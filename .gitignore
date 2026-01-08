@@ -1,0 +1,72 @@
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.local
+package-lock.json
+
+# Editors
+.vscode/
+.idea/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+*.pdb
+
+# Build output
+*.exe
+*.msi
+
+# Python (temperature examples)
+__pycache__/
+*.py[cod]
+*.nsis
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor / IDE
+.github/
+example/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# Environment
+.env
+.env.local
+.env.*.local

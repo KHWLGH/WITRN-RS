@@ -1,0 +1,34 @@
+[package]
+name = "witrn-rs"
+version = "0.1.0"
+description = "WITRN-RS"
+authors = ["KHWLGH"]
+edition = "2021"
+default-run = "witrn-rs"
+repository = "https://github.com/KHWLGH/WITRN-RS"
+homepage = "https://github.com/KHWLGH/WITRN-RS"
+license = "GPL-3.0-only"
+license-file = "../LICENSE"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "witrn_rs_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hidapi = "2.6.3"
+tauri-plugin-dialog = "2.4.2"
+tauri-plugin-fs = "2.4.4"
+tauri-plugin-store = "2.4.1"
+

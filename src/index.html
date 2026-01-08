@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="assets/codicon.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WITRN-RS</title>
+    <script src="vendor/chart.umd.min.js"></script>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <div class="app-container">
+      <!-- Ribbon Menu -->
+      <div class="ribbon">
+        <!-- Single Ribbon Content -->
+        <div class="ribbon-content active">
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">设备</div>
+            <div class="ribbon-group-content" style="flex-direction: column; gap: 2px;">
+              <div class="device-select-row" style="margin-bottom: 0; width: 100%;">
+                <select id="device-select" class="ribbon-select device-dropdown" title="选择要连接的设备" style="flex: 1; min-width: 0;">
+                  <option value="">-- 点击刷新扫描设备 --</option>
+                </select>
+                <button class="ribbon-btn-small" id="btn-refresh-devices" title="刷新设备列表">
+                  <i class="codicon codicon-refresh"></i>
+                </button>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div class="device-buttons-row">
+                  <button class="ribbon-btn" id="btn-connect">
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-plug"></i></span>
+                    <span class="ribbon-btn-text">连接</span>
+                  </button>
+                  <button class="ribbon-btn" id="btn-disconnect" disabled>
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-debug-disconnect"></i></span>
+                    <span class="ribbon-btn-text">断开</span>
+                  </button>
+                </div>
+
+                <div style="width: 1px; height: 32px; background: var(--border-color);"></div>
+
+                <div style="display: grid; grid-template-columns: auto auto; gap: 2px 12px;">
+                  <div class="status-item" style="font-size: 11px;">
+                    <span class="status-indicator" id="connection-status" style="width: 8px; height: 8px;"></span>
+                    <span id="connection-text">未连接</span>
+                  </div>
+                  <div class="status-item" style="font-size: 11px;">
+                    <span style="color: var(--text-muted);">记录:</span>
+                    <span id="record-status">停止</span>
+                  </div>
+                  <div class="status-item" style="font-size: 11px;">
+                    <span style="color: var(--text-muted);">设备:</span>
+                    <span id="device-name-text" class="device-name-status" style="max-width: 100px; font-size: 11px;">--</span>
+                  </div>
+                  <div class="status-item" style="font-size: 11px;">
+                    <span style="color: var(--text-muted);">点数:</span>
+                    <span id="data-count">0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">记录</div>
+            <div class="ribbon-group-content" style="flex-direction: column; align-items: center;">
+              <div style="display: flex; gap: 4px;">
+                <button class="ribbon-btn" id="btn-start-record" disabled>
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-record"></i></span>
+                  <span class="ribbon-btn-text">开始记录</span>
+                </button>
+                <button class="ribbon-btn" id="btn-stop-record" disabled>
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-debug-stop"></i></span>
+                  <span class="ribbon-btn-text">停止记录</span>
+                </button>
+              </div>
+              <div style="margin-top: 4px; width: 100%;">
+                <select id="sample-rate" class="ribbon-select" title="采样率（显示为 每秒次数；值为毫秒）" style="width: 100%;">
+                  <option value="100">10 次/秒</option>
+                  <option value="250" selected>4 次/秒</option>
+                  <option value="500">2 次/秒</option>
+                  <option value="1000">1 次/秒</option>
+                  <option value="5000">0.2 次/秒 (5秒1次)</option>
+                  <option value="10000">0.1 次/秒 (10秒1次)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">统计</div>
+            <div class="ribbon-group-content" style="flex-direction: column; gap: 4px;">
+              <div style="display: flex; gap: 4px;">
+                <!-- btn-reset-energy removed (merged into clear chart) -->
+                <div class="dropdown-container">
+                  <button class="ribbon-btn" id="btn-export">
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-export"></i></span>
+                    <span class="ribbon-btn-text">导出CSV ▼</span>
+                  </button>
+                  <div class="dropdown-menu" id="export-dropdown">
+                    <div class="dropdown-item" id="export-no-temp">不带温度</div>
+                    <div class="dropdown-item" id="export-with-temp">带温度</div>
+                  </div>
+                </div>
+                <button class="ribbon-btn" id="btn-import">
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-cloud-upload"></i></span>
+                  <span class="ribbon-btn-text">导入CSV</span>
+                </button>
+                <button class="ribbon-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-trash"></i></span>
+                  <span class="ribbon-btn-text">一键重置</span>
+                </button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
+                <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据" style="flex: 1 1 auto; min-width: 0;">
+                  <input type="checkbox" id="stats-range-toggle">
+                  <span class="checkmark"></span>
+                  仅统计选中范围
+                </label>
+                <button class="ribbon-btn-small ribbon-btn-small-text" id="btn-reset-settings" title="重置所有设置为默认值">
+                  <i class="codicon codicon-settings-gear"></i>
+                  <span class="ribbon-btn-text">重置配置</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="ribbon-separator"></div>
+
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">显示通道</div>
+            <div class="ribbon-group-content" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+              <label class="ribbon-checkbox">
+                <input type="checkbox" id="show-voltage" checked>
+                <span class="checkmark voltage"></span>
+                电压
+              </label>
+              <label class="ribbon-checkbox">
+                <input type="checkbox" id="show-current" checked>
+                <span class="checkmark current"></span>
+                电流
+              </label>
+              <label class="ribbon-checkbox">
+                <input type="checkbox" id="show-power" checked>
+                <span class="checkmark power"></span>
+                功率
+              </label>
+              <div id="show-temp-container">
+                <label class="ribbon-checkbox">
+                  <input type="checkbox" id="show-temp" checked>
+                  <span class="checkmark temp"></span>
+                  温度
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">自动暂停</div>
+            <div class="ribbon-group-content" style="display: grid; grid-template-columns: auto auto; gap: 4px 8px;">
+              <label class="ribbon-checkbox">
+                <input type="checkbox" id="btn-auto-pause-toggle">
+                <span class="checkmark"></span>
+                启用
+              </label>
+              <div class="ribbon-input-group">
+                <select id="ap-basis" class="ribbon-select" style="width: 85px;">
+                  <option value="none">无</option>
+                  <option value="voltage">电压 &lt;</option>
+                  <option value="current">电流 &lt;</option>
+                  <option value="power">功率 &lt;</option>
+                </select>
+              </div>
+              <div class="ribbon-input-group">
+                <input type="number" id="ap-condition" value="0.00" step="0.01" class="ribbon-input" style="width: 65px;" title="触发阈值">
+                <label id="ap-unit" style="margin-left: 2px;"></label>
+              </div>
+              <div class="ribbon-input-group">
+                <input type="number" id="ap-duration" value="10" min="0" class="ribbon-input" style="width: 50px;" title="持续时间">
+                <label>s</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="ribbon-separator"></div>
+
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">设备参数</div>
+            <div class="ribbon-group-content device-info-group">
+              <div class="ribbon-input-group">
+                <label>VID:</label>
+                <input type="text" id="device-vid" value="0x0716" class="ribbon-input" readonly>
+              </div>
+              <div class="ribbon-input-group">
+                <label>PID:</label>
+                <input type="text" id="device-pid" value="0x5060" class="ribbon-input" readonly>
+              </div>
+              <div class="ribbon-input-group">
+                <label>SN:</label>
+                <input type="text" id="device-sn" value="--" class="ribbon-input device-sn-input" readonly title="设备序列号">
+              </div>
+            </div>
+          </div>
+
+          <div class="ribbon-separator"></div>
+
+          <div class="ribbon-group">
+            <div class="ribbon-group-title">温度服务</div>
+            <div class="ribbon-group-content" style="flex-direction: column; gap: 4px;">
+              <div style="display: flex; gap: 4px; align-items: center;">
+                <div class="ribbon-input-group">
+                  <label>IP:</label>
+                  <input type="text" id="temp-ip" value="127.0.0.1" class="ribbon-input" style="width: 100px;">
+                </div>
+                <div class="ribbon-input-group">
+                  <label>端口:</label>
+                  <input type="number" id="temp-port" value="1573" class="ribbon-input" style="width: 60px;">
+                </div>
+              </div>
+              <div style="display: flex; gap: 4px; align-items: center;">
+                <button class="ribbon-btn" id="btn-temp-connect">
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-plug"></i></span>
+                  <span class="ribbon-btn-text">连接</span>
+                </button>
+                <button class="ribbon-btn" id="btn-temp-disconnect" disabled>
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-debug-disconnect"></i></span>
+                  <span class="ribbon-btn-text">断开</span>
+                </button>
+                <div class="status-item" style="font-size: 11px; margin-left: 8px;">
+                  <span class="status-indicator" id="temp-connection-status"></span>
+                  <span id="temp-connection-text">未连接</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+        <!-- Main Content -->
+      <div class="main-content">
+        <!-- Status Bar removed and moved to ribbon -->
+
+        <div class="content-row">
+          <!-- Real-time Values Panel -->
+          <div class="realtime-panel">
+            <div class="realtime-card voltage">
+              <div class="realtime-label">电压</div>
+              <div class="realtime-content">
+                <div class="realtime-value" id="rt-voltage">--</div>
+                <div class="realtime-unit">V</div>
+              </div>
+              <div class="realtime-stats">
+                <span>最小: <span id="min-voltage">--</span></span>
+                <span>最大: <span id="max-voltage">--</span></span>
+              </div>
+            </div>
+            <div class="realtime-card current">
+              <div class="realtime-label">电流</div>
+              <div class="realtime-content">
+                <div class="realtime-value" id="rt-current">--</div>
+                <div class="realtime-unit">A</div>
+              </div>
+              <div class="realtime-stats">
+                <span>最小: <span id="min-current">--</span></span>
+                <span>最大: <span id="max-current">--</span></span>
+              </div>
+            </div>
+            <div class="realtime-card power">
+              <div class="realtime-label">功率</div>
+              <div class="realtime-content">
+                <div class="realtime-value" id="rt-power">--</div>
+                <div class="realtime-unit">W</div>
+              </div>
+              <div class="realtime-average">
+                <span>平均</span>
+                <span class="realtime-average-value" id="avg-power">--</span>
+                <span class="realtime-average-unit">W</span>
+              </div>
+              <div class="realtime-stats">
+                <span>最小: <span id="min-power">--</span></span>
+                <span>最大: <span id="max-power">--</span></span>
+              </div>
+            </div>
+            <!-- Temperature card removed -->
+            <div class="realtime-card temperature" id="temp-card" style="display: none;">
+              <div class="realtime-label">温度</div>
+              <div class="realtime-content">
+                <div class="realtime-value" id="rt-temp">--</div>
+                <div class="realtime-unit">°C</div>
+              </div>
+              <div class="realtime-average">
+                <span>平均</span>
+                <span class="realtime-average-value" id="avg-temp">--</span>
+                <span class="realtime-average-unit">°C</span>
+              </div>
+              <div class="realtime-stats">
+                <span>最低: <span id="min-temp">--</span></span>
+                <span>最高: <span id="max-temp">--</span></span>
+              </div>
+            </div>
+            <div class="realtime-card energy">
+              <div class="realtime-label">累计能量</div>
+              <div class="realtime-content">
+                <div class="realtime-value" id="rt-energy">--</div>
+                <div class="realtime-unit">Wh</div>
+              </div>
+              <div class="realtime-sub">
+                <span>容量</span>
+                <span class="realtime-sub-value" id="rt-capacity">--</span>
+                <span class="realtime-sub-unit">mAh</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-area">
+            <!-- Chart Container -->
+            <div class="chart-container">
+              <canvas id="main-chart"></canvas>
+            </div>
+
+            <!-- Timeline Navigator -->
+            <div class="timeline-container">
+              <div class="timeline-info">
+                <span id="range-start-time">--</span>
+                <span id="range-duration">全部</span>
+                <span id="range-end-time">--</span>
+              </div>
+              <div class="timeline-track">
+                <canvas id="navigator-chart"></canvas>
+                <div class="dual-slider-container">
+                  <div class="slider-track-fill" id="slider-fill"></div>
+                  <div class="range-handle" id="range-handle-start" tabindex="0" aria-label="范围起点"></div>
+                  <div class="range-handle" id="range-handle-end" tabindex="0" aria-label="范围终点"></div>
+                  <input type="range" id="range-start" min="0" max="1000" value="0" class="dual-slider">
+                  <input type="range" id="range-end" min="0" max="1000" value="1000" class="dual-slider">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+

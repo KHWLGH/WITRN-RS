@@ -1,0 +1,192 @@
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+# WITRN-RS
+
+WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (WITRN) USB 电压电流表。该项目基于 **Tauri v2** 构建，后端使用 **Rust**，前端使用原生 **JavaScript/HTML/CSS**。
+
+**注意：本软件大部分使用Copilot等VibeCoding工具制作，可能存在未知问题**
+
+## 致谢
+感谢 WITRN 提供的 USB-PD 采集硬件支持
+
+感谢所有开源项目贡献者
+
+感谢[JohnScotttt](https://github.com/JohnScotttt)的HID实现
+
+## ✨ 功能特性
+
+### 核心功能
+*   **实时监控**：实时读取并显示电压、电流、功率、D+/D- 电压、温度、容量 (Ah) 和能量 (Wh)
+*   **图表显示**：支持实时数据图表显示和历史数据导航
+*   **数据导出**：支持 CSV 格式数据导出（可选择是否包含温度数据）
+*   **统计信息**：显示最小值、最大值、平均值等统计数据
+*   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接
+
+### 高级功能
+*   **外部温度服务**：支持通过网络连接外部温度传感器数据
+*   **跨平台**：支持 Windows、macOS 和 Linux 系统
+*   **轻量级**：基于 Tauri 构建，安装包体积小，运行资源占用低
+*   **自定义采样率**：可调节数据采样频率以适应不同使用场景
+
+## 📱 支持的设备
+
+目前支持以下 WITRN 设备：
+
+*   **WITRN K2** (VID: 0x0716, PID: 0x5060)
+*   **WITRN U3** (VID: 0x0716, PID: 0x5063)
+*   **WITRN C5** (VID: 0x0716, PID: 0x5053 / 0x5064)
+
+## 🛠️ 开发指南
+
+### 环境要求
+
+*   [Rust](https://www.rust-lang.org/tools/install) (推荐最新稳定版)
+*   Tauri CLI v2（建议：`cargo install tauri-cli --version ^2`）
+*   操作系统支持的 HID API
+
+### 快速开始
+
+1. **克隆仓库**：
+   ```bash
+   git clone https://github.com/KHWLGH/WITRN-RS.git
+   cd WITRN-RS
+   ```
+
+2. **运行开发环境**：
+   ```bash
+   cargo tauri dev
+   ```
+
+3. **构建生产版本**：
+   ```bash
+   cargo tauri build
+   ```
+
+### 构建说明
+
+- 首次运行可能需要较长时间下载依赖
+- Windows 用户可能需要安装 Microsoft C++ Build Tools
+- Linux 用户可能需要安装相关的 WebView 和 HID 库
+
+## 🌡️ 温度服务功能
+
+### 概述
+应用支持通过网络连接外部温度传感器，实现温度数据的实时监控和记录。
+
+### 使用方法
+
+1. **启动温度服务器**：
+   ```bash
+   python temperature-example/network_server.py
+   ```
+
+2. **在应用中连接**：
+   - 设置 IP 地址（默认：127.0.0.1）
+   - 设置端口号（默认：1573）
+   - 点击"连接"按钮
+
+3. **数据格式**：
+   - 服务器通过 TCP 发送纯数字温度值
+   - 每行一个数值，以换行符结束
+   - 示例：`25.125\n`
+
+### 示例文件
+- [`temperature-example/network_server.py`](temperature-example/network_server.py) - 温度服务器示例（发送随机温度数据）
+- [`temperature-example/network_client.py`](temperature-example/network_client.py) - 温度客户端示例（测试用）
+
+## 🏗️ 项目架构
+
+### 后端 (Rust)
+- **位置**：`src-tauri/src/`
+- **核心文件**：
+  - `lib.rs` - 主要应用逻辑、状态管理、Tauri 命令
+  - `main.rs` - 应用入口点
+- **功能模块**：
+  - HID 设备通信 (使用 `hidapi` 库)
+  - 温度服务网络连接
+  - 线程安全的状态管理 (`Arc<Mutex<...>>`)
+  - 事件系统（向前端发送实时数据）
+
+### 前端 (Vanilla JavaScript)
+- **位置**：`src/`
+- **核心文件**：
+  - `index.html` - 应用界面结构
+  - `main.js` - 主要业务逻辑和事件处理
+  - `styles.css` - 界面样式
+- **外部依赖**：
+  - Chart.js - 图表绘制
+  - Tauri Plugin Store - 设置持久化
+
+### 数据流
+1. 前端调用 `connect_device_by_path` 连接设备
+2. 后端启动数据读取线程，解析 HID 报告
+3. 数据通过事件系统推送到前端 (`device-data` 事件)
+4. 前端更新 UI 显示和图表
+
+### HID 协议规范
+- **报告大小**：64 字节
+- **协议头**：第 0 字节必须为 `0xFF`
+- **数据字段**（小端序）：
+  - 电压：字节 46-50 (`f32`)
+  - 电流：字节 50-54 (`f32`)  
+  - 温度：字节 42-46 (`f32`)
+  - D+/D- 电压：字节 30-34 / 34-38 (`f32`)
+
+
+## 🚀 使用说明
+
+### 基本操作
+1. **连接设备**：
+   - 插入 WITRN 设备到 USB 端口
+   - 点击设备选择下拉框旁的刷新按钮扫描设备
+   - 选择目标设备后点击"连接"
+
+2. **数据监控**：
+   - 连接成功后可以开始实时数据采集
+   - 查看实时数值卡片显示的当前数据
+   - 观察图表中的历史数据趋势
+
+3. **设置调整**：
+   - 调节采样率以控制数据更新频率
+   - 选择要显示的数据类型（电压、电流、功率等）
+   - 配置温度服务连接参数
+
+### 数据导出
+- 支持 CSV 格式导出历史数据
+- 可选择导出完整数据或排除温度数据
+- 导出文件包含时间戳和所有采集的参数
+
+## 📋 常见问题
+
+### 设备连接问题
+- **设备未被识别**：确保设备驱动正确安装，尝试重新插拔
+- **连接失败**：检查设备是否被其他程序占用，重启应用程序
+- **数据显示异常**：确认设备型号是否在支持列表中
+
+### 温度服务问题
+- **连接超时**：检查 IP 地址和端口号是否正确
+- **数据格式错误**：确保温度服务器发送的是纯数字格式
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 开启 Pull Request
+
+## 📄 许可证
+
+本项目采用 GNU 通用公共许可证 第3版 (GPLv3)。详情见仓库根目录的 [`LICENSE`](LICENSE) 文件。
+
+---
+
+## 🔗 相关链接
+
+- [Tauri 官方文档](https://tauri.app/)
+- [维简官方网站](https://www.witrn.com/)
+- [Rust 官方网站](https://www.rust-lang.org/)
+
+**如有问题或建议，欢迎提交 Issue：https://github.com/KHWLGH/WITRN-RS/issues**

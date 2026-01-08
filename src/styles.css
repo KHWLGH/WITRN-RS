@@ -1,0 +1,931 @@
+/* WITRN-RS - Dark Theme */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* VS2022 Dark Theme Colors */
+  --bg-primary: #1E1E1E;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2D2D30;
+  --bg-card: #252526;
+  --bg-hover: #3E3E42;
+  --text-primary: #D4D4D4;
+  --text-secondary: #CCCCCC;
+  --text-muted: #858585;
+  --accent-blue: #007ACC;
+  --accent-green: #4EC9B0; /* VS Code Green-ish */
+  --accent-orange: #CE9178;
+  --accent-red: #F44747;
+  --accent-purple: #C586C0;
+  
+  /* Keep these for chart colors, maybe adjust slightly */
+  --voltage-color: #569CD6; /* VS Blue */
+  --current-color: #4EC9B0; /* VS Green */
+  --power-color: #DCDCAA; /* VS Yellow/Orange */
+  --temp-color: #F44747; /* Temperature Red */
+  
+  --border-color: #3F3F46;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px; /* VS uses slightly smaller font usually */
+  line-height: 1.5;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+}
+
+body {
+  overflow: hidden;
+  height: 100vh;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+/* Ribbon Styles */
+.ribbon {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+}
+
+.ribbon-content {
+  display: flex;
+  padding: 8px 10px;
+  gap: 10px;
+  align-items: stretch;
+  min-height: auto;
+  background: var(--bg-primary); /* Match active tab */
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  overflow-y: visible;
+  white-space: nowrap;
+  position: relative;
+}
+
+/* Custom scrollbar for ribbon content */
+.ribbon-content::-webkit-scrollbar {
+  height: 6px;
+}
+
+.ribbon-content::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+.ribbon-content::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.ribbon-content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px;
+  flex-shrink: 0; /* Prevent shrinking */
+}
+
+.ribbon-group-title {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: center;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.ribbon-group-content {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex: 1;
+}
+
+.ribbon-separator {
+  width: 1px;
+  background: var(--border-color);
+  margin: 0 4px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.ribbon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  min-width: 60px;
+}
+
+.ribbon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+  transform: none;
+}
+
+.ribbon-btn:active:not(:disabled) {
+  background: var(--accent-blue);
+  color: white;
+}
+
+.ribbon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-btn-icon {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ribbon-btn-text {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ribbon-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  transition: none;
+}
+
+.ribbon-checkbox:hover {
+  background: var(--bg-hover);
+}
+
+.ribbon-checkbox input {
+  display: none;
+}
+
+.ribbon-checkbox .checkmark {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--text-muted);
+  border-radius: 2px;
+  position: relative;
+  transition: none;
+  background: var(--bg-primary);
+}
+
+.ribbon-checkbox .checkmark.voltage { border-color: var(--voltage-color); }
+.ribbon-checkbox .checkmark.current { border-color: var(--current-color); }
+.ribbon-checkbox .checkmark.power { border-color: var(--power-color); }
+.ribbon-checkbox .checkmark.temp { border-color: var(--temp-color); }
+
+.ribbon-checkbox input:checked + .checkmark {
+  background: currentColor;
+}
+
+.ribbon-checkbox input:checked + .checkmark::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 7px;
+  border: solid var(--bg-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.ribbon-checkbox input:checked + .checkmark.voltage { background: var(--voltage-color); }
+.ribbon-checkbox input:checked + .checkmark.current { background: var(--current-color); }
+.ribbon-checkbox input:checked + .checkmark.power { background: var(--power-color); }
+.ribbon-checkbox input:checked + .checkmark.temp { background: var(--temp-color); }
+
+.ribbon-select {
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 100px;
+}
+
+.ribbon-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.ribbon-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ribbon-select option {
+  background: var(--bg-secondary);
+}
+
+/* Device Selection Styles */
+.device-select-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.device-dropdown {
+  min-width: 200px;
+  max-width: 280px;
+}
+
+.device-buttons-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ribbon-btn-small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  height: 24px;
+  width: 24px;
+}
+
+.ribbon-btn-small-text {
+  width: auto;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.ribbon-btn-small:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+.ribbon-btn-small:active:not(:disabled) {
+  background: var(--accent-blue);
+  color: white;
+}
+
+.ribbon-btn-small:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-btn-small i {
+  font-size: 14px;
+}
+
+/* Device Info Group */
+.device-info-group {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.device-info-group .ribbon-input-group {
+  gap: 4px;
+}
+
+.device-info-group .ribbon-input-group label {
+  width: 28px;
+  text-align: right;
+}
+
+.device-info-group .ribbon-input {
+  width: 75px;
+}
+
+.device-sn-input {
+  width: 120px !important;
+}
+
+/* Status Bar Device Name */
+.device-name-status {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ribbon-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ribbon-input-group label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ribbon-input {
+  padding: 4px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  width: 80px;
+  height: 24px; /* Fixed height for alignment */
+}
+
+.ribbon-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+/* Windows 10 Style Spin Buttons */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  opacity: 1;
+  cursor: pointer;
+  margin-left: 4px;
+  height: 100%;
+  /* Make them slightly larger/wider if possible */
+  transform: scale(1.1); 
+  transform-origin: right center;
+}
+
+.ribbon-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.timeline-container {
+  height: 80px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.timeline-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.timeline-track {
+  position: relative;
+  flex: 1;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#navigator-chart {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.dual-slider-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  z-index: 1;
+}
+
+.dual-slider-container.disabled {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.dual-slider-container.disabled .range-handle {
+  cursor: not-allowed;
+}
+
+.dual-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  margin: 0;
+  z-index: 3;
+}
+
+.dual-slider::-webkit-slider-thumb {
+  pointer-events: none;
+  -webkit-appearance: none;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin-top: 0;
+  border-radius: 0;
+}
+
+.dual-slider::-webkit-slider-thumb:hover {
+  background: transparent;
+  transform: none;
+}
+
+.range-handle {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 18px;
+  transform: translateX(-50%);
+  background: var(--text-primary);
+  border: 1px solid var(--bg-card);
+  border-radius: 3px;
+  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+  cursor: ew-resize;
+  z-index: 4;
+}
+
+.range-handle::before {
+  content: '';
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  left: 50%;
+  width: 6px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 2px;
+}
+
+.range-handle:hover {
+  background: var(--accent-blue);
+}
+
+.range-handle:focus {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.slider-track-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(74, 158, 255, 0.1); /* Light blue highlight for selected area */
+  border-left: 1px solid rgba(255, 255, 255, 0.3);
+  border-right: 1px solid rgba(255, 255, 255, 0.3);
+  transform: none;
+  border-radius: 0;
+  opacity: 1;
+  z-index: 2;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 15px;
+  gap: 15px;
+  overflow: hidden;
+}
+
+.content-row {
+  display: flex;
+  flex: 1;
+  gap: 15px;
+  overflow: hidden;
+}
+
+.chart-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  overflow: hidden;
+  min-width: 0; /* Prevent flex item from overflowing */
+}
+
+/* Status Bar */
+.status-bar {
+  display: flex;
+  gap: 20px;
+  padding: 8px 15px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-red);
+  box-shadow: 0 0 8px var(--accent-red);
+  transition: all 0.3s ease;
+}
+
+.status-indicator.connected {
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+}
+
+/* Real-time Panel */
+.realtime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 230px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  padding: 0;
+}
+
+.realtime-card {
+  background: transparent;
+  border-radius: 0;
+  padding: 8px 12px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.realtime-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 3px;
+  height: auto;
+  background: transparent;
+}
+
+.realtime-card.voltage::before { background: var(--voltage-color); }
+.realtime-card.current::before { background: var(--current-color); }
+.realtime-card.power::before { background: var(--power-color); }
+.realtime-card.temperature::before { background: var(--temp-color); }
+.realtime-card.energy::before { background: var(--accent-purple); }
+
+.realtime-card:hover {
+  background: var(--bg-hover);
+  transform: none;
+  box-shadow: none;
+}
+
+.realtime-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: normal;
+  margin-bottom: 2px;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.realtime-content {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.realtime-value {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: 'Consolas', 'Monaco', monospace;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.realtime-card.voltage .realtime-value { color: var(--voltage-color); }
+.realtime-card.current .realtime-value { color: var(--current-color); }
+.realtime-card.power .realtime-value { color: var(--power-color); }
+.realtime-card.temperature .realtime-value { color: var(--temp-color); }
+.realtime-card.energy .realtime-value { color: var(--accent-purple); }
+
+.realtime-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.realtime-average {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.realtime-average-value {
+  font-weight: 700;
+}
+
+.realtime-average-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.realtime-card.power .realtime-average-value { color: var(--power-color); }
+.realtime-card.temperature .realtime-average-value { color: var(--temp-color); }
+
+.realtime-stats {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color);
+}
+
+.realtime-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 3px 0;
+}
+
+.realtime-sub-value {
+  font-weight: 700;
+  color: var(--accent-purple);
+}
+
+.realtime-sub-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.realtime-stats span {
+  display: inline-block;
+  width: auto;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+/* Chart Container */
+.chart-container {
+  flex: 1;
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 15px;
+  border: 1px solid var(--border-color);
+  position: relative;
+  min-height: 300px;
+}
+
+#main-chart {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .content-row {
+    flex-direction: column;
+  }
+  
+  .realtime-panel {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    overflow-x: auto;
+  }
+  
+  .realtime-card {
+    flex: 1 1 140px;
+    min-width: 140px;
+    min-height: 80px;
+    padding: 8px 10px;
+  }
+
+  .realtime-value { font-size: 20px; }
+  .realtime-average { font-size: 10px; }
+  .realtime-stats { font-size: 10px; }
+  .realtime-stats span { width: 100%; }
+  
+  .ribbon-group-content {
+    flex-wrap: wrap;
+  }
+}
+
+/* Auto Pause Card Styles */
+.realtime-card.auto-pause-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-tertiary); /* Slightly darker background to distinguish */
+  border-bottom: 1px solid var(--border-color);
+}
+
+.realtime-card.auto-pause-card::before {
+  display: none; /* No colored bar */
+}
+
+.auto-pause-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.auto-pause-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.auto-pause-toggle {
+  background: transparent;
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auto-pause-toggle.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+}
+
+.auto-pause-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auto-pause-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.auto-pause-row select,
+.auto-pause-row input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 2px 4px;
+  font-size: 11px;
+  border-radius: 2px;
+  width: 80px;
+  text-align: right;
+}
+
+.auto-pause-row select:focus,
+.auto-pause-row input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.duration-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.duration-input-wrapper input {
+  width: 60px;
+}
+
+/* Temperature Card Styles */
+.realtime-card.temperature::before { background: var(--temp-color); }
+.realtime-card.temperature .realtime-value { color: var(--temp-color); }
+
+/* Dropdown Menu Styles */
+.dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 120px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  margin-top: 2px;
+}
+
+.dropdown-item.hidden {
+  display: none;
+}
+
+.dropdown-menu.show {
+  display: block;
+}
+
+.dropdown-item {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-hover);
+}
+
+.dropdown-item:first-child {
+  border-radius: 4px 4px 0 0;
+}
+
+.dropdown-item:last-child {
+  border-radius: 0 0 4px 4px;
+}
