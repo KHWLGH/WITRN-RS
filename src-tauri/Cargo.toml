@@ -1,6 +1,6 @@
 [package]
 name = "witrn-rs"
-version = "0.1.0"
+version = "0.1.1"
 description = "WITRN-RS"
 authors = ["KHWLGH"]
 edition = "2021"
@@ -8,7 +8,6 @@ default-run = "witrn-rs"
 repository = "https://github.com/KHWLGH/WITRN-RS"
 homepage = "https://github.com/KHWLGH/WITRN-RS"
 license = "GPL-3.0-only"
-license-file = "../LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

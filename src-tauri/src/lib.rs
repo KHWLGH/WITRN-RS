@@ -362,12 +362,45 @@ fn set_sample_rate(rate: u64, state: State<'_, AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn exit_app(app: AppHandle) {
+fn exit_app(state: State<'_, AppState>, app: AppHandle) {
+    // 先停止所有后台线程
+    {
+        let mut running = state.running.lock().unwrap();
+        *running = false;
+    }
+    {
+        let mut temp_running = state.temp_running.lock().unwrap();
+        *temp_running = false;
+    }
+    // 给线程一点时间响应停止信号
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    // 清理设备资源
+    {
+        let mut dev = state.device.lock().unwrap();
+        *dev = None;
+    }
     app.exit(0);
 }
 
 #[tauri::command]
-fn close_main_window(app: AppHandle) -> Result<(), String> {
+fn close_main_window(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    // 先停止所有后台线程
+    {
+        let mut running = state.running.lock().unwrap();
+        *running = false;
+    }
+    {
+        let mut temp_running = state.temp_running.lock().unwrap();
+        *temp_running = false;
+    }
+    // 给线程一点时间响应停止信号
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    // 清理设备资源
+    {
+        let mut dev = state.device.lock().unwrap();
+        *dev = None;
+    }
+    
     use tauri::Manager;
     app.get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?

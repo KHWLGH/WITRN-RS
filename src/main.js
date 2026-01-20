@@ -5,35 +5,67 @@ const { writeTextFile, readTextFile } = window.__TAURI__.fs;
 
 // Store instance (lazy loaded)
 let settingsStore = null;
+let isLoadingSettings = false; // Flag to prevent saving during load
 
 async function getStore() {
   if (!settingsStore) {
+    console.log('getStore: Creating new LazyStore...');
     const { LazyStore } = await import('./vendor/plugin-store.js');
-    settingsStore = new LazyStore('settings.json');
+    settingsStore = new LazyStore('settings.json', {
+      autoSave: 500 // Auto-save with 500ms debounce
+    });
+    // Explicitly initialize the store to ensure it loads from disk
+    await settingsStore.init();
+    console.log('getStore: LazyStore created and initialized');
   }
   return settingsStore;
 }
 
 async function loadSettings() {
   try {
+    isLoadingSettings = true; // Disable auto-save during load
+    console.log('loadSettings: Starting to load settings...');
     const store = await getStore();
+    console.log('loadSettings: Store obtained:', store);
     const savedSettings = await store.get('appSettings');
+    console.log('loadSettings: Saved settings from store:', savedSettings);
     if (savedSettings) {
       // Merge saved settings
       settings = { ...settings, ...savedSettings };
+      console.log('loadSettings: Merged settings:', settings);
       
       // Apply to UI
       const rateSelect = document.getElementById('sample-rate');
-      if (rateSelect) rateSelect.value = String(settings.sampleRate);
+      if (rateSelect) {
+        rateSelect.value = String(settings.sampleRate);
+        console.log('loadSettings: Set sample-rate to', settings.sampleRate);
+      }
       
       if (document.getElementById('show-voltage')) document.getElementById('show-voltage').checked = settings.showVoltage;
       if (document.getElementById('show-current')) document.getElementById('show-current').checked = settings.showCurrent;
       if (document.getElementById('show-power')) document.getElementById('show-power').checked = settings.showPower;
       if (document.getElementById('show-temp')) document.getElementById('show-temp').checked = settings.showTemp;
+      if (document.getElementById('fill-charts')) document.getElementById('fill-charts').checked = settings.fillCharts;
       
       // Temperature service settings
       if (document.getElementById('temp-ip')) document.getElementById('temp-ip').value = settings.tempIp || '127.0.0.1';
       if (document.getElementById('temp-port')) document.getElementById('temp-port').value = settings.tempPort || 1573;
+
+      // Fill settings
+      const setFill = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
+      const setOp = (id, val) => { const el = document.getElementById(id); if(el) el.value = val ?? 15; };
+      
+      setFill('fill-voltage', settings.fillVoltage);
+      setOp('opacity-voltage', settings.opacityVoltage);
+      
+      setFill('fill-current', settings.fillCurrent);
+      setOp('opacity-current', settings.opacityCurrent);
+      
+      setFill('fill-power', settings.fillPower);
+      setOp('opacity-power', settings.opacityPower);
+      
+      setFill('fill-temp', settings.fillTemp);
+      setOp('opacity-temp', settings.opacityTemp);
       
       const statsRangeSelect = document.getElementById('stats-range-select'); // Note: ID might be different, checking code...
       // In code it was statsRangeToggle checkbox?
@@ -44,17 +76,34 @@ async function loadSettings() {
       // Auto Pause
       if (settings.autoPause) {
          autoPauseSettings = { ...autoPauseSettings, ...settings.autoPause };
+         console.log('loadSettings: autoPauseSettings after merge:', autoPauseSettings);
          const apToggle = document.getElementById('btn-auto-pause-toggle');
-         if (apToggle) apToggle.checked = autoPauseSettings.enabled;
+         if (apToggle) {
+           apToggle.checked = autoPauseSettings.enabled;
+           console.log('loadSettings: Set apToggle.checked to', autoPauseSettings.enabled);
+         } else {
+           console.log('loadSettings: apToggle element not found!');
+         }
          
          const apBasis = document.getElementById('ap-basis');
-         if (apBasis) apBasis.value = autoPauseSettings.basis;
+         if (apBasis) {
+           apBasis.value = autoPauseSettings.basis;
+           console.log('loadSettings: Set apBasis.value to', autoPauseSettings.basis);
+         }
          
          const apCondition = document.getElementById('ap-condition');
-         if (apCondition) apCondition.value = autoPauseSettings.condition;
+         if (apCondition) {
+           apCondition.value = autoPauseSettings.condition;
+           console.log('loadSettings: Set apCondition.value to', autoPauseSettings.condition);
+         }
          
          const apDuration = document.getElementById('ap-duration');
-         if (apDuration) apDuration.value = autoPauseSettings.duration;
+         if (apDuration) {
+           apDuration.value = autoPauseSettings.duration;
+           console.log('loadSettings: Set apDuration.value to', autoPauseSettings.duration);
+         }
+      } else {
+         console.log('loadSettings: No autoPause in settings');
       }
       
       // Update charts visibility based on loaded settings
@@ -66,9 +115,15 @@ async function loadSettings() {
          // If we call it before, settings are ready.
          // setupChartToggles uses settings to set initial state.
       }
+      console.log('loadSettings: Settings loaded successfully');
+    } else {
+      console.log('loadSettings: No saved settings found');
     }
   } catch (e) {
     console.error('Failed to load settings:', e);
+  } finally {
+    isLoadingSettings = false; // Re-enable auto-save
+    console.log('loadSettings: Auto-save re-enabled');
   }
 }
 
@@ -91,6 +146,22 @@ async function saveSettings() {
   } catch (e) {
     console.error('Failed to save settings:', e);
   }
+}
+
+// Debounced save to avoid too frequent writes
+let __saveSettingsTimer = null;
+function debouncedSaveSettings(delay = 500) {
+  if (isLoadingSettings) {
+    console.log('debouncedSaveSettings: Skipped (loading in progress)');
+    return; // Don't save while loading settings
+  }
+  if (__saveSettingsTimer) {
+    clearTimeout(__saveSettingsTimer);
+  }
+  __saveSettingsTimer = setTimeout(async () => {
+    __saveSettingsTimer = null;
+    await saveSettings();
+  }, delay);
 }
 
 const defaultSettings = {
@@ -152,18 +223,19 @@ async function resetSettings() {
       mainChart.setDatasetVisibility(0, settings.showVoltage);
       mainChart.setDatasetVisibility(1, settings.showCurrent);
       mainChart.setDatasetVisibility(2, settings.showPower);
-      mainChart.setDatasetVisibility(3, settings.showTemp);
+      // Temperature visibility is handled by updateTempUIVisibility()
       if (mainChart.options && mainChart.options.scales) {
         mainChart.options.scales['y-voltage'].display = settings.showVoltage;
         mainChart.options.scales['y-current'].display = settings.showCurrent;
         mainChart.options.scales['y-power'].display = settings.showPower;
-        mainChart.options.scales['y-temp'].display = settings.showTemp;
+        // Temperature scale visibility is handled by updateTempUIVisibility()
       }
       mainChart.update();
     }
     
     updateStatsDisplay();
-    
+    updateTempUIVisibility(); // Update temperature UI based on connection status
+
     // Clear saved settings from store
     const store = await getStore();
     await store.delete('appSettings');
@@ -207,14 +279,20 @@ async function setupCloseConfirm() {
         // If the event doesn't support preventDefault, just continue.
       }
 
-      if (__isClosingWindow) return;
+      if (__isClosingWindow) {
+        // 如果已经在关闭中，用户多次点击关闭，强制退出
+        try {
+          await __withTimeout(invoke('exit_app'), 500, null);
+        } catch {}
+        return;
+      }
 
       let confirmed = true;
       try {
         // 如果对话框偶发卡死/无法显示：超时后“放行退出”，避免永远无法关闭。
         confirmed = await __withTimeout(
           ask('确定要退出吗？', { title: '确认退出', type: 'warning' }),
-          30_000,
+          5_000,
           true
         );
       } catch {
@@ -236,23 +314,36 @@ async function setupCloseConfirm() {
       } catch {}
       __unlistenCloseRequested = null;
 
+      // 在关闭前先断开设备连接，避免后台线程阻塞关闭
+      try {
+        await __withTimeout(invoke('disconnect_device'), 500, null);
+      } catch (e) {
+        console.warn('disconnect_device failed during close:', e);
+      }
+      
+      try {
+        await __withTimeout(invoke('disconnect_temp_service'), 500, null);
+      } catch (e) {
+        console.warn('disconnect_temp_service failed during close:', e);
+      }
+
       // Save settings before closing, but never block closing indefinitely.
       try {
-        await __withTimeout(saveSettings(), 1200, null);
+        await __withTimeout(saveSettings(), 2000, null);
       } catch (e) {
         console.warn('saveSettings failed during close:', e);
       }
 
       // Close the main window gracefully (preferred), with fallbacks.
       try {
-        await __withTimeout(invoke('close_main_window'), 1500, null);
+        await __withTimeout(invoke('close_main_window'), 1000, null);
         return;
       } catch (e) {
         console.warn('close_main_window failed, falling back to exit_app:', e);
       }
 
       try {
-        await __withTimeout(invoke('exit_app'), 1500, null);
+        await __withTimeout(invoke('exit_app'), 1000, null);
         return;
       } catch (e) {
         console.warn('exit_app failed, falling back to window.destroy:', e);
@@ -261,7 +352,7 @@ async function setupCloseConfirm() {
       // Last resort: force destroy from JS API if available.
       try {
         if (typeof appWindow.destroy === 'function') {
-          await __withTimeout(appWindow.destroy(), 1500, null);
+          await __withTimeout(appWindow.destroy(), 500, null);
         }
       } catch (e) {
         console.warn('appWindow.destroy failed:', e);
@@ -296,13 +387,14 @@ function scheduleChartUpdate() {
     // Check if we need to rebuild downsampled data
     checkAndRebuildDownsampledData();
     
-    const lastX = chartSeries.voltage.length
-      ? (chartSeries.voltage[chartSeries.voltage.length - 1]?.x ?? 0)
+    const lastX = chartSeries.power.length
+      ? (chartSeries.power[chartSeries.power.length - 1]?.x ?? 0)
       : 0;
 
     if (navigatorChart && navigatorChart.options?.scales?.x) {
-      navigatorChart.options.scales.x.min = 0;
-      navigatorChart.options.scales.x.max = lastX;
+      const navPad = Math.max(lastX * 0.005, 0.05);
+      navigatorChart.options.scales.x.min = -navPad;
+      navigatorChart.options.scales.x.max = lastX + navPad;
     }
 
     if (mainChart) mainChart.update('none');
@@ -337,7 +429,7 @@ let renderSeries = {
 
 // Navigator downsampled series (more aggressive downsampling)
 let navigatorSeries = {
-  voltage: [],
+  power: [],
 };
 
 // Downsampling configuration
@@ -516,20 +608,20 @@ function rebuildRenderSeries() {
  * Rebuild navigator series with more aggressive downsampling
  */
 function rebuildNavigatorSeries() {
-  const count = chartSeries.voltage.length;
+  const count = chartSeries.power.length;
   
   if (count <= DOWNSAMPLE_CONFIG.navigatorMaxPoints) {
-    navigatorSeries.voltage = chartSeries.voltage;
+    navigatorSeries.power = chartSeries.power;
   } else {
     // Use minMax for navigator (faster, preserves extremes)
-    navigatorSeries.voltage = minMaxDownsample(chartSeries.voltage, DOWNSAMPLE_CONFIG.navigatorMaxPoints / 2);
+    navigatorSeries.power = minMaxDownsample(chartSeries.power, DOWNSAMPLE_CONFIG.navigatorMaxPoints / 2);
   }
   
   DOWNSAMPLE_CONFIG.navLastRebuildCount = count;
   
   // Update navigator dataset reference
   if (navigatorChart) {
-    navigatorChart.data.datasets[0].data = navigatorSeries.voltage;
+    navigatorChart.data.datasets[0].data = navigatorSeries.power;
   }
 }
 
@@ -587,10 +679,10 @@ function checkAndRebuildDownsampledData() {
   
   // Navigator rebuild check (similar logic)
   if (count <= DOWNSAMPLE_CONFIG.navigatorMaxPoints) {
-    if (navigatorSeries.voltage !== chartSeries.voltage) {
-      navigatorSeries.voltage = chartSeries.voltage;
+    if (navigatorSeries.power !== chartSeries.power) {
+      navigatorSeries.power = chartSeries.power;
       if (navigatorChart) {
-        navigatorChart.data.datasets[0].data = navigatorSeries.voltage;
+        navigatorChart.data.datasets[0].data = navigatorSeries.power;
       }
     }
     DOWNSAMPLE_CONFIG.navLastRebuildCount = count;
@@ -601,9 +693,9 @@ function checkAndRebuildDownsampledData() {
     
     if (navNeedsRebuild) {
       rebuildNavigatorSeries();
-    } else if (navigatorSeries.voltage.length > 0) {
+    } else if (navigatorSeries.power.length > 0) {
       // Align navigator tail as well
-      navigatorSeries.voltage[navigatorSeries.voltage.length - 1] = chartSeries.voltage[count - 1];
+      navigatorSeries.power[navigatorSeries.power.length - 1] = chartSeries.power[count - 1];
     }
   }
 }
@@ -646,10 +738,20 @@ let settings = {
   showCurrent: true,
   showPower: true,
   showTemp: true,
+  // Fill settings per channel
+  fillVoltage: true,
+  opacityVoltage: 15,
+  fillCurrent: true,
+  opacityCurrent: 15,
+  fillPower: true,
+  opacityPower: 15,
+  fillTemp: true,
+  opacityTemp: 15,
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573
 };
+
 
 // Temperature service connection
 let tempSocket = null;
@@ -690,10 +792,28 @@ function labelToSeconds(label) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function hexToRgba(hex, opacityPercent) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacityPercent / 100})`;
+}
+
 // Initialize chart
 function initChart() {
   const ctx = document.getElementById('main-chart').getContext('2d');
+  // Use system fonts (with Microsoft YaHei first for Windows Chinese support) for UI elements,
+  // and maintain a monospace stack for aligned numbers where appropriate.
+  const chartFontFamily = "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
+  const monoFontFamily = "'JetBrains Mono', 'Consolas', 'Monaco', monospace";
   
+  const colors = {
+    voltage: '#4a9eff',
+    current: '#4aff9f',
+    power: '#ffaa4a',
+    temp: '#ff4a4a'
+  };
+
   mainChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -701,45 +821,49 @@ function initChart() {
         {
           label: '电压',
           data: renderSeries.voltage,
-          borderColor: '#4a9eff',
-          backgroundColor: 'rgba(74, 158, 255, 0.1)',
+          borderColor: colors.voltage,
+          backgroundColor: hexToRgba(colors.voltage, settings.opacityVoltage),
           yAxisID: 'y-voltage',
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 1.5,
+          fill: settings.fillVoltage,
           hidden: !settings.showVoltage
         },
         {
           label: '电流',
           data: renderSeries.current,
-          borderColor: '#4aff9f',
-          backgroundColor: 'rgba(74, 255, 159, 0.1)',
+          borderColor: colors.current,
+          backgroundColor: hexToRgba(colors.current, settings.opacityCurrent),
           yAxisID: 'y-current',
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 1.5,
+          fill: settings.fillCurrent,
           hidden: !settings.showCurrent
         },
         {
           label: '功率',
           data: renderSeries.power,
-          borderColor: '#ffaa4a',
-          backgroundColor: 'rgba(255, 170, 74, 0.1)',
+          borderColor: colors.power,
+          backgroundColor: hexToRgba(colors.power, settings.opacityPower),
           yAxisID: 'y-power',
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 1.5,
+          fill: settings.fillPower,
           hidden: !settings.showPower
         },
         {
           label: '温度',
           data: renderSeries.temp,
-          borderColor: '#ff4a4a',
-          backgroundColor: 'rgba(255, 74, 74, 0.1)',
+          borderColor: colors.temp,
+          backgroundColor: hexToRgba(colors.temp, settings.opacityTemp),
           yAxisID: 'y-temp',
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 1.5,
+          fill: settings.fillTemp,
           hidden: !settings.showTemp
         }
       ]
@@ -764,6 +888,9 @@ function initChart() {
           labels: {
             color: '#a0a0b0',
             usePointStyle: true,
+            font: {
+              family: chartFontFamily
+            },
             padding: 15,
             generateLabels: (chart) => {
               const original = Chart.defaults.plugins.legend.labels.generateLabels;
@@ -778,6 +905,12 @@ function initChart() {
           backgroundColor: 'rgba(30, 30, 50, 0.95)',
           titleColor: '#e8e8f0',
           bodyColor: '#a0a0b0',
+          titleFont: {
+            family: monoFontFamily
+          },
+          bodyFont: {
+            family: monoFontFamily
+          },
           borderColor: '#2a2a4a',
           borderWidth: 1,
           padding: 12,
@@ -794,7 +927,8 @@ function initChart() {
                 label += ': ';
               }
               if (context.parsed.y !== null) {
-                label += context.parsed.y.toFixed(4);
+                // Unified: 3 decimal places
+                label += context.parsed.y.toFixed(3);
                 const units = [' V', ' A', ' W', ' °C'];
                 if (context.datasetIndex >= 0 && context.datasetIndex < units.length) {
                   label += units[context.datasetIndex];
@@ -833,6 +967,9 @@ function initChart() {
           },
           ticks: {
             color: '#6a6a7a',
+            font: {
+              family: monoFontFamily
+            },
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 10,
@@ -845,17 +982,31 @@ function initChart() {
           position: 'left',
           min: 0,
           beginAtZero: true,
+          grace: '5%',
           title: {
             display: true,
             text: '电压 (V)',
-            color: '#4a9eff'
+            color: '#4a9eff',
+            font: { family: chartFontFamily }
           },
           grid: {
             color: 'rgba(74, 158, 255, 0.1)',
             drawBorder: false
           },
           ticks: {
-            color: '#4a9eff'
+            color: '#4a9eff',
+            font: {
+              family: monoFontFamily
+            },
+            // count: 11, // removed for adaptive scaling
+            callback: function(value) {
+              const absVal = Math.abs(value);
+              // Optimizing for small values: display more decimals if < 1
+              if (absVal > 0 && absVal < 0.001) return parseFloat(value.toFixed(6));
+              if (absVal > 0 && absVal < 0.1) return parseFloat(value.toFixed(5));
+              if (absVal > 0 && absVal < 1) return parseFloat(value.toFixed(4));
+              return parseFloat(value.toFixed(3));
+            }
           }
         },
         'y-current': {
@@ -864,16 +1015,29 @@ function initChart() {
           position: 'left',
           min: 0,
           beginAtZero: true,
+          grace: '5%',
           title: {
             display: true,
             text: '电流 (A)',
-            color: '#4aff9f'
+            color: '#4aff9f',
+            font: { family: chartFontFamily }
           },
           grid: {
-            display: false
+            display: false // Hide grid to ensure standard look without overlap
           },
           ticks: {
-            color: '#4aff9f'
+            color: '#4aff9f',
+            font: {
+              family: monoFontFamily
+            },
+            // count: 11,
+            callback: function(value) {
+              const absVal = Math.abs(value);
+              if (absVal > 0 && absVal < 0.001) return parseFloat(value.toFixed(6));
+              if (absVal > 0 && absVal < 0.1) return parseFloat(value.toFixed(5));
+              if (absVal > 0 && absVal < 1) return parseFloat(value.toFixed(4));
+              return parseFloat(value.toFixed(3));
+            }
           }
         },
         'y-power': {
@@ -882,16 +1046,29 @@ function initChart() {
           position: 'right',
           min: 0,
           beginAtZero: true,
+          grace: '5%',
           title: {
             display: true,
             text: '功率 (W)',
-            color: '#ffaa4a'
+            color: '#ffaa4a',
+            font: { family: chartFontFamily }
           },
           grid: {
             display: false
           },
           ticks: {
-            color: '#ffaa4a'
+            color: '#ffaa4a',
+            font: {
+              family: monoFontFamily
+            },
+            // count: 11,
+            callback: function(value) {
+              const absVal = Math.abs(value);
+              if (absVal > 0 && absVal < 0.001) return parseFloat(value.toFixed(6));
+              if (absVal > 0 && absVal < 0.1) return parseFloat(value.toFixed(5));
+              if (absVal > 0 && absVal < 1) return parseFloat(value.toFixed(4));
+              return parseFloat(value.toFixed(3));
+            }
           }
         },
         'y-temp': {
@@ -900,16 +1077,25 @@ function initChart() {
           position: 'right',
           min: 0,
           beginAtZero: true,
+          grace: '5%',
           title: {
             display: true,
             text: '温度 (°C)',
-            color: '#ff4a4a'
+            color: '#ff4a4a',
+            font: { family: chartFontFamily }
           },
           grid: {
             display: false
           },
           ticks: {
-            color: '#ff4a4a'
+            color: '#ff4a4a',
+            font: {
+              family: monoFontFamily
+            },
+            // count: 11,
+            callback: function(value) {
+              return parseFloat(value.toFixed(3));
+            }
           }
         }
       }
@@ -927,8 +1113,8 @@ function initNavigatorChart() {
     data: {
       datasets: [
         {
-          data: navigatorSeries.voltage,
-          borderColor: '#4a9eff',
+          data: navigatorSeries.power,
+          borderColor: '#ffaa4a',
           borderWidth: 1,
           pointRadius: 0,
           fill: false,
@@ -954,7 +1140,12 @@ function initNavigatorChart() {
           offset: false,
           grace: 0,
         },
-        y: { display: false }
+        y: { 
+          display: false,
+          type: 'linear',
+          beginAtZero: true,
+          grace: '5%'
+        }
       },
       layout: {
         padding: 0
@@ -1119,8 +1310,13 @@ function updateChartRange() {
     }
   }
 
-  mainChart.options.scales.x.min = startSeconds;
-  mainChart.options.scales.x.max = endSeconds;
+  const rangeSeconds = Math.max(0, endSeconds - startSeconds);
+  const padSeconds = Math.max(rangeSeconds * 0.005, 0.05);
+  const paddedStart = Math.max(0, startSeconds - padSeconds);
+  const paddedEnd = endSeconds + padSeconds;
+
+  mainChart.options.scales.x.min = paddedStart;
+  mainChart.options.scales.x.max = paddedEnd;
   document.getElementById('range-start-time').textContent = formatRelativeHMS(startSeconds);
   document.getElementById('range-end-time').textContent = formatRelativeHMS(endSeconds);
   
@@ -1264,7 +1460,7 @@ function clearChart() {
   chartData = { timestamps: [], voltage: [], current: [], power: [], temp: [] };
   chartSeries = { voltage: [], current: [], power: [], temp: [] };
   renderSeries = { voltage: [], current: [], power: [], temp: [] };
-  navigatorSeries = { voltage: [] };
+  navigatorSeries = { power: [] };
   DOWNSAMPLE_CONFIG.lastRebuildCount = 0;
   DOWNSAMPLE_CONFIG.navLastRebuildCount = 0;
   lastRecordingStartTime = null;
@@ -1283,7 +1479,7 @@ function clearChart() {
   mainChart.update('none');
   
   if (navigatorChart) {
-    navigatorChart.data.datasets[0].data = navigatorSeries.voltage;
+    navigatorChart.data.datasets[0].data = navigatorSeries.power;
     navigatorChart.update('none');
   }
   
@@ -1559,6 +1755,14 @@ async function exportCSV(withTemp = false) {
 
 async function importCSV() {
   try {
+    if (chartData.timestamps.length > 0) {
+      const confirmed = await ask('当前已有数据，导入CSV将清除现有记录。\n确定要继续吗？', {
+        title: '确认导入',
+        type: 'warning'
+      });
+      if (!confirmed) return;
+    }
+
     const selected = await open({
       multiple: false,
       filters: [{
@@ -1626,7 +1830,7 @@ async function importCSV() {
       // Time format: ="00:00:00.000" or just 00:00:00.000
       let timeStr = parts[0].replace(/="/g, '').replace(/"/g, '');
       const voltage = parseFloat(parts[1]);
-      const current = parseFloat(parts[2]);
+      const current = Math.abs(parseFloat(parts[2])); // Force absolute value for current
       const power = parseFloat(parts[3]);
       const temp = hasTemp && parts.length > 4 ? parseFloat(parts[4]) || 0 : 0;
 
@@ -1736,7 +1940,17 @@ async function importCSV() {
     mainChart.update();
     
     if (navigatorChart) {
-      navigatorChart.data.datasets[0].data = navigatorSeries.voltage;
+      const lastX = chartSeries.power.length
+        ? (chartSeries.power[chartSeries.power.length - 1]?.x ?? 0)
+        : 0;
+
+      if (navigatorChart.options?.scales?.x) {
+        const navPad = Math.max(lastX * 0.005, 0.05);
+        navigatorChart.options.scales.x.min = -navPad;
+        navigatorChart.options.scales.x.max = lastX + navPad;
+      }
+
+      navigatorChart.data.datasets[0].data = navigatorSeries.power;
       navigatorChart.update();
     }
     
@@ -1781,6 +1995,7 @@ function setupChartToggles() {
       // For temp, only affect visibility if we have temp data
       if (field === 'temp') {
         updateTempUIVisibility();
+        debouncedSaveSettings();
         return;
       }
       
@@ -1793,8 +2008,55 @@ function setupChartToggles() {
         mainChart.options.scales[`y-${field}`].display = checkbox.checked;
       }
       mainChart.update();
+      debouncedSaveSettings();
     });
   });
+
+  // Fill chart toggle
+  // Removed global toggle, using individual toggles
+
+  const fillControls = [
+    { id: 'fill-voltage', opId: 'opacity-voltage', key: 'Voltage' },
+    { id: 'fill-current', opId: 'opacity-current', key: 'Current' },
+    { id: 'fill-power', opId: 'opacity-power', key: 'Power' },
+    { id: 'fill-temp', opId: 'opacity-temp', key: 'Temp' }
+  ];
+
+  fillControls.forEach((ctrl, index) => {
+    const checkbox = document.getElementById(ctrl.id);
+    const input = document.getElementById(ctrl.opId);
+    
+    if (checkbox) {
+      checkbox.addEventListener('change', (e) => {
+        const fill = e.target.checked;
+        settings[`fill${ctrl.key}`] = fill;
+        if (mainChart && mainChart.data.datasets[index]) {
+          mainChart.data.datasets[index].fill = fill;
+          mainChart.update('none');
+        }
+        debouncedSaveSettings();
+      });
+    }
+
+    if (input) {
+      input.addEventListener('input', (e) => {
+        let val = parseInt(e.target.value);
+        if (isNaN(val)) val = 15;
+        if (val < 0) val = 0;
+        if (val > 100) val = 100;
+        
+        settings[`opacity${ctrl.key}`] = val;
+        
+        if (mainChart && mainChart.data.datasets[index]) {
+          const hex = mainChart.data.datasets[index].borderColor;
+          mainChart.data.datasets[index].backgroundColor = hexToRgba(hex, val);
+          mainChart.update('none');
+        }
+        debouncedSaveSettings();
+      });
+    }
+  });
+
 
   if (mainChart) mainChart.update();
 }
@@ -1947,6 +2209,7 @@ function setupControls() {
         console.error('Failed to set sample rate:', e);
       }
     }
+    debouncedSaveSettings();
   });
   
   document.getElementById('btn-connect').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); connectDevice(); });
@@ -1961,6 +2224,7 @@ function setupControls() {
     statsRangeToggle.addEventListener('change', (e) => {
       settings.statsRange = e.target.checked;
       updateStatsDisplay();
+      debouncedSaveSettings();
     });
   }
   
@@ -2059,10 +2323,12 @@ function setupControls() {
   // Save temperature service settings when changed
   document.getElementById('temp-ip').addEventListener('change', (e) => {
     settings.tempIp = e.target.value;
+    debouncedSaveSettings();
   });
   
   document.getElementById('temp-port').addEventListener('change', (e) => {
     settings.tempPort = parseInt(e.target.value) || 1573;
+    debouncedSaveSettings();
   });
 
   // Auto Pause Controls
@@ -2085,12 +2351,14 @@ function setupControls() {
     autoPauseSettings.enabled = apToggle.checked;
     // Reset trigger state when toggling
     autoPauseSettings.triggerStartTime = null;
+    debouncedSaveSettings();
   });
 
   apBasis.addEventListener('change', (e) => {
     autoPauseSettings.basis = e.target.value;
     autoPauseSettings.triggerStartTime = null;
     updateApUnit();
+    debouncedSaveSettings();
   });
   
   // Initialize unit
@@ -2099,11 +2367,13 @@ function setupControls() {
   apCondition.addEventListener('change', (e) => {
     autoPauseSettings.condition = parseFloat(e.target.value) || 0;
     autoPauseSettings.triggerStartTime = null;
+    debouncedSaveSettings();
   });
 
   apDuration.addEventListener('change', (e) => {
     autoPauseSettings.duration = parseFloat(e.target.value) || 0;
     autoPauseSettings.triggerStartTime = null;
+    debouncedSaveSettings();
   });
 
   // Initialize settings from DOM
@@ -2213,6 +2483,12 @@ function updateTempUIVisibility() {
     showTempContainer.style.display = showTemp ? 'inline-block' : 'none';
   }
   
+  // Show/hide temperature fill controls
+  const fillTempContainer = document.getElementById('fill-temp-container');
+  if (fillTempContainer) {
+    fillTempContainer.style.display = showTemp ? 'flex' : 'none';
+  }
+  
   // Show/hide temperature chart dataset
   if (mainChart && mainChart.data && mainChart.data.datasets[3]) {
     const tempVisible = showTemp && settings.showTemp;
@@ -2231,6 +2507,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     e.preventDefault();
   });
 
+  console.log('=== DOMContentLoaded START ===');
+  
+  // Direct store test using raw invoke
+  try {
+    console.log('Testing store with raw invoke...');
+    const rid = await invoke("plugin:store|load", { path: "settings.json", options: {} });
+    console.log('Store loaded, rid:', rid);
+    const result = await invoke("plugin:store|get", { rid: rid, key: "appSettings" });
+    console.log('Raw store get result:', result);
+  } catch (e) {
+    console.error('Raw store test failed:', e);
+  }
+
   await setupCloseConfirm();
   await loadSettings();
   initChart();
@@ -2245,5 +2534,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   
   // Initialize temperature UI visibility (hidden by default)
   updateTempUIVisibility();
+  
+  console.log('=== DOMContentLoaded END ===');
 });
 

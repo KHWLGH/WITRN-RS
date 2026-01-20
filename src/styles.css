@@ -1,4 +1,11 @@
 /* WITRN-RS - Dark Theme */
+@font-face {
+  font-family: 'Noto Sans Mono';
+  src: url('assets/fonts/NotoSansMono-Regular.ttf') format('truetype');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
 * {
   margin: 0;
   padding: 0;
@@ -30,7 +37,10 @@
   --border-color: #3F3F46;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-ui: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Noto Sans Mono', 'Consolas', 'Monaco', monospace;
+
+  font-family: var(--font-ui);
   font-size: 13px; /* VS uses slightly smaller font usually */
   line-height: 1.5;
   color: var(--text-primary);
@@ -354,8 +364,19 @@ body {
   border-radius: 0;
   color: var(--text-primary);
   font-size: 12px;
+  font-family: var(--font-mono);
   width: 80px;
   height: 24px; /* Fixed height for alignment */
+}
+
+/* Hide spin buttons for number inputs with class .no-spin */
+.ribbon-input.no-spin::-webkit-outer-spin-button,
+.ribbon-input.no-spin::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ribbon-input.no-spin {
+  -moz-appearance: textfield; /* Firefox */
 }
 
 .ribbon-input:focus {
@@ -645,7 +666,7 @@ input[type=number]::-webkit-outer-spin-button {
 .realtime-value {
   font-size: 32px;
   font-weight: 700;
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: var(--font-mono);
   line-height: 1.1;
   text-align: center;
   white-space: nowrap;
@@ -676,6 +697,8 @@ input[type=number]::-webkit-outer-spin-button {
 
 .realtime-average-value {
   font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .realtime-average-unit {
@@ -711,6 +734,8 @@ input[type=number]::-webkit-outer-spin-button {
 .realtime-sub-value {
   font-weight: 700;
   color: var(--accent-purple);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .realtime-sub-unit {
@@ -724,6 +749,12 @@ input[type=number]::-webkit-outer-spin-button {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
+}
+
+.realtime-stats span span,
+#data-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Chart Container */

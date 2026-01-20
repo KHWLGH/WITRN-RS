@@ -23,7 +23,11 @@ class Store {
   }
 
   async get(key) {
-    const [exists, value] = await invoke("plugin:store|get", { rid: this.rid, key });
+    const result = await invoke("plugin:store|get", { rid: this.rid, key });
+    console.log('Store.get raw result:', result, 'for key:', key);
+    // tauri-plugin-store v2 returns [value, exists] not [exists, value]
+    const [value, exists] = result;
+    console.log('Store.get parsed - exists:', exists, 'value:', value);
     return exists ? value : undefined;
   }
 
