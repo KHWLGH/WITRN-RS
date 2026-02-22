@@ -1,0 +1,23 @@
+{
+  "name": "witrn-rs",
+  "version": "0.1.2",
+  "description": "[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KHWLGH/WITRN-RS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KHWLGH/WITRN-RS/issues"
+  },
+  "homepage": "https://github.com/KHWLGH/WITRN-RS#readme",
+  "devDependencies": {
+    "@biomejs/biome": "2.4.4"
+  }
+}

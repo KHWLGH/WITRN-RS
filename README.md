@@ -23,6 +23,7 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 *   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接
 
 ### 高级功能
+*   **图表降采样**：支持 LTTB / MinMax 降采样算法，大数据量下保持流畅渲染，提供低/中/高三档可调
 *   **外部温度服务**：支持通过网络连接外部温度传感器数据
 *   **跨平台**：支持 Windows、macOS 和 Linux 系统
 *   **轻量级**：基于 Tauri 构建，安装包体积小，运行资源占用低
@@ -40,6 +41,7 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 
 ### 环境要求
 
+*   [Node.js](https://nodejs.org/) (v18+，用于前端工具链)
 *   [Rust](https://www.rust-lang.org/tools/install) (推荐最新稳定版)
 *   Tauri CLI v2（建议：`cargo install tauri-cli --version ^2`）
 *   操作系统支持的 HID API
@@ -52,12 +54,18 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
    cd WITRN-RS
    ```
 
-2. **运行开发环境**：
+2. **安装前端依赖**：
+   ```bash
+   cargo install tauri-cli --version ^2
+   npm install
+   ```
+
+3. **运行开发环境**：
    ```bash
    cargo tauri dev
    ```
 
-3. **构建生产版本**：
+4. **构建生产版本**：
    ```bash
    cargo tauri build
    ```
@@ -109,13 +117,24 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 
 ### 前端 (Vanilla JavaScript)
 - **位置**：`src/`
-- **核心文件**：
+- **模块结构**（ES Modules，启用 `// @ts-check` 类型检查）：
+  - `app.js` - 应用入口、Tauri API 导入、窗口关闭、UI 事件绑定
+  - `state.js` - 共享应用状态与类型定义
+  - `chart.js` - Chart.js 初始化、降采样算法（LTTB / MinMax）、渲染调度
+  - `data.js` - 数据采集、统计计算、录制逻辑
+  - `device.js` - HID 设备连接管理
+  - `csv.js` - CSV 导入/导出
+  - `settings.js` - 设置加载/保存（防抖持久化）
+  - `temperature.js` - 温度服务网络连接
+  - `utils.js` - 通用工具函数
+  - `global.d.ts` - Tauri 全局 API 类型声明
+- **其他文件**：
   - `index.html` - 应用界面结构
-  - `main.js` - 主要业务逻辑和事件处理
   - `styles.css` - 界面样式
 - **外部依赖**：
   - Chart.js - 图表绘制
   - Tauri Plugin Store - 设置持久化
+  - Biome 2.0 - 代码格式化与静态检查
 
 ### 数据流
 1. 前端调用 `connect_device_by_path` 连接设备

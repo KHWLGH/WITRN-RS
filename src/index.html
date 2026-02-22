@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WITRN-RS</title>
     <script src="vendor/chart.umd.min.js"></script>
-    <script type="module" src="/main.js" defer></script>
+    <script type="module" src="/app.js" defer></script>
   </head>
 
   <body>
@@ -92,38 +92,56 @@
           
           <div class="ribbon-group">
             <div class="ribbon-group-title">统计</div>
-            <div class="ribbon-group-content" style="flex-direction: column; gap: 4px;">
-              <div style="display: flex; gap: 4px;">
-                <!-- btn-reset-energy removed (merged into clear chart) -->
-                <div class="dropdown-container">
-                  <button class="ribbon-btn" id="btn-export">
-                    <span class="ribbon-btn-icon"><i class="codicon codicon-export"></i></span>
-                    <span class="ribbon-btn-text">导出CSV ▼</span>
-                  </button>
-                  <div class="dropdown-menu" id="export-dropdown">
-                    <div class="dropdown-item" id="export-no-temp">不带温度</div>
-                    <div class="dropdown-item" id="export-with-temp">带温度</div>
+            <div class="ribbon-group-content" style="flex-direction: row; gap: 8px; align-items: stretch;">
+              <!-- 左侧：原有按钮与选项 -->
+              <div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0;">
+                <div style="display: flex; gap: 4px;">
+                  <!-- btn-reset-energy removed (merged into clear chart) -->
+                  <div class="dropdown-container">
+                    <button class="ribbon-btn" id="btn-export">
+                      <span class="ribbon-btn-icon"><i class="codicon codicon-export"></i></span>
+                      <span class="ribbon-btn-text">导出CSV ▼</span>
+                    </button>
+                    <div class="dropdown-menu" id="export-dropdown">
+                      <div class="dropdown-item" id="export-no-temp">不带温度</div>
+                      <div class="dropdown-item" id="export-with-temp">带温度</div>
+                    </div>
                   </div>
+                  <button class="ribbon-btn" id="btn-import">
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-cloud-upload"></i></span>
+                    <span class="ribbon-btn-text">导入CSV</span>
+                  </button>
+                  <button class="ribbon-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-trash"></i></span>
+                    <span class="ribbon-btn-text">一键重置</span>
+                  </button>
                 </div>
-                <button class="ribbon-btn" id="btn-import">
-                  <span class="ribbon-btn-icon"><i class="codicon codicon-cloud-upload"></i></span>
-                  <span class="ribbon-btn-text">导入CSV</span>
-                </button>
-                <button class="ribbon-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
-                  <span class="ribbon-btn-icon"><i class="codicon codicon-trash"></i></span>
-                  <span class="ribbon-btn-text">一键重置</span>
-                </button>
+                <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
+                  <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据" style="flex: 1 1 auto; min-width: 0;">
+                    <input type="checkbox" id="stats-range-toggle">
+                    <span class="checkmark"></span>
+                    仅统计选中范围
+                  </label>
+                  <button class="ribbon-btn-small ribbon-btn-small-text" id="btn-reset-settings" title="重置所有设置为默认值">
+                    <i class="codicon codicon-settings-gear"></i>
+                    <span class="ribbon-btn-text">重置配置</span>
+                  </button>
+                </div>
               </div>
-              <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
-                <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据" style="flex: 1 1 auto; min-width: 0;">
-                  <input type="checkbox" id="stats-range-toggle">
+              <!-- 分隔线 -->
+              <div style="width: 1px; align-self: stretch; background: var(--border-color);"></div>
+              <!-- 右侧：降采样控件（两行） -->
+              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;">
+                <label class="ribbon-checkbox" title="启用/关闭图表降采样">
+                  <input type="checkbox" id="downsample-toggle" checked>
                   <span class="checkmark"></span>
-                  仅统计选中范围
+                  降采样
                 </label>
-                <button class="ribbon-btn-small ribbon-btn-small-text" id="btn-reset-settings" title="重置所有设置为默认值">
-                  <i class="codicon codicon-settings-gear"></i>
-                  <span class="ribbon-btn-text">重置配置</span>
-                </button>
+                <select id="downsample-level" class="ribbon-select" title="降采样强度：低(5000点) / 中(2000点) / 高(500点)" style="width: 60px;">
+                  <option value="low">低</option>
+                  <option value="medium" selected>中</option>
+                  <option value="high">高</option>
+                </select>
               </div>
             </div>
           </div>

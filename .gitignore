@@ -8,7 +8,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 *.local
+
+# App Data
 package-lock.json
+settings.json
+*.csv
 
 # Editors
 .vscode/
