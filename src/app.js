@@ -61,7 +61,10 @@ async function setupCloseConfirm() {
       try { event.preventDefault(); } catch { /* noop */ }
 
       if (__isClosingWindow) {
-        try { await __withTimeout(invoke('exit_app'), 500, null); } catch { /* noop */ }
+        // exit_app calls process::exit — if it somehow times out, fall through to JS-level close
+        try { await __withTimeout(invoke('exit_app'), 800, null); } catch { /* noop */ }
+        try { if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 300, null); } catch { /* noop */ }
+        try { appWindow.close(); } catch { /* noop */ }
         return;
       }
 
@@ -89,7 +92,7 @@ async function setupCloseConfirm() {
       try { await __withTimeout(invoke('disconnect_temp_service'), 500, null); } catch (e) { console.warn('disconnect_temp_service failed during close:', e); }
       try { await __withTimeout(saveSettings(), 2000, null); } catch (e) { console.warn('saveSettings failed during close:', e); }
 
-      try { await __withTimeout(invoke('close_main_window'), 1000, null); return; } catch (e) { console.warn('close_main_window failed:', e); }
+      try { await __withTimeout(invoke('close_main_window'), 300, null); return; } catch (e) { console.warn('close_main_window failed:', e); }
       try { await __withTimeout(invoke('exit_app'), 1000, null); return; } catch (e) { console.warn('exit_app failed:', e); }
       try { if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 500, null); } catch (e) { console.warn('appWindow.destroy failed:', e); }
       try { appWindow.close(); } catch (e) { console.warn('appWindow.close failed:', e); }
@@ -145,31 +148,17 @@ function setupChartToggles() {
     });
   });
 
-  // Fill controls
-  /** @type {{ id: string, opId: string, key: string }[]} */
+  // Fill controls — opacity input drives both opacity and fill (0 = fill off)
+  /** @type {{ opId: string, key: string }[]} */
   const fillControls = [
-    { id: 'fill-voltage', opId: 'opacity-voltage', key: 'Voltage' },
-    { id: 'fill-current', opId: 'opacity-current', key: 'Current' },
-    { id: 'fill-power', opId: 'opacity-power', key: 'Power' },
-    { id: 'fill-temp', opId: 'opacity-temp', key: 'Temp' },
+    { opId: 'opacity-voltage', key: 'Voltage' },
+    { opId: 'opacity-current', key: 'Current' },
+    { opId: 'opacity-power', key: 'Power' },
+    { opId: 'opacity-temp', key: 'Temp' },
   ];
 
   fillControls.forEach((ctrl, index) => {
-    const checkbox = /** @type {HTMLInputElement|null} */ (document.getElementById(ctrl.id));
     const input = /** @type {HTMLInputElement|null} */ (document.getElementById(ctrl.opId));
-
-    if (checkbox) {
-      checkbox.addEventListener('change', (e) => {
-        const fill = /** @type {HTMLInputElement} */ (e.target).checked;
-        // @ts-ignore — dynamic key
-        state.settings[`fill${ctrl.key}`] = fill;
-        if (state.mainChart?.data?.datasets[index]) {
-          state.mainChart.data.datasets[index].fill = fill;
-          state.mainChart.update('none');
-        }
-        debouncedSaveSettings();
-      });
-    }
 
     if (input) {
       input.addEventListener('input', (e) => {
@@ -178,10 +167,14 @@ function setupChartToggles() {
         if (val < 0) val = 0;
         if (val > 100) val = 100;
 
+        const fill = val > 0;
         // @ts-ignore — dynamic key
         state.settings[`opacity${ctrl.key}`] = val;
+        // @ts-ignore — dynamic key
+        state.settings[`fill${ctrl.key}`] = fill;
 
         if (state.mainChart?.data?.datasets[index]) {
+          state.mainChart.data.datasets[index].fill = fill;
           const hex = state.mainChart.data.datasets[index].borderColor;
           state.mainChart.data.datasets[index].backgroundColor = hexToRgba(hex, val);
           state.mainChart.update('none');

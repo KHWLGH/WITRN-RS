@@ -150,78 +150,54 @@
 
           <div class="ribbon-group">
             <div class="ribbon-group-title">显示通道</div>
-            <div class="ribbon-group-content" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-              <label class="ribbon-checkbox">
-                <input type="checkbox" id="show-voltage" checked>
-                <span class="checkmark voltage"></span>
-                电压
-              </label>
-              <label class="ribbon-checkbox">
-                <input type="checkbox" id="show-current" checked>
-                <span class="checkmark current"></span>
-                电流
-              </label>
-              <label class="ribbon-checkbox">
-                <input type="checkbox" id="show-power" checked>
-                <span class="checkmark power"></span>
-                功率
-              </label>
-              <div id="show-temp-container">
-                <label class="ribbon-checkbox">
-                  <input type="checkbox" id="show-temp" checked>
-                  <span class="checkmark temp"></span>
-                  温度
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div class="ribbon-separator"></div>
-
-          <div class="ribbon-group">
-            <div class="ribbon-group-title">曲线填充</div>
             <div class="ribbon-group-content" style="display: grid; grid-template-columns: auto auto; gap: 4px 12px;">
-              <!-- Line 1: Voltage + Current -->
+              <!-- Voltage -->
               <div style="display: flex; align-items: center; gap: 4px;">
-                <label class="ribbon-checkbox" title="开启电压填充">
-                  <input type="checkbox" id="fill-voltage" checked>
+                <label class="ribbon-checkbox" title="显示/隐藏电压曲线">
+                  <input type="checkbox" id="show-voltage" checked>
                   <span class="checkmark voltage"></span>
+                  电压
                 </label>
-                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="不透明度 (0-100)">
+                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="填充不透明度（0 = 关闭填充）">
                   <input type="number" id="opacity-voltage" value="15" min="0" max="100" class="ribbon-input no-spin" style="width: 100%; padding-right: 12px;">
                   <span style="position:absolute; right:4px; top: 50%; transform: translateY(-50%); color:var(--text-muted); font-size:10px; pointer-events:none;">%</span>
                 </div>
               </div>
-              
+
+              <!-- Current -->
               <div style="display: flex; align-items: center; gap: 4px;">
-                <label class="ribbon-checkbox" title="开启电流填充">
-                  <input type="checkbox" id="fill-current" checked>
+                <label class="ribbon-checkbox" title="显示/隐藏电流曲线">
+                  <input type="checkbox" id="show-current" checked>
                   <span class="checkmark current"></span>
+                  电流
                 </label>
-                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="不透明度 (0-100)">
+                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="填充不透明度（0 = 关闭填充）">
                   <input type="number" id="opacity-current" value="15" min="0" max="100" class="ribbon-input no-spin" style="width: 100%; padding-right: 12px;">
                   <span style="position:absolute; right:4px; top: 50%; transform: translateY(-50%); color:var(--text-muted); font-size:10px; pointer-events:none;">%</span>
                 </div>
               </div>
 
-              <!-- Line 2: Power + Temp -->
+              <!-- Power -->
               <div style="display: flex; align-items: center; gap: 4px;">
-                <label class="ribbon-checkbox" title="开启功率填充">
-                  <input type="checkbox" id="fill-power" checked>
+                <label class="ribbon-checkbox" title="显示/隐藏功率曲线">
+                  <input type="checkbox" id="show-power" checked>
                   <span class="checkmark power"></span>
+                  功率
                 </label>
-                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="不透明度 (0-100)">
+                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="填充不透明度（0 = 关闭填充）">
                   <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" style="width: 100%; padding-right: 12px;">
                   <span style="position:absolute; right:4px; top: 50%; transform: translateY(-50%); color:var(--text-muted); font-size:10px; pointer-events:none;">%</span>
                 </div>
               </div>
 
-              <div id="fill-temp-container" style="display: flex; align-items: center; gap: 4px;">
-                <label class="ribbon-checkbox" title="开启温度填充">
-                  <input type="checkbox" id="fill-temp" checked>
+              <!-- Temp -->
+              <div id="show-temp-container" style="display: flex; align-items: center; gap: 4px;">
+                <label class="ribbon-checkbox" title="显示/隐藏温度曲线">
+                  <input type="checkbox" id="show-temp" checked>
                   <span class="checkmark temp"></span>
+                  温度
                 </label>
-                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="不透明度 (0-100)">
+                <div class="ribbon-input-group" style="width: 50px; position: relative;" title="填充不透明度（0 = 关闭填充）">
                   <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" style="width: 100%; padding-right: 12px;">
                   <span style="position:absolute; right:4px; top: 50%; transform: translateY(-50%); color:var(--text-muted); font-size:10px; pointer-events:none;">%</span>
                 </div>

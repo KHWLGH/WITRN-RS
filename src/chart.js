@@ -272,6 +272,68 @@ export function checkAndRebuildDownsampledData() {
   }
 }
 
+// ─── Dense-grid plugin ───────────────────────────────────────────────────────
+
+/**
+ * 自定义 Chart.js 插件：在主刻度之间绘制细分网格线，使网格更密集。
+ * 不修改刻度本身，仅在 canvas 上额外绘制。
+ */
+const denseGridPlugin = {
+  id: 'denseGrid',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+
+    const subdivisions = 5;
+
+    // ── Minor vertical grid lines (x-axis) ──
+    const xScale = chart.scales.x;
+    if (xScale && xScale.ticks.length >= 2) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(80, 80, 130, 0.5)';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < xScale.ticks.length - 1; i++) {
+        const startVal = xScale.ticks[i].value;
+        const endVal = xScale.ticks[i + 1].value;
+        const step = (endVal - startVal) / subdivisions;
+        for (let j = 1; j < subdivisions; j++) {
+          const x = xScale.getPixelForValue(startVal + step * j);
+          if (x >= chartArea.left && x <= chartArea.right) {
+            ctx.beginPath();
+            ctx.moveTo(x, chartArea.top);
+            ctx.lineTo(x, chartArea.bottom);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // ── Minor horizontal grid lines (y-voltage only, as the single reference) ──
+    const yVoltage = chart.scales['y-voltage'];
+    if (yVoltage && yVoltage.options.display && yVoltage.ticks.length >= 2) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120, 130, 160, 0.25)';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < yVoltage.ticks.length - 1; i++) {
+        const startVal = yVoltage.ticks[i].value;
+        const endVal = yVoltage.ticks[i + 1].value;
+        const step = (endVal - startVal) / subdivisions;
+        for (let j = 1; j < subdivisions; j++) {
+          const y = yVoltage.getPixelForValue(startVal + step * j);
+          if (y >= chartArea.top && y <= chartArea.bottom) {
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, y);
+            ctx.lineTo(chartArea.right, y);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+    }
+  },
+};
+
 // ─── Chart initialization ────────────────────────────────────────────────────
 
 /** 初始化主图表。 */
@@ -299,6 +361,7 @@ export function initChart() {
   // @ts-ignore — Chart is a global from chart.umd.min.js
   state.mainChart = new Chart(ctx, {
     type: 'line',
+    plugins: [denseGridPlugin],
     data: {
       datasets: [
         {
@@ -417,9 +480,9 @@ export function initChart() {
           bounds: 'data',
           offset: false,
           grace: 0,
-          grid: { color: 'rgba(42, 42, 74, 0.5)', drawBorder: false },
+          grid: { color: 'rgba(90, 90, 140, 0.75)', drawBorder: false },
           ticks: {
-            color: '#6a6a7a',
+            color: '#9a9ab8',
             font: { family: monoFontFamily },
             maxRotation: 0,
             autoSkip: true,
@@ -435,7 +498,7 @@ export function initChart() {
           beginAtZero: true,
           grace: '5%',
           title: { display: true, text: '电压 (V)', color: '#4a9eff', font: { family: chartFontFamily } },
-          grid: { color: 'rgba(74, 158, 255, 0.1)', drawBorder: false },
+          grid: { color: 'rgba(74, 158, 255, 0.22)', drawBorder: false },
           ticks: { color: '#4a9eff', font: { family: monoFontFamily }, callback: smartTickCallback },
         },
         'y-current': {
@@ -467,12 +530,36 @@ export function initChart() {
           min: 0,
           beginAtZero: true,
           grace: '5%',
-          title: { display: true, text: '温度 (°C)', color: '#ff4a4a', font: { family: chartFontFamily } },
+          title: { display: true, text: '温度 (°C)', color: '#ff6060', font: { family: chartFontFamily } },
           grid: { display: false },
           ticks: {
-            color: '#ff4a4a',
+            color: '#ff6060',
             font: { family: monoFontFamily },
-            callback: (/** @type {number} */ value) => parseFloat(value.toFixed(3)),
+            callback: (/** @type {number} */ value) => Math.round(Number(value)),
+          },
+          afterBuildTicks: (/** @type {any} */ axis) => {
+            const chart = axis.chart;
+            const refAxis = chart?.scales?.['y-voltage'];
+            if (!refAxis || !refAxis.ticks || refAxis.ticks.length === 0) return;
+
+            const refMin = Number(refAxis.min);
+            const refMax = Number(refAxis.max);
+            const tempMin = Number(axis.min);
+            const tempMax = Number(axis.max);
+
+            if (![refMin, refMax, tempMin, tempMax].every(Number.isFinite)) return;
+
+            const refSpan = refMax - refMin;
+            const tempSpan = tempMax - tempMin;
+
+            /** @type {{ value: number }[]} */
+            const mappedTicks = refAxis.ticks.map((tick) => {
+              const ratio = refSpan === 0 ? 0 : (Number(tick.value) - refMin) / refSpan;
+              const mapped = tempMin + ratio * tempSpan;
+              return { value: Math.round(mapped) };
+            });
+
+            axis.ticks = mappedTicks.filter((tick, index, arr) => index === 0 || tick.value !== arr[index - 1].value);
           },
         },
       },

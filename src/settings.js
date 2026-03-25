@@ -70,26 +70,23 @@ export async function loadSettings() {
       const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
       if (tempPort) tempPort.value = String(state.settings.tempPort || 1573);
 
-      // Fill settings
-      /** @param {string} id @param {boolean|undefined} val */
-      const setFill = (id, val) => {
-        const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-        if (el) el.checked = !!val;
-      };
+      // Fill settings — fill state is derived from opacity (opacity > 0 means fill on)
       /** @param {string} id @param {number|undefined} val */
       const setOp = (id, val) => {
         const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
         if (el) el.value = String(val ?? 15);
       };
 
-      setFill('fill-voltage', state.settings.fillVoltage);
       setOp('opacity-voltage', state.settings.opacityVoltage);
-      setFill('fill-current', state.settings.fillCurrent);
       setOp('opacity-current', state.settings.opacityCurrent);
-      setFill('fill-power', state.settings.fillPower);
       setOp('opacity-power', state.settings.opacityPower);
-      setFill('fill-temp', state.settings.fillTemp);
       setOp('opacity-temp', state.settings.opacityTemp);
+
+      // Derive fill state from opacity
+      state.settings.fillVoltage = (state.settings.opacityVoltage ?? 15) > 0;
+      state.settings.fillCurrent = (state.settings.opacityCurrent ?? 15) > 0;
+      state.settings.fillPower   = (state.settings.opacityPower   ?? 15) > 0;
+      state.settings.fillTemp    = (state.settings.opacityTemp    ?? 15) > 0;
 
       const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
       if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
@@ -220,6 +217,23 @@ export async function resetSettings() {
     if (tempIp) tempIp.value = state.settings.tempIp;
     const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
     if (tempPort) tempPort.value = String(state.settings.tempPort);
+
+    // Opacity inputs
+    /** @param {string} id @param {number} val */
+    const setOp2 = (id, val) => {
+      const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+      if (el) el.value = String(val);
+    };
+    setOp2('opacity-voltage', state.settings.opacityVoltage);
+    setOp2('opacity-current', state.settings.opacityCurrent);
+    setOp2('opacity-power',   state.settings.opacityPower);
+    setOp2('opacity-temp',    state.settings.opacityTemp);
+
+    // Derive fill state from default opacity
+    state.settings.fillVoltage = state.settings.opacityVoltage > 0;
+    state.settings.fillCurrent = state.settings.opacityCurrent > 0;
+    state.settings.fillPower   = state.settings.opacityPower   > 0;
+    state.settings.fillTemp    = state.settings.opacityTemp    > 0;
 
     const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
     if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;

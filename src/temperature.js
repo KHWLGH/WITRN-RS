@@ -88,10 +88,7 @@ export function updateTempUIVisibility() {
   if (exportWithTemp) exportWithTemp.classList.toggle('hidden', !showTemp);
 
   const showTempContainer = document.getElementById('show-temp-container');
-  if (showTempContainer) showTempContainer.style.display = showTemp ? 'inline-block' : 'none';
-
-  const fillTempContainer = document.getElementById('fill-temp-container');
-  if (fillTempContainer) fillTempContainer.style.display = showTemp ? 'flex' : 'none';
+  if (showTempContainer) showTempContainer.style.display = showTemp ? 'flex' : 'none';
 
   if (state.mainChart?.data?.datasets?.[3]) {
     const tempVisible = showTemp && state.settings.showTemp;

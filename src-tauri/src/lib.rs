@@ -1,10 +1,11 @@
 use hidapi::{HidApi, HidDevice};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader};
+use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::net::TcpStream;
-use std::io::{BufReader, BufRead};
 use tauri::{AppHandle, Emitter, State};
 
 /// 已知的维简设备型号
@@ -17,11 +18,27 @@ pub struct KnownDevice {
 
 /// 支持的维简设备列表
 pub const KNOWN_DEVICES: &[KnownDevice] = &[
-    KnownDevice { name: "WITRN K2", vid: 0x0716, pid: 0x5060 },
-    KnownDevice { name: "WITRN U3", vid: 0x0716, pid: 0x5063 },
+    KnownDevice {
+        name: "WITRN K2",
+        vid: 0x0716,
+        pid: 0x5060,
+    },
+    KnownDevice {
+        name: "WITRN U3",
+        vid: 0x0716,
+        pid: 0x5063,
+    },
     // Some C5 firmware/variants report PID 0x5053 (observed in the field).
-    KnownDevice { name: "WITRN C5", vid: 0x0716, pid: 0x5053 },
-    KnownDevice { name: "WITRN C5", vid: 0x0716, pid: 0x5064 },
+    KnownDevice {
+        name: "WITRN C5",
+        vid: 0x0716,
+        pid: 0x5053,
+    },
+    KnownDevice {
+        name: "WITRN C5",
+        vid: 0x0716,
+        pid: 0x5064,
+    },
 ];
 
 /// 枚举到的设备信息
@@ -42,32 +59,32 @@ struct DeviceData {
     voltage: f32,
     current: f32,
     power: f32,
-    dp: f32,           // D+
-    dn: f32,           // D-
-    cc1: f32,          // CC1
-    cc2: f32,          // CC2
-    temperature: f32,  // 温度
-    ah: f32,           // 累计容量 Ah
-    wh: f32,           // 累计能量 Wh
+    dp: f32,          // D+
+    dn: f32,          // D-
+    cc1: f32,         // CC1
+    cc2: f32,         // CC2
+    temperature: f32, // 温度
+    ah: f32,          // 累计容量 Ah
+    wh: f32,          // 累计能量 Wh
 }
 
 struct AppState {
     device: Arc<Mutex<Option<HidDevice>>>,
-    running: Arc<Mutex<bool>>,
+    running: Arc<AtomicBool>,
     sample_rate: Arc<Mutex<u64>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     // Temperature service state
-    temp_running: Arc<Mutex<bool>>,
+    temp_running: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             device: Arc::new(Mutex::new(None)),
-            running: Arc::new(Mutex::new(false)),
+            running: Arc::new(AtomicBool::new(false)),
             sample_rate: Arc::new(Mutex::new(250)),
             current_device_info: Arc::new(Mutex::new(None)),
-            temp_running: Arc::new(Mutex::new(false)),
+            temp_running: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -99,9 +116,10 @@ fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
 
         // 检查是否是已知的维简设备
         let known = KNOWN_DEVICES.iter().find(|d| d.vid == vid && d.pid == pid);
-        
+
         // 也支持用户自定义的设备（通过VID/PID匹配）
-        let model_name = known.map(|d| d.name.to_string())
+        let model_name = known
+            .map(|d| d.name.to_string())
             .unwrap_or_else(|| format!("未知设备 ({:04X}:{:04X})", vid, pid));
 
         // 只添加已知设备或者VID为0x0716/0x0483的设备
@@ -109,9 +127,9 @@ fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
             let serial = device_info.serial_number().map(|s| s.to_string());
             let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
             let product = device_info.product_string().map(|s| s.to_string());
-            
+
             let path = device_info.path().to_string_lossy().to_string();
-            
+
             // 生成显示名称
             let display_name = if let Some(ref sn) = serial {
                 if !sn.is_empty() {
@@ -155,22 +173,24 @@ fn connect_device_by_path(
     app: AppHandle,
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
-    
+
     // 查找设备信息
-    let device_info = api.device_list()
+    let device_info = api
+        .device_list()
         .find(|d| d.path().to_string_lossy() == path)
         .ok_or("找不到指定设备")?;
-    
+
     let vid = device_info.vendor_id();
     let pid = device_info.product_id();
     let serial = device_info.serial_number().map(|s| s.to_string());
     let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
     let product = device_info.product_string().map(|s| s.to_string());
-    
+
     let known = KNOWN_DEVICES.iter().find(|d| d.vid == vid && d.pid == pid);
-    let model_name = known.map(|d| d.name.to_string())
+    let model_name = known
+        .map(|d| d.name.to_string())
         .unwrap_or_else(|| format!("未知设备 ({:04X}:{:04X})", vid, pid));
-    
+
     let display_name = if let Some(ref sn) = serial {
         if !sn.is_empty() {
             format!("{} (SN: {})", model_name, sn)
@@ -180,7 +200,7 @@ fn connect_device_by_path(
     } else {
         model_name.clone()
     };
-    
+
     let current_info = DeviceInfo {
         path: path.clone(),
         vid,
@@ -191,50 +211,50 @@ fn connect_device_by_path(
         model_name,
         display_name: display_name.clone(),
     };
-    
+
     // 打开设备
     let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
-    let device = api.open_path(path_cstr.as_c_str())
+    let device = api
+        .open_path(path_cstr.as_c_str())
         .map_err(|e| format!("无法打开设备: {}", e))?;
-    
+
     // Store device
     {
         let mut dev = state.device.lock().unwrap();
         *dev = Some(device);
     }
-    
+
     // Store device info
     {
         let mut info = state.current_device_info.lock().unwrap();
         *info = Some(current_info);
     }
-    
+
     // Set running flag
-    {
-        let mut running = state.running.lock().unwrap();
-        *running = true;
-    }
-    
-    // Clone state references for the thread
-    let device_arc = Arc::clone(&state.device);
+    state.running.store(true, Ordering::Relaxed);
+
+    // Take device ownership into the reading thread — this eliminates all mutex contention
+    // between read_timeout() and disconnect/close, which was the root cause of close hangs.
+    let device = {
+        let mut dev = state.device.lock().unwrap();
+        dev.take().expect("device was just stored above")
+    };
     let running_arc = Arc::clone(&state.running);
     let sample_rate_arc = Arc::clone(&state.sample_rate);
-    
+
     // Start reading thread
     thread::spawn(move || {
+        // device is owned exclusively by this thread; no shared mutex during reads
         let mut buf = [0u8; 64];
         let mut last_emit = Instant::now();
         let mut pending: Option<DeviceData> = None;
-        
+
         loop {
             // Check if still running
-            {
-                let running = running_arc.lock().unwrap();
-                if !*running {
-                    break;
-                }
+            if !running_arc.load(Ordering::Relaxed) {
+                break;
             }
-            
+
             // Get sample rate (ms). This is the desired *emit* interval.
             let rate_ms = {
                 let rate = sample_rate_arc.lock().unwrap();
@@ -246,43 +266,36 @@ fn connect_device_by_path(
             let read_timeout_ms = rate_ms.min(20) as i32;
             let mut error_occurred = false;
 
-            let maybe_sample = {
-                let dev = device_arc.lock().unwrap();
-                if let Some(ref device) = *dev {
-                    match device.read_timeout(&mut buf, read_timeout_ms) {
-                        Ok(size) if size == 64 && buf[0] == 0xFF => {
-                            let ah = f32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]);
-                            let wh = f32::from_le_bytes([buf[18], buf[19], buf[20], buf[21]]);
-                            let dp = f32::from_le_bytes([buf[30], buf[31], buf[32], buf[33]]);
-                            let dn = f32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]);
-                            let temperature = f32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]]);
-                            let voltage = f32::from_le_bytes([buf[46], buf[47], buf[48], buf[49]]);
-                            let current = f32::from_le_bytes([buf[50], buf[51], buf[52], buf[53]]);
-                            let cc1 = buf[55] as f32 / 10.0;
-                            let cc2 = buf[56] as f32 / 10.0;
-                            let power = voltage * current;
+            let maybe_sample = match device.read_timeout(&mut buf, read_timeout_ms) {
+                Ok(size) if size == 64 && buf[0] == 0xFF => {
+                    let ah = f32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]);
+                    let wh = f32::from_le_bytes([buf[18], buf[19], buf[20], buf[21]]);
+                    let dp = f32::from_le_bytes([buf[30], buf[31], buf[32], buf[33]]);
+                    let dn = f32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]);
+                    let temperature = f32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]]);
+                    let voltage = f32::from_le_bytes([buf[46], buf[47], buf[48], buf[49]]);
+                    let current = f32::from_le_bytes([buf[50], buf[51], buf[52], buf[53]]);
+                    let cc1 = buf[55] as f32 / 10.0;
+                    let cc2 = buf[56] as f32 / 10.0;
+                    let power = voltage * current;
 
-                            Some(DeviceData {
-                                voltage,
-                                current,
-                                power,
-                                dp,
-                                dn,
-                                cc1,
-                                cc2,
-                                temperature,
-                                ah,
-                                wh,
-                            })
-                        }
-                        Ok(_) => None,
-                        Err(_) => {
-                            error_occurred = true;
-                            None
-                        }
-                    }
-                } else {
-                    break;
+                    Some(DeviceData {
+                        voltage,
+                        current,
+                        power,
+                        dp,
+                        dn,
+                        cc1,
+                        cc2,
+                        temperature,
+                        ah,
+                        wh,
+                    })
+                }
+                Ok(_) => None,
+                Err(_) => {
+                    error_occurred = true;
+                    None
                 }
             };
 
@@ -302,8 +315,9 @@ fn connect_device_by_path(
                 last_emit = Instant::now();
             }
         }
+        // device dropped here, HID connection closed cleanly
     });
-    
+
     Ok(format!("已连接: {}", display_name))
 }
 
@@ -315,14 +329,15 @@ fn connect_device(
     app: AppHandle,
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
-    
+
     // 查找匹配的设备
-    let device_info = api.device_list()
+    let device_info = api
+        .device_list()
         .find(|d| d.vendor_id() == vid && d.product_id() == pid)
         .ok_or(format!("找不到设备 VID:{:04X} PID:{:04X}", vid, pid))?;
-    
+
     let path = device_info.path().to_string_lossy().to_string();
-    
+
     // 使用path连接
     drop(api); // 释放api
     connect_device_by_path(path, state, app)
@@ -330,27 +345,16 @@ fn connect_device(
 
 #[tauri::command]
 fn disconnect_device(state: State<'_, AppState>) -> Result<String, String> {
-    // Stop reading thread
-    {
-        let mut running = state.running.lock().unwrap();
-        *running = false;
-    }
-    
-    // Give thread time to finish
-    thread::sleep(Duration::from_millis(200));
-    
-    // Clear device
-    {
-        let mut dev = state.device.lock().unwrap();
-        *dev = None;
-    }
-    
-    // Clear device info
+    // Signal reading thread to stop. The thread owns HidDevice and drops it on exit —
+    // no sleep or device.lock() here, eliminating the mutex deadlock that caused close hangs.
+    state.running.store(false, Ordering::Relaxed);
+
+    // Clear device info immediately
     {
         let mut info = state.current_device_info.lock().unwrap();
         *info = None;
     }
-    
+
     Ok("设备已断开".to_string())
 }
 
@@ -362,50 +366,22 @@ fn set_sample_rate(rate: u64, state: State<'_, AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn exit_app(state: State<'_, AppState>, app: AppHandle) {
-    // 先停止所有后台线程
-    {
-        let mut running = state.running.lock().unwrap();
-        *running = false;
-    }
-    {
-        let mut temp_running = state.temp_running.lock().unwrap();
-        *temp_running = false;
-    }
-    // 给线程一点时间响应停止信号
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    // 清理设备资源
-    {
-        let mut dev = state.device.lock().unwrap();
-        *dev = None;
-    }
-    app.exit(0);
+fn exit_app(state: State<'_, AppState>, _app: AppHandle) {
+    // Signal all background threads to stop (device is owned by the read thread, no .lock() needed)
+    state.running.store(false, Ordering::Relaxed);
+    state.temp_running.store(false, Ordering::Relaxed);
+    // Exit the process directly — bypasses Tauri event chain, guaranteed to work
+    std::process::exit(0);
 }
 
 #[tauri::command]
-fn close_main_window(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    // 先停止所有后台线程
-    {
-        let mut running = state.running.lock().unwrap();
-        *running = false;
-    }
-    {
-        let mut temp_running = state.temp_running.lock().unwrap();
-        *temp_running = false;
-    }
-    // 给线程一点时间响应停止信号
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    // 清理设备资源
-    {
-        let mut dev = state.device.lock().unwrap();
-        *dev = None;
-    }
-    
-    use tauri::Manager;
-    app.get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?
-        .close()
-        .map_err(|e| e.to_string())
+fn close_main_window(state: State<'_, AppState>, _app: AppHandle) -> Result<(), String> {
+    // Signal all background threads to stop (device is owned by the read thread, no .lock() needed)
+    state.running.store(false, Ordering::Relaxed);
+    state.temp_running.store(false, Ordering::Relaxed);
+    // Exit the process directly — avoids window.close() re-triggering CloseRequested which
+    // could leave the window permanently un-closeable when the confirm handler is still live.
+    std::process::exit(0);
 }
 
 /// 连接温度服务
@@ -417,39 +393,32 @@ fn connect_temp_service(
     app: AppHandle,
 ) -> Result<String, String> {
     // 如果已经在运行，先停止
-    {
-        let mut running = state.temp_running.lock().unwrap();
-        *running = false;
-    }
+    state.temp_running.store(false, Ordering::Relaxed);
     thread::sleep(Duration::from_millis(100));
 
     let addr = format!("{}:{}", ip, port);
-    
+
     // 尝试连接
     let stream = TcpStream::connect_timeout(
         &addr.parse().map_err(|e| format!("无效地址: {}", e))?,
-        Duration::from_secs(5)
-    ).map_err(|e| format!("连接失败: {}", e))?;
-    
-    stream.set_read_timeout(Some(Duration::from_secs(10)))
+        Duration::from_secs(5),
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("设置超时失败: {}", e))?;
 
     // 启动接收线程
     let running = Arc::clone(&state.temp_running);
-    {
-        let mut r = running.lock().unwrap();
-        *r = true;
-    }
+    running.store(true, Ordering::Relaxed);
 
     thread::spawn(move || {
         let reader = BufReader::new(stream);
         for line in reader.lines() {
             // 检查是否应该停止
-            {
-                let r = running.lock().unwrap();
-                if !*r {
-                    break;
-                }
+            if !running.load(Ordering::Relaxed) {
+                break;
             }
 
             match line {
@@ -470,10 +439,9 @@ fn connect_temp_service(
                 }
             }
         }
-        
+
         // 清理
-        let mut r = running.lock().unwrap();
-        *r = false;
+        running.store(false, Ordering::Relaxed);
     });
 
     Ok(format!("已连接到温度服务 {}", addr))
@@ -482,15 +450,14 @@ fn connect_temp_service(
 /// 断开温度服务
 #[tauri::command]
 fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String> {
-    let mut running = state.temp_running.lock().unwrap();
-    *running = false;
+    state.temp_running.store(false, Ordering::Relaxed);
     Ok("已断开温度服务连接".to_string())
 }
 
 /// 获取温度服务连接状态
 #[tauri::command]
 fn get_temp_service_status(state: State<'_, AppState>) -> bool {
-    *state.temp_running.lock().unwrap()
+    state.temp_running.load(Ordering::Relaxed)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
