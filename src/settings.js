@@ -3,10 +3,10 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { state, defaultSettings, defaultAutoPauseSettings } from './state.js';
+import { rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
 import { updateStatsDisplay } from './data.js';
+import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
-import { rebuildRenderSeries, rebuildNavigatorSeries } from './chart.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -85,8 +85,8 @@ export async function loadSettings() {
       // Derive fill state from opacity
       state.settings.fillVoltage = (state.settings.opacityVoltage ?? 15) > 0;
       state.settings.fillCurrent = (state.settings.opacityCurrent ?? 15) > 0;
-      state.settings.fillPower   = (state.settings.opacityPower   ?? 15) > 0;
-      state.settings.fillTemp    = (state.settings.opacityTemp    ?? 15) > 0;
+      state.settings.fillPower = (state.settings.opacityPower ?? 15) > 0;
+      state.settings.fillTemp = (state.settings.opacityTemp ?? 15) > 0;
 
       const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
       if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
@@ -226,14 +226,14 @@ export async function resetSettings() {
     };
     setOp2('opacity-voltage', state.settings.opacityVoltage);
     setOp2('opacity-current', state.settings.opacityCurrent);
-    setOp2('opacity-power',   state.settings.opacityPower);
-    setOp2('opacity-temp',    state.settings.opacityTemp);
+    setOp2('opacity-power', state.settings.opacityPower);
+    setOp2('opacity-temp', state.settings.opacityTemp);
 
     // Derive fill state from default opacity
     state.settings.fillVoltage = state.settings.opacityVoltage > 0;
     state.settings.fillCurrent = state.settings.opacityCurrent > 0;
-    state.settings.fillPower   = state.settings.opacityPower   > 0;
-    state.settings.fillTemp    = state.settings.opacityTemp    > 0;
+    state.settings.fillPower = state.settings.opacityPower > 0;
+    state.settings.fillTemp = state.settings.opacityTemp > 0;
 
     const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
     if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;

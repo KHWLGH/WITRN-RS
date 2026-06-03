@@ -3,7 +3,7 @@
  * @file Chart.js 初始化、降采样算法、渲染调度。
  */
 
-import { state, DOWNSAMPLE_CONFIG, DOWNSAMPLE_LEVELS } from './state.js';
+import { DOWNSAMPLE_CONFIG, DOWNSAMPLE_LEVELS, state } from './state.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
 
 // ─── Rendering schedule ──────────────────────────────────────────────────────
@@ -83,10 +83,7 @@ export function lttbDownsample(data, threshold) {
     const pointAY = data[a].y;
 
     for (let j = bucketStart; j < bucketEnd; j++) {
-      const area = Math.abs(
-        (pointAX - avgX) * (data[j].y - pointAY) -
-        (pointAX - data[j].x) * (avgY - pointAY),
-      );
+      const area = Math.abs((pointAX - avgX) * (data[j].y - pointAY) - (pointAX - data[j].x) * (avgY - pointAY));
       if (area > maxArea) {
         maxArea = area;
         maxAreaIndex = j;
@@ -129,8 +126,14 @@ export function minMaxDownsample(data, buckets) {
     let maxIdx = start;
 
     for (let j = start; j < end; j++) {
-      if (data[j].y < minY) { minY = data[j].y; minIdx = j; }
-      if (data[j].y > maxY) { maxY = data[j].y; maxIdx = j; }
+      if (data[j].y < minY) {
+        minY = data[j].y;
+        minIdx = j;
+      }
+      if (data[j].y > maxY) {
+        maxY = data[j].y;
+        maxIdx = j;
+      }
     }
 
     if (minIdx <= maxIdx) {
@@ -228,9 +231,10 @@ export function checkAndRebuildDownsampledData() {
     const timeSinceLastRebuild = now - DOWNSAMPLE_CONFIG.lastRebuildTime;
     const growthRatio = lastCount > 0 ? (count - lastCount) / lastCount : 1;
 
-    const mainNeedsRebuild = lastCount === 0
-      || (growthRatio > DOWNSAMPLE_CONFIG.rebuildThreshold
-        && timeSinceLastRebuild >= DOWNSAMPLE_CONFIG.minRebuildInterval);
+    const mainNeedsRebuild =
+      lastCount === 0 ||
+      (growthRatio > DOWNSAMPLE_CONFIG.rebuildThreshold &&
+        timeSinceLastRebuild >= DOWNSAMPLE_CONFIG.minRebuildInterval);
 
     if (mainNeedsRebuild) {
       rebuildRenderSeries();
@@ -261,8 +265,7 @@ export function checkAndRebuildDownsampledData() {
     DOWNSAMPLE_CONFIG.navLastRebuildCount = count;
   } else {
     const navGrowthRatio = navLastCount > 0 ? (count - navLastCount) / navLastCount : 1;
-    const navNeedsRebuild = navLastCount === 0
-      || navGrowthRatio > DOWNSAMPLE_CONFIG.rebuildThreshold;
+    const navNeedsRebuild = navLastCount === 0 || navGrowthRatio > DOWNSAMPLE_CONFIG.rebuildThreshold;
 
     if (navNeedsRebuild) {
       rebuildNavigatorSeries();
@@ -311,7 +314,7 @@ const denseGridPlugin = {
 
     // ── Minor horizontal grid lines (y-voltage only, as the single reference) ──
     const yVoltage = chart.scales['y-voltage'];
-    if (yVoltage && yVoltage.options.display && yVoltage.ticks.length >= 2) {
+    if (yVoltage?.options.display && yVoltage.ticks.length >= 2) {
       ctx.save();
       ctx.strokeStyle = 'rgba(120, 130, 160, 0.25)';
       ctx.lineWidth = 0.5;
@@ -339,7 +342,8 @@ const denseGridPlugin = {
 /** 初始化主图表。 */
 export function initChart() {
   const ctx = /** @type {HTMLCanvasElement} */ (document.getElementById('main-chart')).getContext('2d');
-  const chartFontFamily = "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
+  const chartFontFamily =
+    "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
   const monoFontFamily = "'JetBrains Mono', 'Consolas', 'Monaco', monospace";
 
   const colors = {
@@ -358,7 +362,7 @@ export function initChart() {
     return parseFloat(value.toFixed(3));
   };
 
-  // @ts-ignore — Chart is a global from chart.umd.min.js
+  // @ts-expect-error — Chart is a global from chart.umd.min.js
   state.mainChart = new Chart(ctx, {
     type: 'line',
     plugins: [denseGridPlugin],
@@ -432,7 +436,7 @@ export function initChart() {
             font: { family: chartFontFamily },
             padding: 15,
             generateLabels: (chart) => {
-              // @ts-ignore
+              // @ts-expect-error
               const original = Chart.defaults.plugins.legend.labels.generateLabels;
               return original(chart).filter((/** @type {any} */ item) => chart.isDatasetVisible(item.datasetIndex));
             },
@@ -573,18 +577,20 @@ export function initChart() {
 export function initNavigatorChart() {
   const ctx = /** @type {HTMLCanvasElement} */ (document.getElementById('navigator-chart')).getContext('2d');
 
-  // @ts-ignore — Chart is a global
+  // @ts-expect-error — Chart is a global
   state.navigatorChart = new Chart(ctx, {
     type: 'line',
     data: {
-      datasets: [{
-        data: state.navigatorSeries.power,
-        borderColor: '#ffaa4a',
-        borderWidth: 1,
-        pointRadius: 0,
-        fill: false,
-        tension: 0.2,
-      }],
+      datasets: [
+        {
+          data: state.navigatorSeries.power,
+          borderColor: '#ffaa4a',
+          borderWidth: 1,
+          pointRadius: 0,
+          fill: false,
+          tension: 0.2,
+        },
+      ],
     },
     options: {
       responsive: true,

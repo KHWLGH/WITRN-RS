@@ -30,7 +30,9 @@ export function formatRelativeHMS(seconds) {
  * @returns {number}
  */
 export function labelToSeconds(label) {
-  const text = String(label ?? '').trim().replace(/s$/i, '');
+  const text = String(label ?? '')
+    .trim()
+    .replace(/s$/i, '');
   const value = parseFloat(text);
   return Number.isFinite(value) ? value : 0;
 }

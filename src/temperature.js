@@ -14,7 +14,7 @@ export async function connectTempService() {
   const ipEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   const portEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   const ip = ipEl?.value || '127.0.0.1';
-  const port = parseInt(portEl?.value || '1573') || 1573;
+  const port = Number.parseInt(portEl?.value || '1573', 10) || 1573;
 
   try {
     await invoke('connect_temp_service', { ip, port });

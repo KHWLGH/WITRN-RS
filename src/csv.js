@@ -3,11 +3,11 @@
  * @file CSV 导入 / 导出。
  */
 
-import { state, DOWNSAMPLE_CONFIG } from './state.js';
-import { formatRelativeHMS } from './utils.js';
-import { rebuildRenderSeries, rebuildNavigatorSeries } from './chart.js';
-import { updateStats, updateStatsDisplay, updateEnergyDisplay, updateChartRange, clearAndResetStats } from './data.js';
+import { rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
+import { clearAndResetStats, updateChartRange, updateEnergyDisplay, updateStats, updateStatsDisplay } from './data.js';
+import { DOWNSAMPLE_CONFIG, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { formatRelativeHMS } from './utils.js';
 
 const { save, open } = window.__TAURI__.dialog;
 const { writeTextFile, readTextFile } = window.__TAURI__.fs;
@@ -19,21 +19,22 @@ const { writeTextFile, readTextFile } = window.__TAURI__.fs;
  * @param {boolean} [withTemp=false] - 是否包含温度列
  */
 export async function exportCSV(withTemp = false) {
-  const data = state.recordedData.length > 0
-    ? state.recordedData
-    : state.chartData.timestamps.map((ts, i) => {
-        const baseline = state.chartData.timestamps[0] || ts || 0;
-        const relSec = baseline ? ((ts - baseline) / 1000) : 0;
-        const rel = formatRelativeHMS(relSec);
-        return {
-          timestamp: rel,
-          voltage: state.chartData.voltage[i],
-          current: state.chartData.current[i],
-          power: state.chartData.power[i],
-          temp: state.chartData.temp[i] || 0,
-          relSeconds: relSec,
-        };
-      });
+  const data =
+    state.recordedData.length > 0
+      ? state.recordedData
+      : state.chartData.timestamps.map((ts, i) => {
+          const baseline = state.chartData.timestamps[0] || ts || 0;
+          const relSec = baseline ? (ts - baseline) / 1000 : 0;
+          const rel = formatRelativeHMS(relSec);
+          return {
+            timestamp: rel,
+            voltage: state.chartData.voltage[i],
+            current: state.chartData.current[i],
+            power: state.chartData.power[i],
+            temp: state.chartData.temp[i] || 0,
+            relSeconds: relSec,
+          };
+        });
 
   if (data.length === 0) {
     alert('没有数据可导出');
@@ -56,9 +57,10 @@ export async function exportCSV(withTemp = false) {
   // Metadata
   const sum = data.length;
   const sampTime = state.settings.sampleRate;
-  const startTime = (state.recordedData.length > 0 && state.lastRecordingStartTime)
-    ? state.lastRecordingStartTime
-    : (state.chartData.timestamps[0] || Date.now());
+  const startTime =
+    state.recordedData.length > 0 && state.lastRecordingStartTime
+      ? state.lastRecordingStartTime
+      : state.chartData.timestamps[0] || Date.now();
 
   const d = new Date(startTime);
   /** @param {number} n @returns {string} */
@@ -161,15 +163,16 @@ export async function importCSV() {
 
     const sampTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('SampTime(ms),'));
     if (sampTimeLine) {
-      const rate = parseInt(sampTimeLine.split(',')[1]);
-      if (!isNaN(rate)) newSampleRate = rate;
+      const rate = Number.parseInt(sampTimeLine.split(',')[1], 10);
+      if (!Number.isNaN(rate)) newSampleRate = rate;
     }
 
     const dateTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('DateTime,'));
     if (dateTimeLine) {
       const dtStr = dateTimeLine.split(',')[1];
       const dt = new Date(dtStr);
-      if (!isNaN(dt.getTime())) newStartTime = dt.getTime();
+      const parsedTime = dt.getTime();
+      if (!Number.isNaN(parsedTime)) newStartTime = parsedTime;
     }
 
     for (let i = dataStartIndex; i < lines.length; i++) {
@@ -185,17 +188,17 @@ export async function importCSV() {
       const power = parseFloat(parts[3]);
       const temp = hasTemp && parts.length > 4 ? parseFloat(parts[4]) || 0 : 0;
 
-      if (isNaN(voltage) || isNaN(current) || isNaN(power)) continue;
+      if (Number.isNaN(voltage) || Number.isNaN(current) || Number.isNaN(power)) continue;
 
       const timeParts = timeStr.split(':');
       let seconds = 0;
       if (timeParts.length === 3) {
-        seconds += parseInt(timeParts[0]) * 3600;
-        seconds += parseInt(timeParts[1]) * 60;
+        seconds += Number.parseInt(timeParts[0], 10) * 3600;
+        seconds += Number.parseInt(timeParts[1], 10) * 60;
         seconds += parseFloat(timeParts[2]);
       }
 
-      const timestamp = newStartTime + (seconds * 1000);
+      const timestamp = newStartTime + seconds * 1000;
 
       newSeconds.push(seconds);
       newTimestamps.push(timestamp);

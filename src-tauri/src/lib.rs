@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 已知的维简设备型号
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -366,22 +366,31 @@ fn set_sample_rate(rate: u64, state: State<'_, AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn exit_app(state: State<'_, AppState>, _app: AppHandle) {
-    // Signal all background threads to stop (device is owned by the read thread, no .lock() needed)
+fn exit_app(state: State<'_, AppState>, app: AppHandle) {
+    // Signal all background threads to stop first.
     state.running.store(false, Ordering::Relaxed);
     state.temp_running.store(false, Ordering::Relaxed);
-    // Exit the process directly — bypasses Tauri event chain, guaranteed to work
-    std::process::exit(0);
+
+    // Prefer framework-managed exit to avoid abrupt teardown on Windows.
+    app.exit(0);
 }
 
 #[tauri::command]
-fn close_main_window(state: State<'_, AppState>, _app: AppHandle) -> Result<(), String> {
-    // Signal all background threads to stop (device is owned by the read thread, no .lock() needed)
+fn close_main_window(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    // Signal all background threads to stop first.
     state.running.store(false, Ordering::Relaxed);
     state.temp_running.store(false, Ordering::Relaxed);
-    // Exit the process directly — avoids window.close() re-triggering CloseRequested which
-    // could leave the window permanently un-closeable when the confirm handler is still live.
-    std::process::exit(0);
+
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .close()
+            .map_err(|e| format!("关闭主窗口失败: {}", e))?;
+        return Ok(());
+    }
+
+    eprintln!("未找到主窗口，回退为应用退出");
+    app.exit(0);
+    Ok(())
 }
 
 /// 连接温度服务

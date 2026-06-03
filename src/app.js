@@ -3,22 +3,22 @@
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
 
-import { state } from './state.js';
-import { hexToRgba } from './utils.js';
-import { loadSettings, saveSettings, debouncedSaveSettings, resetSettings } from './settings.js';
-import { initChart, rebuildRenderSeries, rebuildNavigatorSeries } from './chart.js';
+import { initChart, rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
+import { exportCSV, importCSV } from './csv.js';
 import {
   addDataPoint,
-  updateSliderFill,
-  updateChartRange,
-  updateStatsDisplay,
+  clearAndResetStats,
   startRecording,
   stopRecording,
-  clearAndResetStats,
+  updateChartRange,
+  updateSliderFill,
+  updateStatsDisplay,
 } from './data.js';
-import { refreshDeviceList, onDeviceSelect, connectDevice, disconnectDevice } from './device.js';
-import { exportCSV, importCSV } from './csv.js';
+import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
+import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
+import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
+import { hexToRgba } from './utils.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -44,9 +44,11 @@ function __withTimeout(promise, ms, fallback) {
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve(fallback), ms);
   });
-  return /** @type {Promise<T>} */ (Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  }));
+  return /** @type {Promise<T>} */ (
+    Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    })
+  );
 }
 
 async function setupCloseConfirm() {
@@ -58,44 +60,78 @@ async function setupCloseConfirm() {
     if (!appWindow || typeof appWindow.onCloseRequested !== 'function') return;
 
     __unlistenCloseRequested = await appWindow.onCloseRequested(async (/** @type {any} */ event) => {
-      try { event.preventDefault(); } catch { /* noop */ }
+      try {
+        event.preventDefault();
+      } catch {
+        /* noop */
+      }
 
       if (__isClosingWindow) {
-        // exit_app calls process::exit — if it somehow times out, fall through to JS-level close
-        try { await __withTimeout(invoke('exit_app'), 800, null); } catch { /* noop */ }
-        try { if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 300, null); } catch { /* noop */ }
-        try { appWindow.close(); } catch { /* noop */ }
+        // Ignore repeated close clicks while the shutdown flow is running.
+        console.info('Close request ignored: shutdown already in progress.');
         return;
       }
 
-      let confirmed = true;
+      let confirmed = false;
       try {
-        confirmed = /** @type {boolean} */ (await __withTimeout(
-          ask('确定要退出吗？', { title: '确认退出', type: 'warning' }),
-          5_000,
-          true,
-        ));
+        // Wait for explicit user intent; never auto-confirm on timeout.
+        confirmed = /** @type {boolean} */ (await ask('确定要退出吗？', { title: '确认退出', type: 'warning' }));
       } catch {
-        confirmed = true;
+        confirmed = false;
       }
 
       if (!confirmed) return;
 
+      console.info('Shutdown confirmed by user.');
       __isClosingWindow = true;
 
       try {
         if (typeof __unlistenCloseRequested === 'function') __unlistenCloseRequested();
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       __unlistenCloseRequested = null;
 
-      try { await __withTimeout(invoke('disconnect_device'), 500, null); } catch (e) { console.warn('disconnect_device failed during close:', e); }
-      try { await __withTimeout(invoke('disconnect_temp_service'), 500, null); } catch (e) { console.warn('disconnect_temp_service failed during close:', e); }
-      try { await __withTimeout(saveSettings(), 2000, null); } catch (e) { console.warn('saveSettings failed during close:', e); }
+      try {
+        await __withTimeout(invoke('disconnect_device'), 500, null);
+      } catch (e) {
+        console.warn('disconnect_device failed during close:', e);
+      }
+      try {
+        await __withTimeout(invoke('disconnect_temp_service'), 500, null);
+      } catch (e) {
+        console.warn('disconnect_temp_service failed during close:', e);
+      }
+      try {
+        await __withTimeout(saveSettings(), 2000, null);
+      } catch (e) {
+        console.warn('saveSettings failed during close:', e);
+      }
 
-      try { await __withTimeout(invoke('close_main_window'), 300, null); return; } catch (e) { console.warn('close_main_window failed:', e); }
-      try { await __withTimeout(invoke('exit_app'), 1000, null); return; } catch (e) { console.warn('exit_app failed:', e); }
-      try { if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 500, null); } catch (e) { console.warn('appWindow.destroy failed:', e); }
-      try { appWindow.close(); } catch (e) { console.warn('appWindow.close failed:', e); }
+      try {
+        console.info('Closing main window via backend command.');
+        await __withTimeout(invoke('close_main_window'), 300, null);
+        return;
+      } catch (e) {
+        console.warn('close_main_window failed:', e);
+      }
+      try {
+        console.warn('Falling back to exit_app.');
+        await __withTimeout(invoke('exit_app'), 1000, null);
+        return;
+      } catch (e) {
+        console.warn('exit_app failed:', e);
+      }
+      try {
+        if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 500, null);
+      } catch (e) {
+        console.warn('appWindow.destroy failed:', e);
+      }
+      try {
+        appWindow.close();
+      } catch (e) {
+        console.warn('appWindow.close failed:', e);
+      }
     });
   } catch (e) {
     console.error('Failed to setup close confirm:', e);
@@ -111,22 +147,24 @@ function setupChartToggles() {
     if (!checkbox) return;
     const key = `show${field.charAt(0).toUpperCase() + field.slice(1)}`;
 
-    // @ts-ignore — dynamic key
+    // @ts-expect-error — dynamic key
     state.settings[key] = checkbox.checked;
 
     if (state.mainChart && typeof state.mainChart.setDatasetVisibility === 'function') {
-      const shouldShow = field === 'temp' ? (checkbox.checked && (state.isTempConnected || state.hasTempData)) : checkbox.checked;
+      const shouldShow =
+        field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
       state.mainChart.setDatasetVisibility(index, shouldShow);
     } else if (state.mainChart?.data?.datasets[index]) {
       state.mainChart.data.datasets[index].hidden = !checkbox.checked;
     }
     if (state.mainChart?.options?.scales) {
-      const shouldShow = field === 'temp' ? (checkbox.checked && (state.isTempConnected || state.hasTempData)) : checkbox.checked;
+      const shouldShow =
+        field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
       state.mainChart.options.scales[`y-${field}`].display = shouldShow;
     }
 
     checkbox.addEventListener('change', () => {
-      // @ts-ignore — dynamic key
+      // @ts-expect-error — dynamic key
       state.settings[key] = checkbox.checked;
 
       if (field === 'temp') {
@@ -162,15 +200,15 @@ function setupChartToggles() {
 
     if (input) {
       input.addEventListener('input', (e) => {
-        let val = parseInt(/** @type {HTMLInputElement} */ (e.target).value);
-        if (isNaN(val)) val = 15;
+        let val = Number.parseInt(/** @type {HTMLInputElement} */ (e.target).value, 10);
+        if (Number.isNaN(val)) val = 15;
         if (val < 0) val = 0;
         if (val > 100) val = 100;
 
         const fill = val > 0;
-        // @ts-ignore — dynamic key
+        // @ts-expect-error — dynamic key
         state.settings[`opacity${ctrl.key}`] = val;
-        // @ts-ignore — dynamic key
+        // @ts-expect-error — dynamic key
         state.settings[`fill${ctrl.key}`] = fill;
 
         if (state.mainChart?.data?.datasets[index]) {
@@ -222,8 +260,8 @@ function setupControls() {
    */
   function applyRangeValues(nextStart, nextEnd, leader) {
     if (state.isRecording) return;
-    let start = clamp(parseInt(String(nextStart)), 0, 1000);
-    let end = clamp(parseInt(String(nextEnd)), 0, 1000);
+    let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
+    let end = clamp(Number.parseInt(String(nextEnd), 10), 0, 1000);
 
     if (start > end) {
       if (leader === 'start') start = end;
@@ -294,8 +332,8 @@ function setupControls() {
 
       event.preventDefault();
 
-      const baseStep = event.shiftKey ? 10 : (event.ctrlKey ? 50 : 1);
-      const current = which === 'start' ? parseInt(rangeStart.value) : parseInt(rangeEnd.value);
+      const baseStep = event.shiftKey ? 10 : event.ctrlKey ? 50 : 1;
+      const current = which === 'start' ? Number.parseInt(rangeStart.value, 10) : Number.parseInt(rangeEnd.value, 10);
       let next = current;
 
       if (isHome) next = 0;
@@ -322,11 +360,15 @@ function setupControls() {
   const sampleRateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (sampleRateEl) {
     sampleRateEl.addEventListener('change', async (e) => {
-      state.settings.sampleRate = parseInt(/** @type {HTMLSelectElement} */ (e.target).value);
+      state.settings.sampleRate = Number.parseInt(/** @type {HTMLSelectElement} */ (e.target).value, 10);
       updateChartRange();
       state.mainChart.update();
       if (state.isConnected) {
-        try { await invoke('set_sample_rate', { rate: state.settings.sampleRate }); } catch (err) { console.error('Failed to set sample rate:', err); }
+        try {
+          await invoke('set_sample_rate', { rate: state.settings.sampleRate });
+        } catch (err) {
+          console.error('Failed to set sample rate:', err);
+        }
       }
       debouncedSaveSettings();
     });
@@ -336,7 +378,12 @@ function setupControls() {
   /** @param {string} id @param {(e: Event) => void} handler */
   const btn = (id, handler) => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); handler(e); });
+    if (el)
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handler(e);
+      });
   };
 
   btn('btn-connect', () => connectDevice());
@@ -375,7 +422,9 @@ function setupControls() {
   }
   if (downsampleLevel) {
     downsampleLevel.addEventListener('change', (e) => {
-      state.settings.downsampleLevel = /** @type {'low'|'medium'|'high'} */ (/** @type {HTMLSelectElement} */ (e.target).value);
+      state.settings.downsampleLevel = /** @type {'low'|'medium'|'high'} */ (
+        /** @type {HTMLSelectElement} */ (e.target).value
+      );
       rebuildRenderSeries();
       rebuildNavigatorSeries();
       if (state.mainChart) state.mainChart.update('none');
@@ -420,7 +469,10 @@ function setupControls() {
     });
 
     document.addEventListener('click', (e) => {
-      if (!exportBtn.contains(/** @type {Node} */ (e.target)) && !exportDropdown.contains(/** @type {Node} */ (e.target))) {
+      if (
+        !exportBtn.contains(/** @type {Node} */ (e.target)) &&
+        !exportDropdown.contains(/** @type {Node} */ (e.target))
+      ) {
         toggleDropdown(false);
       }
     });
@@ -428,8 +480,16 @@ function setupControls() {
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
 
-    if (exportNoTemp) exportNoTemp.addEventListener('click', () => { toggleDropdown(false); exportCSV(false); });
-    if (exportWithTemp) exportWithTemp.addEventListener('click', () => { toggleDropdown(false); exportCSV(true); });
+    if (exportNoTemp)
+      exportNoTemp.addEventListener('click', () => {
+        toggleDropdown(false);
+        exportCSV(false);
+      });
+    if (exportWithTemp)
+      exportWithTemp.addEventListener('click', () => {
+        toggleDropdown(false);
+        exportCSV(true);
+      });
   }
 
   const importBtn = document.getElementById('btn-import');
@@ -460,7 +520,7 @@ function setupControls() {
   const tempPortEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   if (tempPortEl) {
     tempPortEl.addEventListener('change', (e) => {
-      state.settings.tempPort = parseInt(/** @type {HTMLInputElement} */ (e.target).value) || 1573;
+      state.settings.tempPort = Number.parseInt(/** @type {HTMLInputElement} */ (e.target).value, 10) || 1573;
       debouncedSaveSettings();
     });
   }
@@ -492,7 +552,9 @@ function setupControls() {
 
   if (apBasis) {
     apBasis.addEventListener('change', (e) => {
-      state.autoPauseSettings.basis = /** @type {'none'|'voltage'|'current'|'power'} */ (/** @type {HTMLSelectElement} */ (e.target).value);
+      state.autoPauseSettings.basis = /** @type {'none'|'voltage'|'current'|'power'} */ (
+        /** @type {HTMLSelectElement} */ (e.target).value
+      );
       state.autoPauseSettings.triggerStartTime = null;
       updateApUnit();
       debouncedSaveSettings();

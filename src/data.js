@@ -3,10 +3,10 @@
  * @file 数据入库、统计计算、UI 显示更新、录制控制、图表/统计重置。
  */
 
-import { state, DOWNSAMPLE_CONFIG } from './state.js';
 import { scheduleChartUpdate } from './chart.js';
-import { formatRelativeHMS } from './utils.js';
+import { DOWNSAMPLE_CONFIG, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { formatRelativeHMS } from './utils.js';
 
 // ─── Data ingestion ──────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ export function addDataPoint(data) {
   // 录制数据
   const recordStatusEl = document.getElementById('record-status');
   if (state.isRecording && recordStatusEl && recordStatusEl.textContent === '记录中...') {
-    const relSec = state.recordingStartTime ? ((now.getTime() - state.recordingStartTime) / 1000) : 0;
+    const relSec = state.recordingStartTime ? (now.getTime() - state.recordingStartTime) / 1000 : 0;
     const rel = formatRelativeHMS(relSec);
     state.recordedData.push({
       timestamp: rel,
@@ -146,16 +146,16 @@ export function updateChartRange() {
     return;
   }
 
-  let startIndex = Math.floor(totalPoints * state.settings.rangeStart / 1000);
-  let endIndex = Math.floor(totalPoints * state.settings.rangeEnd / 1000);
+  let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
+  let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
 
   if (startIndex < 0) startIndex = 0;
   if (endIndex >= totalPoints) endIndex = totalPoints - 1;
   if (startIndex > endIndex) startIndex = endIndex;
 
   const baselineMs = state.chartData.timestamps[0];
-  const startSeconds = baselineMs ? ((state.chartData.timestamps[startIndex] - baselineMs) / 1000) : 0;
-  let endSeconds = baselineMs ? ((state.chartData.timestamps[endIndex] - baselineMs) / 1000) : 0;
+  const startSeconds = baselineMs ? (state.chartData.timestamps[startIndex] - baselineMs) / 1000 : 0;
+  let endSeconds = baselineMs ? (state.chartData.timestamps[endIndex] - baselineMs) / 1000 : 0;
 
   // 拖到尾部时使用渲染序列末尾坐标
   const tailSeries = state.renderSeries.voltage?.length ? state.renderSeries.voltage : state.chartSeries.voltage;
@@ -232,8 +232,8 @@ export function getVisibleDataRange() {
   const totalPoints = state.chartData.timestamps.length;
   if (totalPoints === 0) return { startIndex: 0, endIndex: 0 };
 
-  let startIndex = Math.floor(totalPoints * state.settings.rangeStart / 1000);
-  let endIndex = Math.floor(totalPoints * state.settings.rangeEnd / 1000);
+  let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
+  let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
 
   if (startIndex < 0) startIndex = 0;
   if (endIndex >= totalPoints) endIndex = totalPoints - 1;
@@ -245,20 +245,26 @@ export function getVisibleDataRange() {
 /** 更新统计显示面板（支持范围模式）。 */
 export function updateStatsDisplay() {
   let displayStats = state.stats;
-  let powerAvg = state.stats.power.count > 0 ? (state.stats.power.sum / state.stats.power.count) : null;
-  let tempAvg = state.stats.temp.count > 0 ? (state.stats.temp.sum / state.stats.temp.count) : null;
+  let powerAvg = state.stats.power.count > 0 ? state.stats.power.sum / state.stats.power.count : null;
+  let tempAvg = state.stats.temp.count > 0 ? state.stats.temp.sum / state.stats.temp.count : null;
   let displayPowerAvg = powerAvg;
   let displayTempAvg = tempAvg;
 
   if (state.settings.statsRange && state.chartData.timestamps.length > 0) {
     const { startIndex, endIndex } = getVisibleDataRange();
 
-    let minV = Infinity, maxV = -Infinity;
-    let minC = Infinity, maxC = -Infinity;
-    let minP = Infinity, maxP = -Infinity;
-    let minT = Infinity, maxT = -Infinity;
-    let sumP = 0, countP = 0;
-    let sumT = 0, countT = 0;
+    let minV = Infinity,
+      maxV = -Infinity;
+    let minC = Infinity,
+      maxC = -Infinity;
+    let minP = Infinity,
+      maxP = -Infinity;
+    let minT = Infinity,
+      maxT = -Infinity;
+    let sumP = 0,
+      countP = 0;
+    let sumT = 0,
+      countT = 0;
 
     for (let i = startIndex; i <= endIndex; i++) {
       const v = state.chartData.voltage[i];
@@ -276,7 +282,10 @@ export function updateStatsDisplay() {
       countP += 1;
       if (t !== 0 && t < minT) minT = t;
       if (t !== 0 && t > maxT) maxT = t;
-      if (t !== 0) { sumT += t; countT += 1; }
+      if (t !== 0) {
+        sumT += t;
+        countT += 1;
+      }
     }
 
     displayStats = {
@@ -286,8 +295,8 @@ export function updateStatsDisplay() {
       temp: { min: minT, max: maxT, sum: 0, count: 0 },
     };
 
-    powerAvg = countP > 0 ? (sumP / countP) : null;
-    tempAvg = countT > 0 ? (sumT / countT) : null;
+    powerAvg = countP > 0 ? sumP / countP : null;
+    tempAvg = countT > 0 ? sumT / countT : null;
     displayPowerAvg = powerAvg;
     displayTempAvg = tempAvg;
   }

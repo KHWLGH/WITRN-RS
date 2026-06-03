@@ -3,8 +3,8 @@
  * @file HID 设备枚举、连接、断开。
  */
 
-import { state } from './state.js';
 import { stopRecording } from './data.js';
+import { state } from './state.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -61,7 +61,7 @@ export function onDeviceSelect() {
   const select = /** @type {HTMLSelectElement} */ (document.getElementById('device-select'));
   const selectedOption = select.options[select.selectedIndex];
 
-  if (selectedOption && selectedOption.value) {
+  if (selectedOption?.value) {
     state.selectedDevicePath = selectedOption.value;
     const vid = selectedOption.dataset.vid || '0';
     const pid = selectedOption.dataset.pid || '0';
@@ -94,10 +94,10 @@ export async function connectDevice() {
     } else {
       const vidStr = /** @type {HTMLInputElement} */ (document.getElementById('device-vid')).value;
       const pidStr = /** @type {HTMLInputElement} */ (document.getElementById('device-pid')).value;
-      const vid = parseInt(vidStr);
-      const pid = parseInt(pidStr);
+      const vid = Number(vidStr.trim());
+      const pid = Number(pidStr.trim());
 
-      if (isNaN(vid) || isNaN(pid)) {
+      if (Number.isNaN(vid) || Number.isNaN(pid)) {
         alert('请先选择一个设备或输入有效的VID/PID');
         return;
       }
@@ -113,8 +113,7 @@ export async function connectDevice() {
         `0x${di.vid.toString(16).toUpperCase().padStart(4, '0')}`;
       /** @type {HTMLInputElement} */ (document.getElementById('device-pid')).value =
         `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`;
-      /** @type {HTMLInputElement} */ (document.getElementById('device-sn')).value =
-        di.serial_number || '--';
+      /** @type {HTMLInputElement} */ (document.getElementById('device-sn')).value = di.serial_number || '--';
       const nameEl = document.getElementById('device-name-text');
       if (nameEl) nameEl.textContent = di.model_name;
     }

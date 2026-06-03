@@ -1,7 +1,7 @@
 /* WITRN-RS - Dark Theme */
 @font-face {
-  font-family: 'Noto Sans Mono';
-  src: url('assets/fonts/NotoSansMono-Regular.ttf') format('truetype');
+  font-family: "Noto Sans Mono";
+  src: url("assets/fonts/NotoSansMono-Regular.ttf") format("truetype");
   font-weight: 300 700;
   font-style: normal;
   font-display: swap;
@@ -14,31 +14,31 @@
 
 :root {
   /* VS2022 Dark Theme Colors */
-  --bg-primary: #1E1E1E;
+  --bg-primary: #1e1e1e;
   --bg-secondary: #252526;
-  --bg-tertiary: #2D2D30;
+  --bg-tertiary: #2d2d30;
   --bg-card: #252526;
-  --bg-hover: #3E3E42;
-  --text-primary: #D4D4D4;
-  --text-secondary: #CCCCCC;
+  --bg-hover: #3e3e42;
+  --text-primary: #d4d4d4;
+  --text-secondary: #cccccc;
   --text-muted: #858585;
-  --accent-blue: #007ACC;
-  --accent-green: #4EC9B0; /* VS Code Green-ish */
-  --accent-orange: #CE9178;
-  --accent-red: #F44747;
-  --accent-purple: #C586C0;
-  
+  --accent-blue: #007acc;
+  --accent-green: #4ec9b0; /* VS Code Green-ish */
+  --accent-orange: #ce9178;
+  --accent-red: #f44747;
+  --accent-purple: #c586c0;
+
   /* Keep these for chart colors, maybe adjust slightly */
-  --voltage-color: #569CD6; /* VS Blue */
-  --current-color: #4EC9B0; /* VS Green */
-  --power-color: #DCDCAA; /* VS Yellow/Orange */
-  --temp-color: #F44747; /* Temperature Red */
-  
-  --border-color: #3F3F46;
+  --voltage-color: #569cd6; /* VS Blue */
+  --current-color: #4ec9b0; /* VS Green */
+  --power-color: #dcdcaa; /* VS Yellow/Orange */
+  --temp-color: #f44747; /* Temperature Red */
+
+  --border-color: #3f3f46;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  
-  --font-ui: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'Noto Sans Mono', 'Consolas', 'Monaco', monospace;
+
+  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Noto Sans Mono", "Consolas", "Monaco", monospace;
 
   font-family: var(--font-ui);
   font-size: 13px; /* VS uses slightly smaller font usually */
@@ -205,17 +205,25 @@ body {
   background: var(--bg-primary);
 }
 
-.ribbon-checkbox .checkmark.voltage { border-color: var(--voltage-color); }
-.ribbon-checkbox .checkmark.current { border-color: var(--current-color); }
-.ribbon-checkbox .checkmark.power { border-color: var(--power-color); }
-.ribbon-checkbox .checkmark.temp { border-color: var(--temp-color); }
+.ribbon-checkbox .checkmark.voltage {
+  border-color: var(--voltage-color);
+}
+.ribbon-checkbox .checkmark.current {
+  border-color: var(--current-color);
+}
+.ribbon-checkbox .checkmark.power {
+  border-color: var(--power-color);
+}
+.ribbon-checkbox .checkmark.temp {
+  border-color: var(--temp-color);
+}
 
 .ribbon-checkbox input:checked + .checkmark {
   background: currentColor;
 }
 
 .ribbon-checkbox input:checked + .checkmark::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 4px;
   top: 1px;
@@ -226,10 +234,18 @@ body {
   transform: rotate(45deg);
 }
 
-.ribbon-checkbox input:checked + .checkmark.voltage { background: var(--voltage-color); }
-.ribbon-checkbox input:checked + .checkmark.current { background: var(--current-color); }
-.ribbon-checkbox input:checked + .checkmark.power { background: var(--power-color); }
-.ribbon-checkbox input:checked + .checkmark.temp { background: var(--temp-color); }
+.ribbon-checkbox input:checked + .checkmark.voltage {
+  background: var(--voltage-color);
+}
+.ribbon-checkbox input:checked + .checkmark.current {
+  background: var(--current-color);
+}
+.ribbon-checkbox input:checked + .checkmark.power {
+  background: var(--power-color);
+}
+.ribbon-checkbox input:checked + .checkmark.temp {
+  background: var(--temp-color);
+}
 
 .ribbon-select {
   padding: 4px 8px;
@@ -385,14 +401,14 @@ body {
 }
 
 /* Windows 10 Style Spin Buttons */
-input[type=number]::-webkit-inner-spin-button, 
-input[type=number]::-webkit-outer-spin-button { 
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
   opacity: 1;
   cursor: pointer;
   margin-left: 4px;
   height: 100%;
   /* Make them slightly larger/wider if possible */
-  transform: scale(1.1); 
+  transform: scale(1.1);
   transform-origin: right center;
 }
 
@@ -494,13 +510,13 @@ input[type=number]::-webkit-outer-spin-button {
   background: var(--text-primary);
   border: 1px solid var(--bg-card);
   border-radius: 3px;
-  box-shadow: 0 0 6px rgba(0,0,0,0.6);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
   cursor: ew-resize;
   z-index: 4;
 }
 
 .range-handle::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 15%;
   bottom: 15%;
@@ -624,7 +640,7 @@ input[type=number]::-webkit-outer-spin-button {
 }
 
 .realtime-card::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: 0;
@@ -634,11 +650,21 @@ input[type=number]::-webkit-outer-spin-button {
   background: transparent;
 }
 
-.realtime-card.voltage::before { background: var(--voltage-color); }
-.realtime-card.current::before { background: var(--current-color); }
-.realtime-card.power::before { background: var(--power-color); }
-.realtime-card.temperature::before { background: var(--temp-color); }
-.realtime-card.energy::before { background: var(--accent-purple); }
+.realtime-card.voltage::before {
+  background: var(--voltage-color);
+}
+.realtime-card.current::before {
+  background: var(--current-color);
+}
+.realtime-card.power::before {
+  background: var(--power-color);
+}
+.realtime-card.temperature::before {
+  background: var(--temp-color);
+}
+.realtime-card.energy::before {
+  background: var(--accent-purple);
+}
 
 .realtime-card:hover {
   background: var(--bg-hover);
@@ -672,11 +698,21 @@ input[type=number]::-webkit-outer-spin-button {
   white-space: nowrap;
 }
 
-.realtime-card.voltage .realtime-value { color: var(--voltage-color); }
-.realtime-card.current .realtime-value { color: var(--current-color); }
-.realtime-card.power .realtime-value { color: var(--power-color); }
-.realtime-card.temperature .realtime-value { color: var(--temp-color); }
-.realtime-card.energy .realtime-value { color: var(--accent-purple); }
+.realtime-card.voltage .realtime-value {
+  color: var(--voltage-color);
+}
+.realtime-card.current .realtime-value {
+  color: var(--current-color);
+}
+.realtime-card.power .realtime-value {
+  color: var(--power-color);
+}
+.realtime-card.temperature .realtime-value {
+  color: var(--temp-color);
+}
+.realtime-card.energy .realtime-value {
+  color: var(--accent-purple);
+}
 
 .realtime-unit {
   font-size: 14px;
@@ -706,8 +742,12 @@ input[type=number]::-webkit-outer-spin-button {
   color: var(--text-muted);
 }
 
-.realtime-card.power .realtime-average-value { color: var(--power-color); }
-.realtime-card.temperature .realtime-average-value { color: var(--temp-color); }
+.realtime-card.power .realtime-average-value {
+  color: var(--power-color);
+}
+.realtime-card.temperature .realtime-average-value {
+  color: var(--temp-color);
+}
 
 .realtime-stats {
   display: flex;
@@ -797,7 +837,7 @@ input[type=number]::-webkit-outer-spin-button {
   .content-row {
     flex-direction: column;
   }
-  
+
   .realtime-panel {
     width: 100%;
     flex-direction: row;
@@ -805,7 +845,7 @@ input[type=number]::-webkit-outer-spin-button {
     gap: 8px;
     overflow-x: auto;
   }
-  
+
   .realtime-card {
     flex: 1 1 140px;
     min-width: 140px;
@@ -813,11 +853,19 @@ input[type=number]::-webkit-outer-spin-button {
     padding: 8px 10px;
   }
 
-  .realtime-value { font-size: 20px; }
-  .realtime-average { font-size: 10px; }
-  .realtime-stats { font-size: 10px; }
-  .realtime-stats span { width: 100%; }
-  
+  .realtime-value {
+    font-size: 20px;
+  }
+  .realtime-average {
+    font-size: 10px;
+  }
+  .realtime-stats {
+    font-size: 10px;
+  }
+  .realtime-stats span {
+    width: 100%;
+  }
+
   .ribbon-group-content {
     flex-wrap: wrap;
   }
@@ -910,8 +958,12 @@ input[type=number]::-webkit-outer-spin-button {
 }
 
 /* Temperature Card Styles */
-.realtime-card.temperature::before { background: var(--temp-color); }
-.realtime-card.temperature .realtime-value { color: var(--temp-color); }
+.realtime-card.temperature::before {
+  background: var(--temp-color);
+}
+.realtime-card.temperature .realtime-value {
+  color: var(--temp-color);
+}
 
 /* Dropdown Menu Styles */
 .dropdown-container {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-03
+
+### Changed
+- **代码规范重构**：升级 Biome.js 至 2.4.4，全量优化代码规范及导入排序，修复隐患部分（完善 `parseInt` 进制参数、`try/catch` 流程等）。
+- **退出交互优化**：主窗口关闭流程升级，优先尝试调用框架标准的 `window.close()`，提升底层资源释放与多环境下的稳定性。
+
 ## [0.1.3] - 2026-03-25
 
 ### Changed
