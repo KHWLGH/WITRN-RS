@@ -3,11 +3,18 @@
  * @file CSV 导入 / 导出。
  */
 
-import { rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
-import { clearAndResetStats, updateChartRange, updateEnergyDisplay, updateStats, updateStatsDisplay } from './data.js';
-import { DOWNSAMPLE_CONFIG, state } from './state.js';
+import { syncChartSeries, updateCharts } from './chart.js';
+import {
+  clearAndResetStats,
+  stopRecording,
+  updateChartRange,
+  updateEnergyDisplay,
+  updateStats,
+  updateStatsDisplay,
+} from './data.js';
+import { buildExportRows, calculateEnergy, parseRelativeTime } from './measurement.js';
+import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
-import { formatRelativeHMS } from './utils.js';
 
 const { save, open } = window.__TAURI__.dialog;
 const { writeTextFile, readTextFile } = window.__TAURI__.fs;
@@ -19,22 +26,7 @@ const { writeTextFile, readTextFile } = window.__TAURI__.fs;
  * @param {boolean} [withTemp=false] - 是否包含温度列
  */
 export async function exportCSV(withTemp = false) {
-  const data =
-    state.recordedData.length > 0
-      ? state.recordedData
-      : state.chartData.timestamps.map((ts, i) => {
-          const baseline = state.chartData.timestamps[0] || ts || 0;
-          const relSec = baseline ? (ts - baseline) / 1000 : 0;
-          const rel = formatRelativeHMS(relSec);
-          return {
-            timestamp: rel,
-            voltage: state.chartData.voltage[i],
-            current: state.chartData.current[i],
-            power: state.chartData.power[i],
-            temp: state.chartData.temp[i] || 0,
-            relSeconds: relSec,
-          };
-        });
+  const data = buildExportRows(state.chartData, state.chartSeries);
 
   if (data.length === 0) {
     alert('没有数据可导出');
@@ -57,10 +49,7 @@ export async function exportCSV(withTemp = false) {
   // Metadata
   const sum = data.length;
   const sampTime = state.settings.sampleRate;
-  const startTime =
-    state.recordedData.length > 0 && state.lastRecordingStartTime
-      ? state.lastRecordingStartTime
-      : state.chartData.timestamps[0] || Date.now();
+  const startTime = state.lastRecordingStartTime || state.chartData.timestamps[0] || Date.now();
 
   const d = new Date(startTime);
   /** @param {number} n @returns {string} */
@@ -87,7 +76,7 @@ export async function exportCSV(withTemp = false) {
     const c = Number(row.current).toFixed(4);
     const p = Number(row.power).toFixed(4);
     if (withTemp) {
-      const t = Number(row.temp || 0).toFixed(1);
+      const t = Number.isFinite(row.temp) ? row.temp.toFixed(1) : '';
       csv += `${timeStr},${v},${c},${p},${t},\n`;
     } else {
       csv += `${timeStr},${v},${c},${p},\n`;
@@ -117,12 +106,16 @@ const { ask } = window.__TAURI__.dialog;
 /** 从 CSV 文件导入数据。 */
 export async function importCSV() {
   try {
-    if (state.chartData.timestamps.length > 0) {
-      const confirmed = await ask('当前已有数据，导入CSV将清除现有记录。\n确定要继续吗？', {
+    if (state.isRecording || state.chartData.timestamps.length > 0) {
+      const message = state.isRecording
+        ? '当前正在录制，导入 CSV 将停止录制并清除现有记录。\n确定要继续吗？'
+        : '当前已有数据，导入 CSV 将清除现有记录。\n确定要继续吗？';
+      const confirmed = await ask(message, {
         title: '确认导入',
-        type: 'warning',
+        kind: 'warning',
       });
       if (!confirmed) return;
+      if (state.isRecording) stopRecording();
     }
 
     const selected = await open({
@@ -147,13 +140,12 @@ export async function importCSV() {
       throw new Error('Invalid CSV format: Header not found');
     }
 
-    /** @type {number[]} */ const newSeconds = [];
-    /** @type {number[]} */ const newTimestamps = [];
-    /** @type {number[]} */ const newVoltage = [];
-    /** @type {number[]} */ const newCurrent = [];
-    /** @type {number[]} */ const newPower = [];
-    /** @type {number[]} */ const newTemp = [];
-    /** @type {import('./state.js').RecordedRow[]} */ const newRecordedData = [];
+    /** @type {number[]} */ let newSeconds = [];
+    /** @type {number[]} */ let newTimestamps = [];
+    /** @type {number[]} */ let newVoltage = [];
+    /** @type {number[]} */ let newCurrent = [];
+    /** @type {number[]} */ let newPower = [];
+    /** @type {number[]} */ let newTemp = [];
 
     let newSampleRate = state.settings.sampleRate;
     let newStartTime = Date.now();
@@ -164,7 +156,10 @@ export async function importCSV() {
     const sampTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('SampTime(ms),'));
     if (sampTimeLine) {
       const rate = Number.parseInt(sampTimeLine.split(',')[1], 10);
-      if (!Number.isNaN(rate)) newSampleRate = rate;
+      if (Number.isFinite(rate)) {
+        // Imported metadata is untrusted; keep it within the same range as the Rust command/settings.
+        newSampleRate = Math.min(60_000, Math.max(10, rate));
+      }
     }
 
     const dateTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('DateTime,'));
@@ -175,6 +170,9 @@ export async function importCSV() {
       if (!Number.isNaN(parsedTime)) newStartTime = parsedTime;
     }
 
+    // 时间列格式 "D.hh:mm:ss.ms"（官方软件带天数前缀）或 "hh:mm:ss.ms"（本应用导出）。
+    // 注意不能用 split(':') + parseInt 解析首段——"0.01" 会被 parseInt 截成 0，丢失小时字段，
+    // 导致 x 非单调（uPlot 依赖有序 x 做二分切片，乱序会造成空白 / 无法显示）。
     for (let i = dataStartIndex; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -182,43 +180,48 @@ export async function importCSV() {
       const parts = line.split(',');
       if (parts.length < 4) continue;
 
-      const timeStr = parts[0].replace(/="/g, '').replace(/"/g, '');
+      const timeStr = parts[0].replace(/[="]/g, '').trim();
       const voltage = parseFloat(parts[1]);
       const current = Math.abs(parseFloat(parts[2]));
       const power = parseFloat(parts[3]);
-      const temp = hasTemp && parts.length > 4 ? parseFloat(parts[4]) || 0 : 0;
+      const parsedTemp = hasTemp && parts.length > 4 ? parseFloat(parts[4]) : Number.NaN;
+      const temp = Number.isFinite(parsedTemp) ? parsedTemp : Number.NaN;
 
       if (Number.isNaN(voltage) || Number.isNaN(current) || Number.isNaN(power)) continue;
 
-      const timeParts = timeStr.split(':');
-      let seconds = 0;
-      if (timeParts.length === 3) {
-        seconds += Number.parseInt(timeParts[0], 10) * 3600;
-        seconds += Number.parseInt(timeParts[1], 10) * 60;
-        seconds += parseFloat(timeParts[2]);
-      }
-
-      const timestamp = newStartTime + seconds * 1000;
+      const seconds = parseRelativeTime(timeStr);
+      if (seconds === null) continue;
 
       newSeconds.push(seconds);
-      newTimestamps.push(timestamp);
+      newTimestamps.push(newStartTime + seconds * 1000);
       newVoltage.push(voltage);
       newCurrent.push(current);
       newPower.push(power);
       newTemp.push(temp);
-
-      newRecordedData.push({
-        timestamp: formatRelativeHMS(seconds),
-        voltage,
-        current,
-        power,
-        temp,
-        relSeconds: seconds,
-      });
     }
 
     if (newTimestamps.length === 0) {
       throw new Error('No valid data found in CSV');
+    }
+
+    // uPlot 要求 x 非降序（二分查找 / 视窗切片依赖有序数据）；文件行乱序时按时间重排
+    let isSorted = true;
+    for (let i = 1; i < newSeconds.length; i++) {
+      if (newSeconds[i] < newSeconds[i - 1]) {
+        isSorted = false;
+        break;
+      }
+    }
+    if (!isSorted) {
+      const order = newSeconds.map((_, i) => i).sort((a, b) => newSeconds[a] - newSeconds[b]);
+      /** @param {number[]} arr @returns {number[]} */
+      const reorder = (arr) => order.map((i) => arr[i]);
+      newSeconds = reorder(newSeconds);
+      newTimestamps = reorder(newTimestamps);
+      newVoltage = reorder(newVoltage);
+      newCurrent = reorder(newCurrent);
+      newPower = reorder(newPower);
+      newTemp = reorder(newTemp);
     }
 
     // Commit changes
@@ -234,37 +237,34 @@ export async function importCSV() {
     state.chartData.current = newCurrent;
     state.chartData.power = newPower;
     state.chartData.temp = newTemp;
-    state.recordedData = newRecordedData;
+    // 导出始终从 chartData/chartSeries 这一份数据源按需派生。
 
-    state.chartSeries.voltage = newVoltage.map((v, i) => ({ x: newSeconds[i], y: v }));
-    state.chartSeries.current = newCurrent.map((v, i) => ({ x: newSeconds[i], y: v }));
-    state.chartSeries.power = newPower.map((v, i) => ({ x: newSeconds[i], y: v }));
-    state.chartSeries.temp = newTemp.map((v, i) => ({ x: newSeconds[i], y: v }));
+    // uPlot 列式序列 — 数值数组需复制，避免与 chartData 共享引用导致后续双重追加
+    state.chartSeries = {
+      x: newSeconds,
+      voltage: newVoltage.slice(),
+      current: newCurrent.slice(),
+      power: newPower.slice(),
+      temp: newTemp.slice(),
+    };
 
     // Re-calculate stats
     for (let i = 0; i < newVoltage.length; i++) {
       updateStats('voltage', newVoltage[i]);
       updateStats('current', newCurrent[i]);
       updateStats('power', newPower[i]);
-      if (newTemp[i] !== 0) {
+      if (Number.isFinite(newTemp[i])) {
         updateStats('temp', newTemp[i]);
       }
     }
 
     // Calculate energy
-    state.energy.wh = 0;
-    state.energy.mah = 0;
+    const importedEnergy = calculateEnergy(newTimestamps, newCurrent, newPower);
+    state.energy.wh = importedEnergy.wh;
+    state.energy.mah = importedEnergy.mah;
     state.energy.lastTimestamp = null;
 
-    for (let i = 1; i < newTimestamps.length; i++) {
-      const dt = (newTimestamps[i] - newTimestamps[i - 1]) / 3600000;
-      const currentAbs = Math.abs(newCurrent[i]);
-      const powerAbs = Math.abs(newPower[i]);
-      state.energy.wh += powerAbs * dt;
-      state.energy.mah += currentAbs * 1000 * dt;
-    }
-
-    const importedHasTemp = newTemp.some((t) => t !== 0);
+    const importedHasTemp = newTemp.some((t) => Number.isFinite(t));
     if (importedHasTemp) {
       state.hasTempData = true;
     }
@@ -275,36 +275,10 @@ export async function importCSV() {
     const dataCountEl = document.getElementById('data-count');
     if (dataCountEl) dataCountEl.textContent = String(state.chartData.timestamps.length);
 
-    // Rebuild downsampled data
-    DOWNSAMPLE_CONFIG.lastRebuildCount = 0;
-    DOWNSAMPLE_CONFIG.navLastRebuildCount = 0;
-    rebuildRenderSeries();
-    rebuildNavigatorSeries();
-
-    if (state.mainChart) {
-      state.mainChart.data.datasets[0].data = state.renderSeries.voltage;
-      state.mainChart.data.datasets[1].data = state.renderSeries.current;
-      state.mainChart.data.datasets[2].data = state.renderSeries.power;
-      state.mainChart.data.datasets[3].data = state.renderSeries.temp;
-
-      updateChartRange();
-      state.mainChart.update();
-    }
-
-    if (state.navigatorChart) {
-      const lastX = state.chartSeries.power.length
-        ? (state.chartSeries.power[state.chartSeries.power.length - 1]?.x ?? 0)
-        : 0;
-
-      if (state.navigatorChart.options?.scales?.x) {
-        const navPad = Math.max(lastX * 0.005, 0.05);
-        state.navigatorChart.options.scales.x.min = -navPad;
-        state.navigatorChart.options.scales.x.max = lastX + navPad;
-      }
-
-      state.navigatorChart.data.datasets[0].data = state.navigatorSeries.power;
-      state.navigatorChart.update();
-    }
+    // 序列数组已整体替换，重新绑定数据集并刷新（导航图范围由 uPlot range 函数自动计算）
+    syncChartSeries();
+    updateChartRange();
+    updateCharts();
 
     updateTempUIVisibility();
 

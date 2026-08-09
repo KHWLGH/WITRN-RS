@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native Tauri and HID dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          libxdo-dev libssl-dev libudev-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JavaScript tooling
+        run: npm ci
+
+      - name: Test JavaScript pure logic
+        run: npm test
+
+      - name: Type check JavaScript
+        run: npm run typecheck
+
+      - name: Lint and format frontend files with Biome
+        run: npm run lint
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint Rust backend
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Check Rust backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml

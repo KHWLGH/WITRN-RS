@@ -806,11 +806,91 @@ input[type="number"]::-webkit-outer-spin-button {
   border: 1px solid var(--border-color);
   position: relative;
   min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 #main-chart {
-  width: 100% !important;
-  height: 100% !important;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+
+/* ── Chart legend (top, only visible series) ── */
+.chart-legend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  min-height: 16px;
+  font-size: 12px;
+  color: #a0a0b0;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.chart-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* ── Hover tooltip ── */
+.chart-tooltip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: rgba(30, 30, 50, 0.95);
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #a0a0b0;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.chart-tooltip-title {
+  color: #e8e8f0;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.chart-tooltip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+/* ── uPlot overrides ── */
+.uplot {
+  font-family: var(--font-ui);
+}
+
+.u-cursor-x {
+  border-right: 1px dashed rgba(154, 154, 184, 0.45);
 }
 
 /* Scrollbar Styles */
@@ -994,6 +1074,11 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .dropdown-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
   padding: 8px 12px;
   font-size: 12px;
   color: var(--text-primary);

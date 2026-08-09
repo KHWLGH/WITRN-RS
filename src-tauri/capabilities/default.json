@@ -3,13 +3,5 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "dialog:default",
-    "fs:default",
-    "fs:allow-write-text-file",
-    "fs:allow-home-write-recursive",
-    "store:default"
-  ]
+  "permissions": ["core:default", "dialog:default", "fs:default", "fs:allow-write-text-file", "store:default"]
 }

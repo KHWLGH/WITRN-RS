@@ -3,11 +3,12 @@
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
 
-import { initChart, rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
+import { initChart, scheduleChartUpdate, setSeriesFill, setSeriesVisible, updateCharts } from './chart.js';
 import { exportCSV, importCSV } from './csv.js';
 import {
   addDataPoint,
   clearAndResetStats,
+  scheduleStatsUpdate,
   startRecording,
   stopRecording,
   updateChartRange,
@@ -18,7 +19,6 @@ import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } fr
 import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
 import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
-import { hexToRgba } from './utils.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -75,7 +75,7 @@ async function setupCloseConfirm() {
       let confirmed = false;
       try {
         // Wait for explicit user intent; never auto-confirm on timeout.
-        confirmed = /** @type {boolean} */ (await ask('确定要退出吗？', { title: '确认退出', type: 'warning' }));
+        confirmed = /** @type {boolean} */ (await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' }));
       } catch {
         confirmed = false;
       }
@@ -147,24 +147,13 @@ function setupChartToggles() {
     if (!checkbox) return;
     const key = `show${field.charAt(0).toUpperCase() + field.slice(1)}`;
 
-    // @ts-expect-error — dynamic key
     state.settings[key] = checkbox.checked;
 
-    if (state.mainChart && typeof state.mainChart.setDatasetVisibility === 'function') {
-      const shouldShow =
-        field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
-      state.mainChart.setDatasetVisibility(index, shouldShow);
-    } else if (state.mainChart?.data?.datasets[index]) {
-      state.mainChart.data.datasets[index].hidden = !checkbox.checked;
-    }
-    if (state.mainChart?.options?.scales) {
-      const shouldShow =
-        field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
-      state.mainChart.options.scales[`y-${field}`].display = shouldShow;
-    }
+    const effectiveShow =
+      field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
+    setSeriesVisible(index, effectiveShow);
 
     checkbox.addEventListener('change', () => {
-      // @ts-expect-error — dynamic key
       state.settings[key] = checkbox.checked;
 
       if (field === 'temp') {
@@ -173,15 +162,7 @@ function setupChartToggles() {
         return;
       }
 
-      if (state.mainChart && typeof state.mainChart.setDatasetVisibility === 'function') {
-        state.mainChart.setDatasetVisibility(index, checkbox.checked);
-      } else if (state.mainChart?.data?.datasets[index]) {
-        state.mainChart.data.datasets[index].hidden = !checkbox.checked;
-      }
-      if (state.mainChart?.options?.scales) {
-        state.mainChart.options.scales[`y-${field}`].display = checkbox.checked;
-      }
-      state.mainChart.update();
+      setSeriesVisible(index, checkbox.checked);
       debouncedSaveSettings();
     });
   });
@@ -205,24 +186,12 @@ function setupChartToggles() {
         if (val < 0) val = 0;
         if (val > 100) val = 100;
 
-        const fill = val > 0;
-        // @ts-expect-error — dynamic key
         state.settings[`opacity${ctrl.key}`] = val;
-        // @ts-expect-error — dynamic key
-        state.settings[`fill${ctrl.key}`] = fill;
-
-        if (state.mainChart?.data?.datasets[index]) {
-          state.mainChart.data.datasets[index].fill = fill;
-          const hex = state.mainChart.data.datasets[index].borderColor;
-          state.mainChart.data.datasets[index].backgroundColor = hexToRgba(hex, val);
-          state.mainChart.update('none');
-        }
+        setSeriesFill(index, val);
         debouncedSaveSettings();
       });
     }
   });
-
-  if (state.mainChart) state.mainChart.update();
 }
 
 // ─── Controls ────────────────────────────────────────────────────────────────
@@ -275,8 +244,9 @@ function setupControls() {
 
     updateSliderFill();
     updateChartRange();
-    if (state.settings.statsRange) updateStatsDisplay();
-    state.mainChart.update();
+    // 拖动期间逐事件同步重建大数据量图表会卡顿，统一用 rAF 合并到每帧一次
+    if (state.settings.statsRange) scheduleStatsUpdate();
+    scheduleChartUpdate();
   }
 
   /** @param {'start'|'end'} leader */
@@ -362,7 +332,7 @@ function setupControls() {
     sampleRateEl.addEventListener('change', async (e) => {
       state.settings.sampleRate = Number.parseInt(/** @type {HTMLSelectElement} */ (e.target).value, 10);
       updateChartRange();
-      state.mainChart.update();
+      updateCharts();
       if (state.isConnected) {
         try {
           await invoke('set_sample_rate', { rate: state.settings.sampleRate });
@@ -406,33 +376,6 @@ function setupControls() {
     });
   }
 
-  // Downsample controls
-  const downsampleToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('downsample-toggle'));
-  const downsampleLevel = /** @type {HTMLSelectElement|null} */ (document.getElementById('downsample-level'));
-  if (downsampleToggle) {
-    downsampleToggle.addEventListener('change', (e) => {
-      state.settings.downsampleEnabled = /** @type {HTMLInputElement} */ (e.target).checked;
-      if (downsampleLevel) downsampleLevel.disabled = !state.settings.downsampleEnabled;
-      rebuildRenderSeries();
-      rebuildNavigatorSeries();
-      if (state.mainChart) state.mainChart.update('none');
-      if (state.navigatorChart) state.navigatorChart.update('none');
-      debouncedSaveSettings();
-    });
-  }
-  if (downsampleLevel) {
-    downsampleLevel.addEventListener('change', (e) => {
-      state.settings.downsampleLevel = /** @type {'low'|'medium'|'high'} */ (
-        /** @type {HTMLSelectElement} */ (e.target).value
-      );
-      rebuildRenderSeries();
-      rebuildNavigatorSeries();
-      if (state.mainChart) state.mainChart.update('none');
-      if (state.navigatorChart) state.navigatorChart.update('none');
-      debouncedSaveSettings();
-    });
-  }
-
   // Export dropdown menu
   const exportBtn = document.getElementById('btn-export');
   const exportDropdown = document.getElementById('export-dropdown');
@@ -450,12 +393,15 @@ function setupControls() {
 
     /** @param {boolean} show */
     const toggleDropdown = (show) => {
+      exportBtn.setAttribute('aria-expanded', String(show));
       if (show) {
         exportDropdown.style.position = 'fixed';
         exportDropdown.style.width = 'auto';
         exportDropdown.style.minWidth = '120px';
         exportDropdown.classList.add('show');
         updatePosition();
+        const firstItem = /** @type {HTMLElement|null} */ (exportDropdown.querySelector('[role="menuitem"]'));
+        if (firstItem) firstItem.focus();
       } else {
         exportDropdown.classList.remove('show');
       }
@@ -475,6 +421,31 @@ function setupControls() {
       ) {
         toggleDropdown(false);
       }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && exportDropdown.classList.contains('show')) {
+        toggleDropdown(false);
+        exportBtn.focus();
+      }
+    });
+
+    exportDropdown.addEventListener('keydown', (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      const candidates = /** @type {NodeListOf<HTMLButtonElement>} */ (
+        exportDropdown.querySelectorAll('[role="menuitem"]')
+      );
+      const items = Array.from(candidates).filter((item) => !item.disabled && !item.classList.contains('hidden'));
+      if (items.length === 0) return;
+
+      e.preventDefault();
+      const activeElement = document.activeElement;
+      const current = activeElement instanceof HTMLButtonElement ? items.indexOf(activeElement) : -1;
+      let next = current;
+      if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = items.length - 1;
+      else if (e.key === 'ArrowDown') next = (current + 1 + items.length) % items.length;
+      else next = (current - 1 + items.length) % items.length;
+      items[next].focus();
     });
 
     window.addEventListener('resize', updatePosition);
@@ -496,12 +467,12 @@ function setupControls() {
   if (importBtn) importBtn.addEventListener('click', importCSV);
 
   btn('btn-reset-settings', async () => {
-    const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', type: 'warning' });
+    const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
     if (yes) await resetSettings();
   });
 
   btn('btn-clear-chart', async () => {
-    const yes = await ask('确定要清空图表并重置所有统计数据吗？', { title: '确认重置', type: 'warning' });
+    const yes = await ask('确定要清空图表并重置所有统计数据吗？', { title: '确认重置', kind: 'warning' });
     if (yes) clearAndResetStats();
   });
 
@@ -520,7 +491,14 @@ function setupControls() {
   const tempPortEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   if (tempPortEl) {
     tempPortEl.addEventListener('change', (e) => {
-      state.settings.tempPort = Number.parseInt(/** @type {HTMLInputElement} */ (e.target).value, 10) || 1573;
+      const input = /** @type {HTMLInputElement} */ (e.target);
+      const port = Number.parseInt(input.value, 10);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        input.value = String(state.settings.tempPort);
+        alert('请输入 1 到 65535 之间的有效端口');
+        return;
+      }
+      state.settings.tempPort = port;
       debouncedSaveSettings();
     });
   }
@@ -595,7 +573,7 @@ async function setupEventListener() {
   await listen('device-disconnected', async () => {
     if (state.isConnected) {
       await disconnectDevice();
-      await message('设备连接已断开', { title: '连接断开', type: 'warning' });
+      await message('设备连接已断开', { title: '连接断开', kind: 'warning' });
     }
   });
 
@@ -619,19 +597,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   // 禁用右键菜单
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  console.log('=== DOMContentLoaded START ===');
-
-  // Direct store test
-  try {
-    console.log('Testing store with raw invoke...');
-    const rid = await invoke('plugin:store|load', { path: 'settings.json', options: {} });
-    console.log('Store loaded, rid:', rid);
-    const result = await invoke('plugin:store|get', { rid, key: 'appSettings' });
-    console.log('Raw store get result:', result);
-  } catch (e) {
-    console.error('Raw store test failed:', e);
-  }
-
   await setupCloseConfirm();
   await loadSettings();
   initChart();
@@ -640,12 +605,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Clean recording state on load
   state.isRecording = false;
-  state.recordedData = [];
 
   await setupEventListener();
   await refreshDeviceList();
 
   updateTempUIVisibility();
-
-  console.log('=== DOMContentLoaded END ===');
 });

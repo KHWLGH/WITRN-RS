@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Binary assets must never be normalized as text.
+*.png binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.pdb binary
+*.exe binary
+*.msi binary
+*.dmg binary

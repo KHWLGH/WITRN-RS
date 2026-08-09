@@ -3,8 +3,8 @@
  * @file 数据入库、统计计算、UI 显示更新、录制控制、图表/统计重置。
  */
 
-import { scheduleChartUpdate } from './chart.js';
-import { DOWNSAMPLE_CONFIG, state } from './state.js';
+import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
+import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { formatRelativeHMS } from './utils.js';
 
@@ -19,10 +19,11 @@ export function addDataPoint(data) {
 
   const currentAbs = Math.abs(data.current);
   const powerAbs = Math.abs(data.power);
-  const tempValue = state.currentTemp !== null ? state.currentTemp : 0;
+  const tempValue =
+    typeof state.currentTemp === 'number' && Number.isFinite(state.currentTemp) ? state.currentTemp : Number.NaN;
 
   // 仅录制模式：未录制时只更新实时显示
-  if (state.collectWhenRecordingOnly && !state.isRecording) {
+  if (!state.isRecording) {
     updateRealtimeDisplay({ ...data, current: currentAbs, power: powerAbs, temp: tempValue });
     const el = document.getElementById('data-count');
     if (el) el.textContent = String(state.chartData.timestamps.length);
@@ -30,8 +31,8 @@ export function addDataPoint(data) {
   }
 
   const nowMs = now.getTime();
-  const baselineMs = state.chartData.timestamps.length ? state.chartData.timestamps[0] : nowMs;
-  const relSeconds = (nowMs - baselineMs) / 1000;
+  const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
+  const relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
 
   // 全精度原始数据
   state.chartData.timestamps.push(nowMs);
@@ -40,31 +41,34 @@ export function addDataPoint(data) {
   state.chartData.power.push(powerAbs);
   state.chartData.temp.push(tempValue);
 
-  // x/y 序列
-  state.chartSeries.voltage.push({ x: relSeconds, y: data.voltage });
-  state.chartSeries.current.push({ x: relSeconds, y: currentAbs });
-  state.chartSeries.power.push({ x: relSeconds, y: powerAbs });
-  state.chartSeries.temp.push({ x: relSeconds, y: tempValue });
+  // x/y 序列（uPlot 列式格式，与 chartData 同步追加）
+  state.chartSeries.x.push(relSeconds);
+  state.chartSeries.voltage.push(data.voltage);
+  state.chartSeries.current.push(currentAbs);
+  state.chartSeries.power.push(powerAbs);
+  state.chartSeries.temp.push(tempValue);
 
   updateChartRange();
 
   updateStats('voltage', data.voltage);
   updateStats('current', currentAbs);
   updateStats('power', powerAbs);
-  if (state.isTempConnected && tempValue !== 0 && state.isRecording) {
+  if (state.isTempConnected && Number.isFinite(tempValue)) {
     updateStats('temp', tempValue);
   }
 
   // 能量累计
   if (state.energy.lastTimestamp !== null) {
-    const dt = (now.getTime() - state.energy.lastTimestamp) / 3600000;
-    state.energy.wh += powerAbs * dt;
-    state.energy.mah += currentAbs * 1000 * dt;
+    const dt = (nowMs - state.energy.lastTimestamp) / 3600000;
+    if (dt >= 0) {
+      state.energy.wh += powerAbs * dt;
+      state.energy.mah += currentAbs * 1000 * dt;
+    }
   }
   state.energy.lastTimestamp = now.getTime();
 
   updateRealtimeDisplay({ ...data, current: currentAbs, power: powerAbs, temp: tempValue });
-  updateStatsDisplay();
+  scheduleStatsUpdate();
   updateEnergyDisplay();
 
   const dataCountEl = document.getElementById('data-count');
@@ -89,27 +93,11 @@ export function addDataPoint(data) {
         if (elapsed >= state.autoPauseSettings.duration) {
           stopRecording();
           state.autoPauseSettings.triggerStartTime = null;
-          console.info('Auto paused due to trigger condition');
         }
       }
     } else {
       state.autoPauseSettings.triggerStartTime = null;
     }
-  }
-
-  // 录制数据
-  const recordStatusEl = document.getElementById('record-status');
-  if (state.isRecording && recordStatusEl && recordStatusEl.textContent === '记录中...') {
-    const relSec = state.recordingStartTime ? (now.getTime() - state.recordingStartTime) / 1000 : 0;
-    const rel = formatRelativeHMS(relSec);
-    state.recordedData.push({
-      timestamp: rel,
-      voltage: data.voltage,
-      current: currentAbs,
-      power: powerAbs,
-      temp: tempValue,
-      relSeconds: relSec,
-    });
   }
 
   scheduleChartUpdate();
@@ -129,8 +117,14 @@ export function updateSliderFill() {
 
   const handleStart = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-start'));
   const handleEnd = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-end'));
-  if (handleStart) handleStart.style.left = `${start}%`;
-  if (handleEnd) handleEnd.style.left = `${end}%`;
+  if (handleStart) {
+    handleStart.style.left = `${start}%`;
+    handleStart.setAttribute('aria-valuenow', String(start));
+  }
+  if (handleEnd) {
+    handleEnd.style.left = `${end}%`;
+    handleEnd.setAttribute('aria-valuenow', String(end));
+  }
 }
 
 /** 根据滑块值更新主图表的可见范围。 */
@@ -146,35 +140,17 @@ export function updateChartRange() {
     return;
   }
 
-  let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
-  let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
+  const { startIndex, endIndex } = getVisibleDataRange();
 
-  if (startIndex < 0) startIndex = 0;
-  if (endIndex >= totalPoints) endIndex = totalPoints - 1;
-  if (startIndex > endIndex) startIndex = endIndex;
+  // 直接取序列的 x 坐标（与图表同一坐标系）。
+  // 不能用时间戳差值换算——差值恒从 0 起，而导入的 CSV 序列可能从非零时刻开始，
+  // 错位会让窗口大于数据范围，在图表前部凭空出现空白。
+  const xs = state.chartSeries.x;
+  const startSeconds = Number.isFinite(xs[startIndex]) ? xs[startIndex] : 0;
+  const endSeconds = Number.isFinite(xs[endIndex]) ? xs[endIndex] : 0;
 
-  const baselineMs = state.chartData.timestamps[0];
-  const startSeconds = baselineMs ? (state.chartData.timestamps[startIndex] - baselineMs) / 1000 : 0;
-  let endSeconds = baselineMs ? (state.chartData.timestamps[endIndex] - baselineMs) / 1000 : 0;
-
-  // 拖到尾部时使用渲染序列末尾坐标
-  const tailSeries = state.renderSeries.voltage?.length ? state.renderSeries.voltage : state.chartSeries.voltage;
-  if (endIndex === totalPoints - 1 && tailSeries.length) {
-    const lastX = tailSeries[tailSeries.length - 1]?.x;
-    if (typeof lastX === 'number' && Number.isFinite(lastX)) {
-      endSeconds = lastX;
-    }
-  }
-
-  const rangeSeconds = Math.max(0, endSeconds - startSeconds);
-  const padSeconds = Math.max(rangeSeconds * 0.005, 0.05);
-  const paddedStart = Math.max(0, startSeconds - padSeconds);
-  const paddedEnd = endSeconds + padSeconds;
-
-  if (state.mainChart?.options?.scales?.x) {
-    state.mainChart.options.scales.x.min = paddedStart;
-    state.mainChart.options.scales.x.max = paddedEnd;
-  }
+  // 窗口与数据齐平，不加人为留白（零跨度情况由 chart.js 的 range 函数保护）
+  setChartXWindow(startSeconds, endSeconds);
 
   const el1 = document.getElementById('range-start-time');
   const el2 = document.getElementById('range-end-time');
@@ -218,9 +194,12 @@ export function updateRealtimeDisplay(data) {
   if (vEl) vEl.textContent = data.voltage.toFixed(4);
   if (cEl) cEl.textContent = data.current.toFixed(4);
   if (pEl) pEl.textContent = data.power.toFixed(4);
-  if (state.isTempConnected && data.temp !== undefined) {
+  if (state.isTempConnected && Number.isFinite(data.temp)) {
     const tEl = document.getElementById('rt-temp');
     if (tEl) tEl.textContent = data.temp.toFixed(1);
+  } else if (state.isTempConnected) {
+    const tEl = document.getElementById('rt-temp');
+    if (tEl) tEl.textContent = '--';
   }
 }
 
@@ -280,9 +259,9 @@ export function updateStatsDisplay() {
       if (p > maxP) maxP = p;
       sumP += p;
       countP += 1;
-      if (t !== 0 && t < minT) minT = t;
-      if (t !== 0 && t > maxT) maxT = t;
-      if (t !== 0) {
+      if (Number.isFinite(t) && t < minT) minT = t;
+      if (Number.isFinite(t) && t > maxT) maxT = t;
+      if (Number.isFinite(t)) {
         sumT += t;
         countT += 1;
       }
@@ -333,6 +312,24 @@ export function updateEnergyDisplay() {
   if (mahEl) mahEl.textContent = state.energy.mah.toFixed(2);
 }
 
+// ─── Throttled stats refresh ─────────────────────────────────────────────────
+
+/** @type {ReturnType<typeof setTimeout>|null} */
+let __statsUpdateTimer = null;
+
+/**
+ * 节流版 updateStatsDisplay。
+ * 范围统计需要 O(可见点数) 的遍历，流式采样不需要每个点都同步重扫。
+ * 250ms 的上限刷新间隔保持 UI 可读性，同时避免长录制时主线程被统计占满。
+ */
+export function scheduleStatsUpdate() {
+  if (__statsUpdateTimer !== null) return;
+  __statsUpdateTimer = setTimeout(() => {
+    __statsUpdateTimer = null;
+    updateStatsDisplay();
+  }, 250);
+}
+
 // ─── Reset functions ─────────────────────────────────────────────────────────
 
 /** 重置统计数据。 */
@@ -354,32 +351,20 @@ export function resetEnergy() {
 
 /** 清空图表数据和相关状态。 */
 export function clearChart() {
+  if (state.isRecording) stopRecording();
   state.chartData = { timestamps: [], voltage: [], current: [], power: [], temp: [] };
-  state.chartSeries = { voltage: [], current: [], power: [], temp: [] };
-  state.renderSeries = { voltage: [], current: [], power: [], temp: [] };
-  state.navigatorSeries = { power: [] };
-  DOWNSAMPLE_CONFIG.lastRebuildCount = 0;
-  DOWNSAMPLE_CONFIG.navLastRebuildCount = 0;
+  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [] };
   state.lastRecordingStartTime = null;
-  state.recordedData = [];
+  state.recordingBaseSeconds = 0;
 
   if (!state.isTempConnected) {
     state.hasTempData = false;
     updateTempUIVisibility();
   }
 
-  if (state.mainChart) {
-    state.mainChart.data.datasets[0].data = state.renderSeries.voltage;
-    state.mainChart.data.datasets[1].data = state.renderSeries.current;
-    state.mainChart.data.datasets[2].data = state.renderSeries.power;
-    state.mainChart.data.datasets[3].data = state.renderSeries.temp;
-    state.mainChart.update('none');
-  }
-
-  if (state.navigatorChart) {
-    state.navigatorChart.data.datasets[0].data = state.navigatorSeries.power;
-    state.navigatorChart.update('none');
-  }
+  setChartXWindow(null, null);
+  syncChartSeries();
+  updateCharts();
 
   const el = document.getElementById('data-count');
   if (el) el.textContent = '0';
@@ -396,18 +381,30 @@ export function startRecording() {
   if (state.isRecording) return;
 
   state.isRecording = true;
-  state.recordingStartTime = Date.now();
-  state.lastRecordingStartTime = state.recordingStartTime;
-  console.info('Recording started');
-  state.recordedData = [];
+  const now = Date.now();
+  state.recordingStartTime = now;
+  if (state.chartData.timestamps.length === 0) {
+    state.lastRecordingStartTime = now;
+    state.recordingBaseSeconds = 0;
+  } else {
+    const lastX = state.chartSeries.x[state.chartSeries.x.length - 1];
+    state.recordingBaseSeconds =
+      (Number.isFinite(lastX) ? lastX : 0) + Math.max(state.settings.sampleRate / 1000, 0.001);
+    if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartData.timestamps[0];
+  }
+  // 暂停期间不属于下一段能量积分区间。
+  state.energy.lastTimestamp = null;
+  state.autoPauseSettings.triggerStartTime = null;
 
   const el = document.getElementById('record-status');
   if (el) el.textContent = '记录中...';
 
   const btnStart = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-start-record'));
   const btnStop = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-stop-record'));
+  const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
   if (btnStart) btnStart.disabled = true;
   if (btnStop) btnStop.disabled = false;
+  if (btnClear) btnClear.disabled = true;
 
   if (typeof state.__setRangeControlsEnabled === 'function') {
     state.__setRangeControlsEnabled(false);
@@ -420,14 +417,18 @@ export function stopRecording() {
 
   state.isRecording = false;
   state.recordingStartTime = null;
+  state.energy.lastTimestamp = null;
+  state.autoPauseSettings.triggerStartTime = null;
 
   const el = document.getElementById('record-status');
   if (el) el.textContent = '停止';
 
   const btnStart = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-start-record'));
   const btnStop = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-stop-record'));
+  const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
   if (btnStart) btnStart.disabled = !state.isConnected;
   if (btnStop) btnStop.disabled = true;
+  if (btnClear) btnClear.disabled = false;
 
   if (typeof state.__setRangeControlsEnabled === 'function') {
     state.__setRangeControlsEnabled(true);

@@ -12,7 +12,11 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "allowJs": true
+    "allowJs": true,
+    "types": []
+  },
+  "typeAcquisition": {
+    "enable": false
   },
   "include": ["src/**/*.js", "src/**/*.d.ts"],
   "exclude": ["src/vendor/**", "node_modules", "src-tauri/target"]

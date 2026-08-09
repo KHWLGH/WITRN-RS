@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Local copy of @tauri-apps/plugin-store v2.4.1 (ES module)
 // Avoids runtime CDN fetches; uses window.__TAURI__ globals provided by Tauri.
 const invoke = (...args) => window.__TAURI__?.core?.invoke?.(...args);
@@ -24,10 +25,8 @@ class Store {
 
   async get(key) {
     const result = await invoke("plugin:store|get", { rid: this.rid, key });
-    console.log('Store.get raw result:', result, 'for key:', key);
     // tauri-plugin-store v2 returns [value, exists] not [exists, value]
     const [value, exists] = result;
-    console.log('Store.get parsed - exists:', exists, 'value:', value);
     return exists ? value : undefined;
   }
 

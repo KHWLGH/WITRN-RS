@@ -3,7 +3,7 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { rebuildNavigatorSeries, rebuildRenderSeries } from './chart.js';
+import { setSeriesFill, setSeriesVisible } from './chart.js';
 import { updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
@@ -17,16 +17,62 @@ let settingsStore = null;
 let isLoadingSettings = false;
 
 /**
+ * 仅接收已知且合理的设置值，避免手工编辑 settings.json 将畸形数据带入运行时。
+ * @param {unknown} saved
+ * @returns {import('./state.js').Settings}
+ */
+function normalizeSettings(saved) {
+  const source = saved && typeof saved === 'object' ? /** @type {Record<string, unknown>} */ (saved) : {};
+  const numberValue = (key, fallback, min, max) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  const boolValue = (key, fallback) => (typeof source[key] === 'boolean' ? source[key] : fallback);
+  const stringValue = (key, fallback) =>
+    typeof source[key] === 'string' && source[key].trim() ? source[key] : fallback;
+
+  return {
+    rangeStart: numberValue('rangeStart', defaultSettings.rangeStart, 0, 1000),
+    rangeEnd: numberValue('rangeEnd', defaultSettings.rangeEnd, 0, 1000),
+    sampleRate: Math.round(numberValue('sampleRate', defaultSettings.sampleRate, 10, 60000)),
+    showVoltage: boolValue('showVoltage', defaultSettings.showVoltage),
+    showCurrent: boolValue('showCurrent', defaultSettings.showCurrent),
+    showPower: boolValue('showPower', defaultSettings.showPower),
+    showTemp: boolValue('showTemp', defaultSettings.showTemp),
+    opacityVoltage: numberValue('opacityVoltage', defaultSettings.opacityVoltage, 0, 100),
+    opacityCurrent: numberValue('opacityCurrent', defaultSettings.opacityCurrent, 0, 100),
+    opacityPower: numberValue('opacityPower', defaultSettings.opacityPower, 0, 100),
+    opacityTemp: numberValue('opacityTemp', defaultSettings.opacityTemp, 0, 100),
+    statsRange: boolValue('statsRange', defaultSettings.statsRange),
+    tempIp: stringValue('tempIp', defaultSettings.tempIp),
+    tempPort: Math.round(numberValue('tempPort', defaultSettings.tempPort, 1, 65535)),
+  };
+}
+
+/** @param {unknown} saved @returns {import('./state.js').AutoPauseSettings} */
+function normalizeAutoPause(saved) {
+  const source = saved && typeof saved === 'object' ? /** @type {Record<string, unknown>} */ (saved) : {};
+  const condition = Number(source.condition);
+  const duration = Number(source.duration);
+  const basis = source.basis;
+  return {
+    enabled: typeof source.enabled === 'boolean' ? source.enabled : defaultAutoPauseSettings.enabled,
+    basis: basis === 'voltage' || basis === 'current' || basis === 'power' ? basis : 'none',
+    condition: Number.isFinite(condition) ? condition : defaultAutoPauseSettings.condition,
+    duration: Number.isFinite(duration) ? Math.max(0, duration) : defaultAutoPauseSettings.duration,
+    triggerStartTime: null,
+  };
+}
+
+/**
  * 获取 / 懒创建 LazyStore 实例。
  * @returns {Promise<any>}
  */
 export async function getStore() {
   if (!settingsStore) {
-    console.log('getStore: Creating new LazyStore...');
     const { LazyStore } = await import('./vendor/plugin-store.js');
     settingsStore = new LazyStore('settings.json', { autoSave: 500 });
     await settingsStore.init();
-    console.log('getStore: LazyStore created and initialized');
   }
   return settingsStore;
 }
@@ -37,21 +83,16 @@ export async function getStore() {
 export async function loadSettings() {
   try {
     isLoadingSettings = true;
-    console.log('loadSettings: Starting to load settings...');
     const store = await getStore();
-    console.log('loadSettings: Store obtained:', store);
     const savedSettings = await store.get('appSettings');
-    console.log('loadSettings: Saved settings from store:', savedSettings);
 
     if (savedSettings) {
-      state.settings = { ...state.settings, ...savedSettings };
-      console.log('loadSettings: Merged settings:', state.settings);
+      state.settings = normalizeSettings(savedSettings);
 
       // 基本控件
       const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
       if (rateSelect) {
         rateSelect.value = String(state.settings.sampleRate);
-        console.log('loadSettings: Set sample-rate to', state.settings.sampleRate);
       }
 
       /** @param {string} id @param {boolean} val */
@@ -70,7 +111,7 @@ export async function loadSettings() {
       const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
       if (tempPort) tempPort.value = String(state.settings.tempPort || 1573);
 
-      // Fill settings — fill state is derived from opacity (opacity > 0 means fill on)
+      // Fill settings are derived directly from opacity.
       /** @param {string} id @param {number|undefined} val */
       const setOp = (id, val) => {
         const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
@@ -82,66 +123,37 @@ export async function loadSettings() {
       setOp('opacity-power', state.settings.opacityPower);
       setOp('opacity-temp', state.settings.opacityTemp);
 
-      // Derive fill state from opacity
-      state.settings.fillVoltage = (state.settings.opacityVoltage ?? 15) > 0;
-      state.settings.fillCurrent = (state.settings.opacityCurrent ?? 15) > 0;
-      state.settings.fillPower = (state.settings.opacityPower ?? 15) > 0;
-      state.settings.fillTemp = (state.settings.opacityTemp ?? 15) > 0;
-
       const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
       if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
 
-      // Downsample settings
-      const dsToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('downsample-toggle'));
-      if (dsToggle) dsToggle.checked = state.settings.downsampleEnabled;
-      const dsLevel = /** @type {HTMLSelectElement|null} */ (document.getElementById('downsample-level'));
-      if (dsLevel) {
-        dsLevel.value = state.settings.downsampleLevel;
-        dsLevel.disabled = !state.settings.downsampleEnabled;
-      }
-
       // Auto Pause
       if (savedSettings.autoPause) {
-        state.autoPauseSettings = { ...state.autoPauseSettings, ...savedSettings.autoPause };
-        console.log('loadSettings: autoPauseSettings after merge:', state.autoPauseSettings);
+        state.autoPauseSettings = normalizeAutoPause(savedSettings.autoPause);
         const apToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('btn-auto-pause-toggle'));
         if (apToggle) {
           apToggle.checked = state.autoPauseSettings.enabled;
-          console.log('loadSettings: Set apToggle.checked to', state.autoPauseSettings.enabled);
-        } else {
-          console.log('loadSettings: apToggle element not found!');
         }
 
         const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
         if (apBasis) {
           apBasis.value = state.autoPauseSettings.basis;
-          console.log('loadSettings: Set apBasis.value to', state.autoPauseSettings.basis);
         }
 
         const apCondition = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-condition'));
         if (apCondition) {
           apCondition.value = String(state.autoPauseSettings.condition);
-          console.log('loadSettings: Set apCondition.value to', state.autoPauseSettings.condition);
         }
 
         const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
         if (apDuration) {
           apDuration.value = String(state.autoPauseSettings.duration);
-          console.log('loadSettings: Set apDuration.value to', state.autoPauseSettings.duration);
         }
-      } else {
-        console.log('loadSettings: No autoPause in settings');
       }
-
-      console.log('loadSettings: Settings loaded successfully');
-    } else {
-      console.log('loadSettings: No saved settings found');
     }
   } catch (e) {
     console.error('Failed to load settings:', e);
   } finally {
     isLoadingSettings = false;
-    console.log('loadSettings: Auto-save re-enabled');
   }
 }
 
@@ -162,7 +174,6 @@ export async function saveSettings() {
     };
     await store.set('appSettings', settingsToSave);
     await store.save();
-    console.log('Settings saved successfully');
   } catch (e) {
     console.error('Failed to save settings:', e);
   }
@@ -179,7 +190,6 @@ let __saveSettingsTimer = null;
  */
 export function debouncedSaveSettings(delay = 500) {
   if (isLoadingSettings) {
-    console.log('debouncedSaveSettings: Skipped (loading in progress)');
     return;
   }
   if (__saveSettingsTimer) {
@@ -229,23 +239,8 @@ export async function resetSettings() {
     setOp2('opacity-power', state.settings.opacityPower);
     setOp2('opacity-temp', state.settings.opacityTemp);
 
-    // Derive fill state from default opacity
-    state.settings.fillVoltage = state.settings.opacityVoltage > 0;
-    state.settings.fillCurrent = state.settings.opacityCurrent > 0;
-    state.settings.fillPower = state.settings.opacityPower > 0;
-    state.settings.fillTemp = state.settings.opacityTemp > 0;
-
     const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
     if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
-
-    // Downsample settings
-    const dsToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('downsample-toggle'));
-    if (dsToggle) dsToggle.checked = state.settings.downsampleEnabled;
-    const dsLevel = /** @type {HTMLSelectElement|null} */ (document.getElementById('downsample-level'));
-    if (dsLevel) {
-      dsLevel.value = state.settings.downsampleLevel;
-      dsLevel.disabled = !state.settings.downsampleEnabled;
-    }
 
     const apToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('btn-auto-pause-toggle'));
     if (apToggle) apToggle.checked = state.autoPauseSettings.enabled;
@@ -259,34 +254,22 @@ export async function resetSettings() {
     const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
     if (apDuration) apDuration.value = String(state.autoPauseSettings.duration);
 
-    // Update chart visibility
-    if (state.mainChart) {
-      state.mainChart.setDatasetVisibility(0, state.settings.showVoltage);
-      state.mainChart.setDatasetVisibility(1, state.settings.showCurrent);
-      state.mainChart.setDatasetVisibility(2, state.settings.showPower);
-      if (state.mainChart.options?.scales) {
-        state.mainChart.options.scales['y-voltage'].display = state.settings.showVoltage;
-        state.mainChart.options.scales['y-current'].display = state.settings.showCurrent;
-        state.mainChart.options.scales['y-power'].display = state.settings.showPower;
-      }
-      state.mainChart.update();
-    }
+    // Update chart visibility & fill (temp is handled by updateTempUIVisibility below)
+    setSeriesVisible(0, state.settings.showVoltage);
+    setSeriesVisible(1, state.settings.showCurrent);
+    setSeriesVisible(2, state.settings.showPower);
+    setSeriesFill(0, state.settings.opacityVoltage);
+    setSeriesFill(1, state.settings.opacityCurrent);
+    setSeriesFill(2, state.settings.opacityPower);
+    setSeriesFill(3, state.settings.opacityTemp);
 
     updateStatsDisplay();
     updateTempUIVisibility();
-
-    // Rebuild chart data with reset downsample settings
-    rebuildRenderSeries();
-    rebuildNavigatorSeries();
-    if (state.mainChart) state.mainChart.update('none');
-    if (state.navigatorChart) state.navigatorChart.update('none');
 
     // Clear saved settings from store
     const store = await getStore();
     await store.delete('appSettings');
     await store.save();
-
-    console.log('Settings reset to defaults');
   } catch (e) {
     console.error('Failed to reset settings:', e);
   }

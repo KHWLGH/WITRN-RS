@@ -2,11 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <link rel="stylesheet" href="vendor/uPlot.min.css" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="assets/codicon.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WITRN-RS</title>
-    <script src="vendor/chart.umd.min.js"></script>
+    <script src="vendor/uPlot.iife.min.js"></script>
     <script type="module" src="/app.js" defer></script>
   </head>
 
@@ -92,56 +93,38 @@
           
           <div class="ribbon-group">
             <div class="ribbon-group-title">统计</div>
-            <div class="ribbon-group-content" style="flex-direction: row; gap: 8px; align-items: stretch;">
-              <!-- 左侧：原有按钮与选项 -->
-              <div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0;">
-                <div style="display: flex; gap: 4px;">
-                  <!-- btn-reset-energy removed (merged into clear chart) -->
-                  <div class="dropdown-container">
-                    <button type="button" class="ribbon-btn" id="btn-export">
-                      <span class="ribbon-btn-icon"><i class="codicon codicon-export"></i></span>
-                      <span class="ribbon-btn-text">导出CSV ▼</span>
-                    </button>
-                    <div class="dropdown-menu" id="export-dropdown">
-                      <div class="dropdown-item" id="export-no-temp">不带温度</div>
-                      <div class="dropdown-item" id="export-with-temp">带温度</div>
-                    </div>
+            <div class="ribbon-group-content" style="flex-direction: column; gap: 4px; align-items: stretch;">
+              <div style="display: flex; gap: 4px;">
+                <!-- btn-reset-energy removed (merged into clear chart) -->
+                <div class="dropdown-container">
+                  <button type="button" class="ribbon-btn" id="btn-export" aria-haspopup="menu" aria-controls="export-dropdown" aria-expanded="false">
+                    <span class="ribbon-btn-icon"><i class="codicon codicon-export"></i></span>
+                    <span class="ribbon-btn-text">导出CSV ▼</span>
+                  </button>
+                  <div class="dropdown-menu" id="export-dropdown" role="menu" aria-label="导出选项">
+                    <button type="button" class="dropdown-item" id="export-no-temp" role="menuitem">不带温度</button>
+                    <button type="button" class="dropdown-item" id="export-with-temp" role="menuitem">带温度</button>
                   </div>
-                  <button type="button" class="ribbon-btn" id="btn-import">
-                    <span class="ribbon-btn-icon"><i class="codicon codicon-cloud-upload"></i></span>
-                    <span class="ribbon-btn-text">导入CSV</span>
-                  </button>
-                  <button type="button" class="ribbon-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
-                    <span class="ribbon-btn-icon"><i class="codicon codicon-trash"></i></span>
-                    <span class="ribbon-btn-text">一键重置</span>
-                  </button>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
-                  <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据" style="flex: 1 1 auto; min-width: 0;">
-                    <input type="checkbox" id="stats-range-toggle">
-                    <span class="checkmark"></span>
-                    仅统计选中范围
-                  </label>
-                  <button type="button" class="ribbon-btn-small ribbon-btn-small-text" id="btn-reset-settings" title="重置所有设置为默认值">
-                    <i class="codicon codicon-settings-gear"></i>
-                    <span class="ribbon-btn-text">重置配置</span>
-                  </button>
-                </div>
+                <button type="button" class="ribbon-btn" id="btn-import">
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-cloud-upload"></i></span>
+                  <span class="ribbon-btn-text">导入CSV</span>
+                </button>
+                <button type="button" class="ribbon-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
+                  <span class="ribbon-btn-icon"><i class="codicon codicon-trash"></i></span>
+                  <span class="ribbon-btn-text">一键重置</span>
+                </button>
               </div>
-              <!-- 分隔线 -->
-              <div style="width: 1px; align-self: stretch; background: var(--border-color);"></div>
-              <!-- 右侧：降采样控件（两行） -->
-              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;">
-                <label class="ribbon-checkbox" title="启用/关闭图表降采样">
-                  <input type="checkbox" id="downsample-toggle" checked>
+              <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; width: 100%;">
+                <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据" style="flex: 1 1 auto; min-width: 0;">
+                  <input type="checkbox" id="stats-range-toggle">
                   <span class="checkmark"></span>
-                  降采样
+                  仅统计选中范围
                 </label>
-                <select id="downsample-level" class="ribbon-select" title="降采样强度：低(5000点) / 中(2000点) / 高(500点)" style="width: 60px;">
-                  <option value="low">低</option>
-                  <option value="medium" selected>中</option>
-                  <option value="high">高</option>
-                </select>
+                <button type="button" class="ribbon-btn-small ribbon-btn-small-text" id="btn-reset-settings" title="重置所有设置为默认值">
+                  <i class="codicon codicon-settings-gear"></i>
+                  <span class="ribbon-btn-text">重置配置</span>
+                </button>
               </div>
             </div>
           </div>
@@ -224,11 +207,11 @@
               </div>
               <div class="ribbon-input-group">
                 <input type="number" id="ap-condition" value="0.00" step="0.01" class="ribbon-input" style="width: 65px;" title="触发阈值">
-                <label id="ap-unit" style="margin-left: 2px;"></label>
+                <span id="ap-unit" style="margin-left: 2px;"></span>
               </div>
               <div class="ribbon-input-group">
                 <input type="number" id="ap-duration" value="10" min="0" class="ribbon-input" style="width: 50px;" title="持续时间">
-                <label>s</label>
+                <label for="ap-duration">s</label>
               </div>
             </div>
           </div>
@@ -239,15 +222,15 @@
             <div class="ribbon-group-title">设备参数</div>
             <div class="ribbon-group-content device-info-group">
               <div class="ribbon-input-group">
-                <label>VID:</label>
+                <label for="device-vid">VID:</label>
                 <input type="text" id="device-vid" value="0x0716" class="ribbon-input" readonly>
               </div>
               <div class="ribbon-input-group">
-                <label>PID:</label>
+                <label for="device-pid">PID:</label>
                 <input type="text" id="device-pid" value="0x5060" class="ribbon-input" readonly>
               </div>
               <div class="ribbon-input-group">
-                <label>SN:</label>
+                <label for="device-sn">SN:</label>
                 <input type="text" id="device-sn" value="--" class="ribbon-input device-sn-input" readonly title="设备序列号">
               </div>
             </div>
@@ -260,11 +243,11 @@
             <div class="ribbon-group-content" style="flex-direction: column; gap: 4px;">
               <div style="display: flex; gap: 4px; align-items: center;">
                 <div class="ribbon-input-group">
-                  <label>IP:</label>
+                  <label for="temp-ip">IP:</label>
                   <input type="text" id="temp-ip" value="127.0.0.1" class="ribbon-input" style="width: 100px;">
                 </div>
                 <div class="ribbon-input-group">
-                  <label>端口:</label>
+                  <label for="temp-port">端口:</label>
                   <input type="number" id="temp-port" value="1573" class="ribbon-input" style="width: 60px;">
                 </div>
               </div>
@@ -366,7 +349,8 @@
           <div class="chart-area">
             <!-- Chart Container -->
             <div class="chart-container">
-              <canvas id="main-chart"></canvas>
+              <div class="chart-legend" id="main-chart-legend"></div>
+              <div id="main-chart"></div>
             </div>
 
             <!-- Timeline Navigator -->
@@ -377,11 +361,11 @@
                 <span id="range-end-time">--</span>
               </div>
               <div class="timeline-track">
-                <canvas id="navigator-chart"></canvas>
+                <div id="navigator-chart"></div>
                 <div class="dual-slider-container">
                   <div class="slider-track-fill" id="slider-fill"></div>
-                  <div class="range-handle" id="range-handle-start" tabindex="0" aria-label="范围起点"></div>
-                  <div class="range-handle" id="range-handle-end" tabindex="0" aria-label="范围终点"></div>
+                  <div class="range-handle" id="range-handle-start" role="slider" tabindex="0" aria-label="范围起点" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-orientation="horizontal"></div>
+                  <div class="range-handle" id="range-handle-end" role="slider" tabindex="0" aria-label="范围终点" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-orientation="horizontal"></div>
                   <input type="range" id="range-start" min="0" max="1000" value="0" class="dual-slider">
                   <input type="range" id="range-end" min="0" max="1000" value="1000" class="dual-slider">
                 </div>

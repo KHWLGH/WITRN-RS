@@ -2,6 +2,15 @@
 // These APIs are injected by 'withGlobalTauri: true' in tauri.conf.json.
 
 declare namespace TauriAPI {
+  interface DialogOptions {
+    title?: string;
+    kind?: 'info' | 'warning' | 'error';
+  }
+  interface FileDialogOptions extends DialogOptions {
+    multiple?: boolean;
+    filters?: { name: string; extensions: string[] }[];
+    defaultPath?: string;
+  }
   interface Core {
     invoke(cmd: string, args?: Record<string, unknown>): Promise<any>;
   }
@@ -9,10 +18,10 @@ declare namespace TauriAPI {
     listen(event: string, handler: (event: any) => void): Promise<() => void>;
   }
   interface Dialog {
-    save(options?: any): Promise<string | null>;
-    open(options?: any): Promise<string | string[] | null>;
-    ask(message: string, options?: any): Promise<boolean>;
-    message(message: string, options?: any): Promise<void>;
+    save(options?: FileDialogOptions): Promise<string | null>;
+    open(options?: FileDialogOptions): Promise<string | string[] | null>;
+    ask(message: string, options?: DialogOptions): Promise<boolean>;
+    message(message: string, options?: DialogOptions): Promise<void>;
   }
   interface Fs {
     writeTextFile(path: string, contents: string): Promise<void>;
@@ -34,5 +43,5 @@ interface Window {
   __TAURI__: TauriAPI.Tauri;
 }
 
-// Chart.js global (loaded via <script> tag)
-declare const Chart: any;
+// uPlot global (loaded via <script> tag from vendor/uPlot.iife.min.js)
+declare const uPlot: any;

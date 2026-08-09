@@ -2,11 +2,6 @@
 
 # WITRN-RS
 
-> ⚠️ **项目归档声明 (Archived Notice)** ⚠️
-> 
-> 本项目已停止活跃开发并进入归档状态，当前版本为最终存档版本。后续除非发生重大问题，否则不再提供功能更新或日常维护。
-> 感谢大家的支持，欢迎自行 Fork 并在此基础上进行二次开发！
-
 WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (WITRN) USB 电压电流表。该项目基于 **Tauri v2** 构建，后端使用 **Rust**，前端使用原生 **JavaScript/HTML/CSS**。
 
 **注意：本软件大部分使用Copilot等VibeCoding工具制作，可能存在未知问题**
@@ -21,14 +16,13 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 ## ✨ 功能特性
 
 ### 核心功能
-*   **实时监控**：实时读取并显示电压、电流、功率、D+/D- 电压、温度、容量 (Ah) 和能量 (Wh)
+*   **实时监控**：实时读取并显示电压、电流、功率和温度；容量 (mAh) 与能量 (Wh) 由软件按录制区间积分
 *   **图表显示**：支持实时数据图表显示和历史数据导航
 *   **数据导出**：支持 CSV 格式数据导出（可选择是否包含温度数据）
 *   **统计信息**：显示最小值、最大值、平均值等统计数据
 *   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接
 
 ### 高级功能
-*   **图表降采样**：支持 LTTB / MinMax 降采样算法，大数据量下保持流畅渲染，提供低/中/高三档可调
 *   **密集网格显示**：主图支持细分网格线绘制，提升读取趋势和局部变化时的参考精度
 *   **平滑退出机制**：优化窗口关闭与应用退出流程，降低后台线程/设备读写竞争导致的关闭卡住问题
 *   **填充控制简化**：曲线填充改为由透明度直接控制（0 = 关闭填充，1-100 = 开启填充）
@@ -49,10 +43,13 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 
 ### 环境要求
 
-*   [Node.js](https://nodejs.org/) (v18+，用于前端工具链)
 *   [Rust](https://www.rust-lang.org/tools/install) (推荐最新稳定版)
 *   Tauri CLI v2（建议：`cargo install tauri-cli --version ^2`）
 *   操作系统支持的 HID API
+
+Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需要，不参与应用运行或 Tauri 构建。
+
+前端质量工具版本由 `package-lock.json` 锁定：Biome 2.4.4 负责 JavaScript、JSON、CSS 和 HTML 的 lint、格式检查及导入整理；TypeScript 负责带 `// @ts-check` 的 JavaScript 类型检查。`npm run lint` 会将警告视为失败，`npm run format` 可应用 Biome 的安全格式化。`.editorconfig`、Biome 和 `.gitattributes` 共同约束文本文件使用 LF。
 
 ### 快速开始
 
@@ -62,10 +59,9 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
    cd WITRN-RS
    ```
 
-2. **安装前端依赖**：
+2. **安装构建工具**：
    ```bash
    cargo install tauri-cli --version ^2
-   npm install
    ```
 
 3. **运行开发环境**：
@@ -77,6 +73,20 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
    ```bash
    cargo tauri build
    ```
+
+5. **运行与 CI 相同的质量检查（可选）**：
+   ```bash
+   npm ci
+   npm test
+   npm run typecheck
+   npm run lint
+   cargo fmt --check --manifest-path src-tauri/Cargo.toml
+   cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+   cargo test --manifest-path src-tauri/Cargo.toml
+   cargo check --manifest-path src-tauri/Cargo.toml
+   ```
+
+仓库中的 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会在 push 和 Pull Request 时执行上述检查。`npm ci` 使用已提交的 `package-lock.json` 安装固定版本的前端质量工具。
 
 ### 构建说明
 
@@ -102,9 +112,10 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
    - 点击"连接"按钮
 
 3. **数据格式**：
-   - 服务器通过 TCP 发送纯数字温度值
-   - 每行一个数值，以换行符结束
-   - 示例：`25.125\n`
+    - 服务器通过 TCP 发送纯数字温度值
+    - 每行一个数值，以换行符结束
+    - 发送间隔可以超过 10 秒，服务会在空闲期间保持连接
+    - 示例：`25.125\n`
 
 ### 示例文件
 - [`temperature-example/network_server.py`](temperature-example/network_server.py) - 温度服务器示例（发送随机温度数据）
@@ -120,7 +131,8 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 - **功能模块**：
   - HID 设备通信 (使用 `hidapi` 库)
   - 温度服务网络连接
-  - 线程安全的状态管理 (`Arc<Mutex<...>>`)
+  - 后台任务生命周期管理（每个 HID/温度连接持有独立停止标志与 `JoinHandle`，重连和退出前等待旧任务结束）
+  - 线程安全的共享配置与设备信息管理 (`Arc<Mutex<...>>`)
   - 事件系统（向前端发送实时数据）
 
 ### 前端 (Vanilla JavaScript)
@@ -128,8 +140,9 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 - **模块结构**（ES Modules，启用 `// @ts-check` 类型检查）：
   - `app.js` - 应用入口、Tauri API 导入、窗口关闭、UI 事件绑定
   - `state.js` - 共享应用状态与类型定义
-  - `chart.js` - Chart.js 初始化、降采样算法（LTTB / MinMax）、渲染调度
+  - `chart.js` - uPlot 图表初始化、渲染调度、tooltip/图例交互
   - `data.js` - 数据采集、统计计算、录制逻辑
+  - `measurement.js` - 相对时间解析、能量/容量积分、导出行构造（不依赖 DOM 与 Tauri 的纯函数，供单元测试直接调用）
   - `device.js` - HID 设备连接管理
   - `csv.js` - CSV 导入/导出
   - `settings.js` - 设置加载/保存（防抖持久化）
@@ -139,25 +152,43 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 - **其他文件**：
   - `index.html` - 应用界面结构
   - `styles.css` - 界面样式
-- **外部依赖**：
-  - Chart.js - 图表绘制
+- **前端运行时依赖**（均已 vendor 到 `src/vendor/`，本地运行无网络依赖）：
+  - uPlot - 图表绘制（轻量高性能，替代原 Chart.js）
   - Tauri Plugin Store - 设置持久化
-  - Biome 2.0 - 代码格式化与静态检查
+- **开发质量工具**：Biome 2.4.4、TypeScript 5.x（仅由 `npm ci` 安装，用于质量检查）
+
+### 测试 (`test/`)
+
+前端测试使用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑：
+
+- `measurement.test.js` - 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分、导出行构造
+- `recording.test.js` - 录制会话边界重置积分基线、导入后续录从最后一个相对时间点继续
+
+Rust 侧测试以 `#[cfg(test)]` 内联在 `src-tauri/src/lib.rs`，覆盖 HID 帧解析校验与多接口筛选。硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
 
 ### 数据流
-1. 前端调用 `connect_device_by_path` 连接设备
-2. 后端启动数据读取线程，解析 HID 报告
-3. 数据通过事件系统推送到前端 (`device-data` 事件)
-4. 前端更新 UI 显示和图表
+1. 前端扫描已知 VID/PID 的设备；同一物理设备有多个 HID 接口时，后端优先选择厂商自定义 Usage Page
+2. 前端调用 `connect_device_by_path` 连接选中的接口
+3. 后端启动该连接独享的数据读取任务，解析并校验 HID 报告
+4. 合法数据通过事件系统推送到前端 (`device-data` 事件)
+5. 前端更新 UI、uPlot 图表、统计及录制区间内的 Wh/mAh 积分
 
 ### HID 协议规范
 - **报告大小**：64 字节
 - **协议头**：第 0 字节必须为 `0xFF`
 - **数据字段**（小端序）：
-  - 电压：字节 46-50 (`f32`)
-  - 电流：字节 50-54 (`f32`)  
-  - 温度：字节 42-46 (`f32`)
-  - D+/D- 电压：字节 30-34 / 34-38 (`f32`)
+   - 电压：字节 46-49 (`f32`)
+   - 电流：字节 50-53 (`f32`)
+   - 温度：字节 42-45 (`f32`)
+   - D+/D- 电压：字节 30-33 / 34-37 (`f32`)
+
+解析器会拒绝长度或帧头错误、非有限数值以及明显超出物理范围的报告。目前未实现协议校验和验证；新增设备型号或固件前应先用实机样本确认字节布局与量程。
+
+### 安全边界
+
+- Tauri WebView 启用了基础内容安全策略 (CSP)
+- 文件系统能力只保留 CSV 导出所需的文本文件写入，不授予主目录递归写权限
+- 前端运行依赖均保存在 `src/vendor/`，应用运行时不从 CDN 加载脚本或样式
 
 
 ## 🚀 使用说明

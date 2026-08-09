@@ -25,19 +25,6 @@ export function formatRelativeHMS(seconds) {
 }
 
 /**
- * 将时间标签字符串转换为秒数（去除可能的 "s" 后缀）。
- * @param {string|number|null|undefined} label
- * @returns {number}
- */
-export function labelToSeconds(label) {
-  const text = String(label ?? '')
-    .trim()
-    .replace(/s$/i, '');
-  const value = parseFloat(text);
-  return Number.isFinite(value) ? value : 0;
-}
-
-/**
  * 将 HEX 颜色字符串转换为 rgba() 格式。
  * @param {string} hex - 例如 "#4a9eff"
  * @param {number} opacityPercent - 0-100

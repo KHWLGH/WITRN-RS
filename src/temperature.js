@@ -3,6 +3,7 @@
  * @file 温度服务连接管理及温度相关 UI 可见性控制。
  */
 
+import { setSeriesVisible } from './chart.js';
 import { state } from './state.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -14,7 +15,11 @@ export async function connectTempService() {
   const ipEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   const portEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   const ip = ipEl?.value || '127.0.0.1';
-  const port = Number.parseInt(portEl?.value || '1573', 10) || 1573;
+  const port = Number.parseInt(portEl?.value || '', 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    alert('请输入 1 到 65535 之间的有效端口');
+    return;
+  }
 
   try {
     await invoke('connect_temp_service', { ip, port });
@@ -90,12 +95,8 @@ export function updateTempUIVisibility() {
   const showTempContainer = document.getElementById('show-temp-container');
   if (showTempContainer) showTempContainer.style.display = showTemp ? 'flex' : 'none';
 
-  if (state.mainChart?.data?.datasets?.[3]) {
+  if (state.mainChart) {
     const tempVisible = showTemp && state.settings.showTemp;
-    state.mainChart.setDatasetVisibility(3, tempVisible);
-    if (state.mainChart.options?.scales?.['y-temp']) {
-      state.mainChart.options.scales['y-temp'].display = tempVisible;
-    }
-    state.mainChart.update('none');
+    setSeriesVisible(3, tempVisible);
   }
 }

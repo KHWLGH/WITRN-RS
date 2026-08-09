@@ -25,17 +25,6 @@
  */
 
 /**
- * 录制的单条数据记录。
- * @typedef {Object} RecordedRow
- * @property {string} timestamp   - 相对时间字符串 HH:mm:ss.s
- * @property {number} voltage
- * @property {number} current
- * @property {number} power
- * @property {number} temp
- * @property {number} relSeconds  - 相对录制开始的秒数
- */
-
-/**
  * 应用设置。
  * @typedef {Object} Settings
  * @property {number} rangeStart
@@ -45,17 +34,11 @@
  * @property {boolean} showCurrent
  * @property {boolean} showPower
  * @property {boolean} showTemp
- * @property {boolean} fillVoltage
  * @property {number}  opacityVoltage
- * @property {boolean} fillCurrent
  * @property {number}  opacityCurrent
- * @property {boolean} fillPower
  * @property {number}  opacityPower
- * @property {boolean} fillTemp
  * @property {number}  opacityTemp
  * @property {boolean} statsRange
- * @property {boolean} downsampleEnabled
- * @property {'low'|'medium'|'high'} downsampleLevel
  * @property {string}  tempIp
  * @property {number}  tempPort
  */
@@ -88,8 +71,13 @@
  */
 
 /**
- * Chart.js 数据点。
- * @typedef {{ x: number, y: number }} ChartPoint
+ * 图表序列（uPlot 列式格式）— x 为相对秒数，各序列与 x 等长对齐。
+ * @typedef {Object} ChartSeriesColumns
+ * @property {number[]} x
+ * @property {number[]} voltage
+ * @property {number[]} current
+ * @property {number[]} power
+ * @property {number[]} temp
  */
 
 /**
@@ -101,6 +89,8 @@
  * @property {number} pid
  * @property {string} serial_number
  * @property {string} model_name
+ * @property {number} interface_number
+ * @property {number} usage_page
  */
 
 // ─── Default Settings ────────────────────────────────────────────────────────
@@ -114,17 +104,11 @@ export const defaultSettings = {
   showCurrent: true,
   showPower: true,
   showTemp: true,
-  fillVoltage: true,
   opacityVoltage: 15,
-  fillCurrent: true,
   opacityCurrent: 15,
-  fillPower: true,
   opacityPower: 15,
-  fillTemp: true,
   opacityTemp: 15,
   statsRange: false,
-  downsampleEnabled: true,
-  downsampleLevel: 'medium',
   tempIp: '127.0.0.1',
   tempPort: 1573,
 };
@@ -138,22 +122,6 @@ export const defaultAutoPauseSettings = {
   triggerStartTime: null,
 };
 
-// ─── Downsampling configuration ──────────────────────────────────────────────
-
-/** 降采样挡位 → 主图表最大渲染点数映射（强度越高点数越少） */
-export const DOWNSAMPLE_LEVELS = /** @type {const} */ ({ low: 5000, medium: 2000, high: 500 });
-
-export const DOWNSAMPLE_CONFIG = {
-  mainChartMaxPoints: 2000,
-  navigatorMaxPoints: 500,
-  rebuildThreshold: 0.15,
-  minRebuildInterval: 500,
-  lastRebuildCount: 0,
-  navLastRebuildCount: 0,
-  lastRebuildTime: 0,
-  useDirectReference: true,
-};
-
 // ─── Shared mutable state ────────────────────────────────────────────────────
 
 /**
@@ -161,9 +129,9 @@ export const DOWNSAMPLE_CONFIG = {
  */
 export const state = {
   // ── Chart instances ──
-  /** @type {any} Chart.js main chart instance */
+  /** @type {any} uPlot 主图表实例 */
   mainChart: null,
-  /** @type {any} Chart.js navigator chart instance */
+  /** @type {any} uPlot 导航器图表实例 */
   navigatorChart: null,
 
   /** @type {boolean} */
@@ -181,25 +149,13 @@ export const state = {
     temp: [],
   },
 
-  /** @type {{ voltage: ChartPoint[], current: ChartPoint[], power: ChartPoint[], temp: ChartPoint[] }} */
+  /** @type {ChartSeriesColumns} */
   chartSeries: {
+    x: [],
     voltage: [],
     current: [],
     power: [],
     temp: [],
-  },
-
-  /** @type {{ voltage: ChartPoint[], current: ChartPoint[], power: ChartPoint[], temp: ChartPoint[] }} */
-  renderSeries: {
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-  },
-
-  /** @type {{ power: ChartPoint[] }} */
-  navigatorSeries: {
-    power: [],
   },
 
   // ── Statistics ──
@@ -215,16 +171,14 @@ export const state = {
   energy: { wh: 0, mah: 0, lastTimestamp: null },
 
   // ── Recording ──
-  /** @type {RecordedRow[]} */
-  recordedData: [],
   /** @type {boolean} */
   isRecording: false,
   /** @type {number|null} */
   recordingStartTime: null,
   /** @type {number|null} */
   lastRecordingStartTime: null,
-  /** @type {boolean} */
-  collectWhenRecordingOnly: true,
+  /** @type {number} Relative x coordinate at the start of the active segment. */
+  recordingBaseSeconds: 0,
 
   // ── Connection ──
   /** @type {boolean} */
@@ -239,14 +193,10 @@ export const state = {
   settings: { ...defaultSettings },
 
   // ── Temperature ──
-  /** @type {any} */
-  tempSocket: null,
   /** @type {boolean} */
   isTempConnected: false,
   /** @type {number|null} */
   currentTemp: null,
-  /** @type {string} */
-  tempBuffer: '',
   /** @type {boolean} */
   hasTempData: false,
 
