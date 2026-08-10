@@ -13,8 +13,6 @@ audit-reports/
 # App Data
 settings.json
 *.csv
-# 测试夹具需要真实 CSV 样本（时间格式、往返解析回归）
-!test/fixtures/*.csv
 
 # Rust / Tauri
 src-tauri/target/

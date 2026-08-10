@@ -15,11 +15,8 @@ export async function connectTempService() {
   const ipEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   const portEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   const ip = ipEl?.value || '127.0.0.1';
+  // 端口在输入框 change 时已校验；后端命令签名是 u16，越界值会被 Tauri 反序列化直接拒绝。
   const port = Number.parseInt(portEl?.value || '', 10);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    alert('请输入 1 到 65535 之间的有效端口');
-    return;
-  }
 
   try {
     await invoke('connect_temp_service', { ip, port });

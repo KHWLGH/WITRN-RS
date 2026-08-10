@@ -19,8 +19,8 @@ export function addDataPoint(data) {
 
   const currentAbs = Math.abs(data.current);
   const powerAbs = Math.abs(data.power);
-  const tempValue =
-    typeof state.currentTemp === 'number' && Number.isFinite(state.currentTemp) ? state.currentTemp : Number.NaN;
+  // 后端只推送有限温度值（见 lib.rs 的 temp-data 分支），此处只需区分「有 / 无」。
+  const tempValue = state.currentTemp ?? Number.NaN;
 
   // 仅录制模式：未录制时只更新实时显示
   if (!state.isRecording) {
@@ -211,10 +211,10 @@ export function getVisibleDataRange() {
   const totalPoints = state.chartData.timestamps.length;
   if (totalPoints === 0) return { startIndex: 0, endIndex: 0 };
 
+  // rangeStart/rangeEnd 已限定在 0..1000，只需处理上界取到末尾以及首尾交叉的情况。
   let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
   let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
 
-  if (startIndex < 0) startIndex = 0;
   if (endIndex >= totalPoints) endIndex = totalPoints - 1;
   if (startIndex > endIndex) startIndex = endIndex;
 
@@ -406,9 +406,7 @@ export function startRecording() {
   if (btnStop) btnStop.disabled = false;
   if (btnClear) btnClear.disabled = true;
 
-  if (typeof state.__setRangeControlsEnabled === 'function') {
-    state.__setRangeControlsEnabled(false);
-  }
+  state.__setRangeControlsEnabled?.(false);
 }
 
 /** 停止录制。 */
@@ -430,9 +428,7 @@ export function stopRecording() {
   if (btnStop) btnStop.disabled = true;
   if (btnClear) btnClear.disabled = false;
 
-  if (typeof state.__setRangeControlsEnabled === 'function') {
-    state.__setRangeControlsEnabled(true);
-  }
+  state.__setRangeControlsEnabled?.(true);
 }
 
 /** 清空图表并重置统计和能量。 */

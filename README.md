@@ -24,7 +24,7 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 
 ### 高级功能
 *   **密集网格显示**：主图支持细分网格线绘制，提升读取趋势和局部变化时的参考精度
-*   **平滑退出机制**：优化窗口关闭与应用退出流程，降低后台线程/设备读写竞争导致的关闭卡住问题
+*   **平滑退出机制**：退出确认后由后端统一停止后台线程并 `destroy` 主窗口，避免 `close` 重新派发关闭事件造成的回环
 *   **填充控制简化**：曲线填充改为由透明度直接控制（0 = 关闭填充，1-100 = 开启填充）
 *   **外部温度服务**：支持通过网络连接外部温度传感器数据
 *   **跨平台**：支持 Windows、macOS 和 Linux 系统
@@ -83,7 +83,6 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
    cargo fmt --check --manifest-path src-tauri/Cargo.toml
    cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
    cargo test --manifest-path src-tauri/Cargo.toml
-   cargo check --manifest-path src-tauri/Cargo.toml
    ```
 
 仓库中的 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会在 push 和 Pull Request 时执行上述检查。`npm ci` 使用已提交的 `package-lock.json` 安装固定版本的前端质量工具。
@@ -132,6 +131,7 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
   - HID 设备通信 (使用 `hidapi` 库)
   - 温度服务网络连接
   - 后台任务生命周期管理（每个 HID/温度连接持有独立停止标志与 `JoinHandle`，重连和退出前等待旧任务结束）
+  - 退出流程（`shutdown` 命令：停止后台任务后 `destroy` 主窗口）
   - 线程安全的共享配置与设备信息管理 (`Arc<Mutex<...>>`)
   - 事件系统（向前端发送实时数据）
 

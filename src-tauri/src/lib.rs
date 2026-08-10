@@ -153,7 +153,6 @@ fn get_known_devices() -> Vec<serde_json::Value> {
 fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
     let api = HidApi::new().map_err(|e| format!("无法初始化HID API: {}", e))?;
     let mut devices = Vec::new();
-    let mut seen_paths = HashSet::new();
 
     for device_info in api.device_list() {
         let vid = device_info.vendor_id();
@@ -173,9 +172,6 @@ fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
             let product = device_info.product_string().map(|s| s.to_string());
 
             let path = device_info.path().to_string_lossy().to_string();
-            if !seen_paths.insert(path.clone()) {
-                continue;
-            }
 
             // 生成显示名称
             let display_name = if let Some(ref sn) = serial {
@@ -420,8 +416,15 @@ fn set_sample_rate(rate: u64, state: State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
-#[tauri::command]
-fn exit_app(state: State<'_, AppState>, app: AppHandle) {
+/// 退出流程的唯一入口：先停后台任务，再强制销毁主窗口。
+///
+/// 必须用 `destroy` 而不是 `close`——`close` 会重新派发 close-requested 事件，
+/// 与前端的退出确认监听器构成回环，窗口反而关不掉（Tauri v2 起的行为变更）。
+///
+/// 标为 `async` 交由 Tauri 的工作线程调度：`stop_task` 会 join 后台线程，
+/// 而这些线程退出前可能仍在 `emit`（需要主线程处理），在主线程上阻塞等待会死锁。
+#[tauri::command(async)]
+fn shutdown(state: State<'_, AppState>, app: AppHandle) {
     if let Ok(mut task) = state.device_task.lock() {
         stop_task(&mut task);
     }
@@ -429,29 +432,15 @@ fn exit_app(state: State<'_, AppState>, app: AppHandle) {
         stop_task(&mut task);
     }
 
-    // Prefer framework-managed exit to avoid abrupt teardown on Windows.
-    app.exit(0);
-}
-
-#[tauri::command]
-fn close_main_window(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
-    if let Ok(mut task) = state.device_task.lock() {
-        stop_task(&mut task);
+    match app.get_webview_window("main") {
+        Some(window) => {
+            if let Err(e) = window.destroy() {
+                eprintln!("销毁主窗口失败，回退为进程退出: {}", e);
+                app.exit(0);
+            }
+        }
+        None => app.exit(0),
     }
-    if let Ok(mut task) = state.temp_task.lock() {
-        stop_task(&mut task);
-    }
-
-    if let Some(window) = app.get_webview_window("main") {
-        window
-            .close()
-            .map_err(|e| format!("关闭主窗口失败: {}", e))?;
-        return Ok(());
-    }
-
-    eprintln!("未找到主窗口，回退为应用退出");
-    app.exit(0);
-    Ok(())
 }
 
 /// 连接温度服务
@@ -562,36 +551,29 @@ fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
         return None;
     }
 
-    let f32_at = |offset| -> Option<f32> {
-        Some(f32::from_le_bytes(buf[offset..offset + 4].try_into().ok()?))
-    };
-    let ah = f32_at(14)?;
-    let wh = f32_at(18)?;
-    let dp = f32_at(30)?;
-    let dn = f32_at(34)?;
-    let temperature = f32_at(42)?;
-    let voltage = f32_at(46)?;
-    let current = f32_at(50)?;
+    // 长度已确认为 64，下列定长读取不会越界。
+    let f32_at = |o: usize| f32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
+
+    let ah = f32_at(14);
+    let wh = f32_at(18);
+    let dp = f32_at(30);
+    let dn = f32_at(34);
+    let temperature = f32_at(42);
+    let voltage = f32_at(46);
+    let current = f32_at(50);
     let cc1 = buf[55] as f32 / 10.0;
     let cc2 = buf[56] as f32 / 10.0;
     let power = voltage * current;
 
-    let values = [
-        ah,
-        wh,
-        dp,
-        dn,
-        temperature,
-        voltage,
-        current,
-        power,
-        cc1,
-        cc2,
-    ];
-    if values.iter().any(|value| !value.is_finite())
-        || !(0.0..=60.0).contains(&voltage)
-        || current.abs() > 10.0
+    // 范围判定对 NaN 一律返回 false，因此下面的取反同时兜住了非有限值。
+    // cc1/cc2 由 u8 换算、power 由已校验的电压电流相乘，都无需单独判定。
+    if !(0.0..=60.0).contains(&voltage)
+        || !(-10.0..=10.0).contains(&current)
         || !(-40.0..=150.0).contains(&temperature)
+        || !ah.is_finite()
+        || !wh.is_finite()
+        || !dp.is_finite()
+        || !dn.is_finite()
     {
         return None;
     }
@@ -622,8 +604,7 @@ pub fn run() {
             connect_device_by_path,
             disconnect_device,
             set_sample_rate,
-            exit_app,
-            close_main_window,
+            shutdown,
             enumerate_devices,
             get_known_devices,
             get_current_device_info,

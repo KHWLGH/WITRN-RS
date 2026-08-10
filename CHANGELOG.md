@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **退出流程回环**：确认退出后改为调用后端 `shutdown`（停后台线程 → `destroy` 主窗口）。原先走 `window.close()`，而 Tauri v2 起 `close` 会重新派发 close-requested 事件，与前端的退出确认监听器构成回环；旧代码靠「先注销监听器再 close」规避，但注销是异步 IPC，抢先失败时后端仍返回成功，前端便不再尝试其它路径，窗口就此关不掉。`destroy` 不派发该事件，不存在这个竞争
+- **退出时线程 join 死锁**：`shutdown` 标为 `#[tauri::command(async)]`。原 `exit_app` / `close_main_window` 是同步命令，在主线程上 join 后台线程，而后台线程退出前可能仍在 `emit`（需要主线程处理），构成死锁
 - **后台任务生命周期**：HID 与温度连接改为每代独立停止标志并保存线程句柄，重连和退出前等待旧线程结束，避免旧连接复活后重复推送数据
 - **温度服务稳定性**：读取超时缩短到 250ms，并将空闲超时与真实断线分开处理；低频温度源不再被误判为断开
 - **HID 接口选择**：设备枚举按物理设备分组，有厂商自定义 Usage Page 时优先保留数据接口，并在无法唯一判断时显示接口编号供用户选择
@@ -25,13 +27,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Biome 质量门禁**：恢复并锁定 Biome 2.4.4，`npm run lint` 对 warning 级诊断也返回失败，并新增 `npm run format` 安全格式化命令
 
 ### Changed
+- **移除过度防御**：清理工具软件不需要的冗余保护层
+  - 退出流程从 5 级回退链（`close_main_window` → `exit_app` → `destroy` → `close`）收敛为单一确定路径，`app.js` 该段 110 行降到 27 行；顺带删除只为它存在的 `__withTimeout`。其中前端 `appWindow.destroy()` / `close()` 两级本就是死代码——它们属于 `core:window:allow-*` 权限，而本应用只声明了 `core:default`（窗口部分为只读），调用必被 ACL 拒绝
+  - `parse_device_data` 移除长度已校验后不可达的 8 处 `?` 分支，并去掉对 `power`（乘积）和 `cc1`/`cc2`（`u8` 换算）这三个不可能非有限的值的判定
+  - `enumerate_devices` 移除 `seen_paths` 去重：hidapi 的设备路径本就唯一，该集合不可能命中
+  - `normalizeSettings` / `normalizeAutoPause` 从逐字段类型校验（42 行）收敛为默认值合并 + 仅对参与下标换算和下发后端的字段钳位（22 行）
+  - 移除温度端口的重复校验（输入框 change 时已校验，且后端命令签名为 `u16`）、`getVisibleDataRange` 中不可达的负值钳位、温度值的二次有限性判定
+  - `typeof state.__setRangeControlsEnabled === 'function'` 三处改用可选调用
+- **精简 CI**：移除 `cargo check`——它排在 `cargo clippy --all-targets` 和 `cargo test` 之后，二者均已完整编译
 - **项目状态**：撤销 README 归档声明，恢复活跃维护
 - **安全权限收紧**：移除未使用的 opener 插件及主目录递归写权限，并为 Tauri WebView 配置基础 CSP
 - **流式统计性能**：选中范围统计改为 250ms 节流，避免长录制时每个采样点都执行 O(n) 全量扫描
 - **阻塞命令调度**：HID 枚举、设备连接和温度连接交由 Tauri 异步命令调度，避免连接超时冻结界面
 - **状态与残留清理**：录制逻辑只依赖 `state.isRecording`，移除旧 TCP 状态、无调用工具函数、调试 Store 探针和未使用 opener 依赖
 - **开发文档同步**：README 更新实际显示字段、软件积分语义、uPlot 架构、`measurement.js` 模块与 `test/` 测试结构、HID 校验、安全边界和 CI 使用方法
-- **忽略规则整理**：修复 `.vscode/` 与其白名单冲突导致的失效规则、去重 `.idea/`、纠正打包产物与 Python 分类错位、移除无打包器的 `dist/` 残留，并放开 `test/fixtures/*.csv` 供 CSV 解析回归使用
+- **忽略规则整理**：修复 `.vscode/` 与其白名单冲突导致的失效规则、去重 `.idea/`、纠正打包产物与 Python 分类错位、移除无打包器的 `dist/` 残留
 - **换行规范**：通过 `.editorconfig`、Biome 和 `.gitattributes` 统一文本文件使用 LF，二进制资源不参与换行转换
 - **百万级点数支持**（不做数据降采样）：
   - 自适应路径构建：可见点数 ≤ 1000 时用 spline 平滑，密集视图切换到 uPlot linear 构建器（按像素列聚合 min/max，视觉无损），百万点全景渲染与拖动流畅

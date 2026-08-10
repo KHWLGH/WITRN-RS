@@ -27,115 +27,36 @@ const { ask, message } = window.__TAURI__.dialog;
 // ─── Close confirmation ──────────────────────────────────────────────────────
 
 let __isClosingWindow = false;
-/** @type {(() => void)|null} */
-let __unlistenCloseRequested = null;
 
 /**
- * 带超时的 Promise 包装器。
- * @template T
- * @param {Promise<T>} promise
- * @param {number} ms
- * @param {T} fallback
- * @returns {Promise<T>}
+ * 退出确认。确认后由后端 `shutdown` 停止后台任务并 destroy 主窗口。
+ *
+ * destroy 不会重新派发 close-requested，因此这里既不需要注销监听器，也不需要备用关闭路径。
+ * 关闭动作必须走后端：前端的 `close()` / `destroy()` 属于 `core:window:allow-*` 权限，
+ * 本应用的 capability 只声明了 `core:default`（窗口部分是只读的），调用会被 ACL 拒绝。
  */
-function __withTimeout(promise, ms, fallback) {
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let timer = null;
-  const timeout = new Promise((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
-  });
-  return /** @type {Promise<T>} */ (
-    Promise.race([promise, timeout]).finally(() => {
-      if (timer) clearTimeout(timer);
-    })
-  );
-}
-
 async function setupCloseConfirm() {
-  try {
-    const getCurrentWindow = window.__TAURI__?.window?.getCurrentWindow;
-    if (typeof getCurrentWindow !== 'function') return;
+  const appWindow = window.__TAURI__.window.getCurrentWindow();
 
-    const appWindow = getCurrentWindow();
-    if (!appWindow || typeof appWindow.onCloseRequested !== 'function') return;
+  await appWindow.onCloseRequested(async (/** @type {any} */ event) => {
+    event.preventDefault();
+    if (__isClosingWindow) return;
 
-    __unlistenCloseRequested = await appWindow.onCloseRequested(async (/** @type {any} */ event) => {
-      try {
-        event.preventDefault();
-      } catch {
-        /* noop */
-      }
+    const confirmed = await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' });
+    if (!confirmed) return;
+    __isClosingWindow = true;
 
-      if (__isClosingWindow) {
-        // Ignore repeated close clicks while the shutdown flow is running.
-        console.info('Close request ignored: shutdown already in progress.');
-        return;
-      }
+    // 设置里可能还压着一次未触发的防抖保存；saveSettings 自身已吞掉写盘异常。
+    await saveSettings();
 
-      let confirmed = false;
-      try {
-        // Wait for explicit user intent; never auto-confirm on timeout.
-        confirmed = /** @type {boolean} */ (await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' }));
-      } catch {
-        confirmed = false;
-      }
-
-      if (!confirmed) return;
-
-      console.info('Shutdown confirmed by user.');
-      __isClosingWindow = true;
-
-      try {
-        if (typeof __unlistenCloseRequested === 'function') __unlistenCloseRequested();
-      } catch {
-        /* noop */
-      }
-      __unlistenCloseRequested = null;
-
-      try {
-        await __withTimeout(invoke('disconnect_device'), 500, null);
-      } catch (e) {
-        console.warn('disconnect_device failed during close:', e);
-      }
-      try {
-        await __withTimeout(invoke('disconnect_temp_service'), 500, null);
-      } catch (e) {
-        console.warn('disconnect_temp_service failed during close:', e);
-      }
-      try {
-        await __withTimeout(saveSettings(), 2000, null);
-      } catch (e) {
-        console.warn('saveSettings failed during close:', e);
-      }
-
-      try {
-        console.info('Closing main window via backend command.');
-        await __withTimeout(invoke('close_main_window'), 300, null);
-        return;
-      } catch (e) {
-        console.warn('close_main_window failed:', e);
-      }
-      try {
-        console.warn('Falling back to exit_app.');
-        await __withTimeout(invoke('exit_app'), 1000, null);
-        return;
-      } catch (e) {
-        console.warn('exit_app failed:', e);
-      }
-      try {
-        if (typeof appWindow.destroy === 'function') await __withTimeout(appWindow.destroy(), 500, null);
-      } catch (e) {
-        console.warn('appWindow.destroy failed:', e);
-      }
-      try {
-        appWindow.close();
-      } catch (e) {
-        console.warn('appWindow.close failed:', e);
-      }
-    });
-  } catch (e) {
-    console.error('Failed to setup close confirm:', e);
-  }
+    try {
+      await invoke('shutdown');
+    } catch (e) {
+      // 退出失败必须复位，否则窗口再也关不掉。
+      console.error('退出失败:', e);
+      __isClosingWindow = false;
+    }
+  });
 }
 
 // ─── Chart toggles ───────────────────────────────────────────────────────────
@@ -322,9 +243,7 @@ function setupControls() {
 
   updateSliderFill();
 
-  if (typeof state.__setRangeControlsEnabled === 'function') {
-    state.__setRangeControlsEnabled(!state.isRecording);
-  }
+  state.__setRangeControlsEnabled?.(!state.isRecording);
 
   // Sample rate
   const sampleRateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));

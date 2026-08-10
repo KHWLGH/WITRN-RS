@@ -17,51 +17,39 @@ let settingsStore = null;
 let isLoadingSettings = false;
 
 /**
- * 仅接收已知且合理的设置值，避免手工编辑 settings.json 将畸形数据带入运行时。
+ * 合并已保存的设置。只对参与索引计算或直接下发后端的数值字段钳位；
+ * 其余字段即使被手工改坏也仅影响显示，不做逐字段校验。
  * @param {unknown} saved
  * @returns {import('./state.js').Settings}
  */
 function normalizeSettings(saved) {
-  const source = saved && typeof saved === 'object' ? /** @type {Record<string, unknown>} */ (saved) : {};
-  const numberValue = (key, fallback, min, max) => {
-    const value = Number(source[key]);
-    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
-  };
-  const boolValue = (key, fallback) => (typeof source[key] === 'boolean' ? source[key] : fallback);
-  const stringValue = (key, fallback) =>
-    typeof source[key] === 'string' && source[key].trim() ? source[key] : fallback;
+  const source = /** @type {Partial<import('./state.js').Settings>} */ (
+    saved && typeof saved === 'object' ? saved : {}
+  );
+  const merged = { ...defaultSettings, ...source };
 
-  return {
-    rangeStart: numberValue('rangeStart', defaultSettings.rangeStart, 0, 1000),
-    rangeEnd: numberValue('rangeEnd', defaultSettings.rangeEnd, 0, 1000),
-    sampleRate: Math.round(numberValue('sampleRate', defaultSettings.sampleRate, 10, 60000)),
-    showVoltage: boolValue('showVoltage', defaultSettings.showVoltage),
-    showCurrent: boolValue('showCurrent', defaultSettings.showCurrent),
-    showPower: boolValue('showPower', defaultSettings.showPower),
-    showTemp: boolValue('showTemp', defaultSettings.showTemp),
-    opacityVoltage: numberValue('opacityVoltage', defaultSettings.opacityVoltage, 0, 100),
-    opacityCurrent: numberValue('opacityCurrent', defaultSettings.opacityCurrent, 0, 100),
-    opacityPower: numberValue('opacityPower', defaultSettings.opacityPower, 0, 100),
-    opacityTemp: numberValue('opacityTemp', defaultSettings.opacityTemp, 0, 100),
-    statsRange: boolValue('statsRange', defaultSettings.statsRange),
-    tempIp: stringValue('tempIp', defaultSettings.tempIp),
-    tempPort: Math.round(numberValue('tempPort', defaultSettings.tempPort, 1, 65535)),
-  };
+  /** @param {number} value @param {number} min @param {number} max @param {number} fallback */
+  const clamp = (value, min, max, fallback) =>
+    Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
+  // rangeStart/rangeEnd 参与可见区间的下标换算，sampleRate 会下发到后端命令。
+  merged.rangeStart = clamp(merged.rangeStart, 0, 1000, defaultSettings.rangeStart);
+  merged.rangeEnd = clamp(merged.rangeEnd, 0, 1000, defaultSettings.rangeEnd);
+  merged.sampleRate = Math.round(clamp(merged.sampleRate, 10, 60_000, defaultSettings.sampleRate));
+  return merged;
 }
 
 /** @param {unknown} saved @returns {import('./state.js').AutoPauseSettings} */
 function normalizeAutoPause(saved) {
-  const source = saved && typeof saved === 'object' ? /** @type {Record<string, unknown>} */ (saved) : {};
-  const condition = Number(source.condition);
-  const duration = Number(source.duration);
-  const basis = source.basis;
-  return {
-    enabled: typeof source.enabled === 'boolean' ? source.enabled : defaultAutoPauseSettings.enabled,
-    basis: basis === 'voltage' || basis === 'current' || basis === 'power' ? basis : 'none',
-    condition: Number.isFinite(condition) ? condition : defaultAutoPauseSettings.condition,
-    duration: Number.isFinite(duration) ? Math.max(0, duration) : defaultAutoPauseSettings.duration,
-    triggerStartTime: null,
-  };
+  const source = /** @type {Partial<import('./state.js').AutoPauseSettings>} */ (
+    saved && typeof saved === 'object' ? saved : {}
+  );
+  const merged = { ...defaultAutoPauseSettings, ...source, triggerStartTime: null };
+
+  // 这两个值参与自动停止的数值比较，非数值会让比较结果不可预期。
+  if (!Number.isFinite(merged.condition)) merged.condition = defaultAutoPauseSettings.condition;
+  if (!Number.isFinite(merged.duration)) merged.duration = defaultAutoPauseSettings.duration;
+  return merged;
 }
 
 /**
