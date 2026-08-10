@@ -18,27 +18,30 @@ pub struct KnownDevice {
     pub pid: u16,
 }
 
+/// 维简设备的厂商 ID
+pub const WITRN_VID: u16 = 0x0716;
+
 /// 支持的维简设备列表
 pub const KNOWN_DEVICES: &[KnownDevice] = &[
     KnownDevice {
         name: "WITRN K2",
-        vid: 0x0716,
+        vid: WITRN_VID,
         pid: 0x5060,
     },
     KnownDevice {
         name: "WITRN U3",
-        vid: 0x0716,
+        vid: WITRN_VID,
         pid: 0x5063,
     },
     // Some C5 firmware/variants report PID 0x5053 (observed in the field).
     KnownDevice {
         name: "WITRN C5",
-        vid: 0x0716,
+        vid: WITRN_VID,
         pid: 0x5053,
     },
     KnownDevice {
         name: "WITRN C5",
-        vid: 0x0716,
+        vid: WITRN_VID,
         pid: 0x5064,
     },
 ];
@@ -133,21 +136,6 @@ impl Default for AppState {
     }
 }
 
-/// 获取已知设备列表（用于前端显示支持的设备类型）
-#[tauri::command]
-fn get_known_devices() -> Vec<serde_json::Value> {
-    KNOWN_DEVICES
-        .iter()
-        .map(|d| {
-            serde_json::json!({
-                "name": d.name,
-                "vid": format!("0x{:04X}", d.vid),
-                "pid": format!("0x{:04X}", d.pid),
-            })
-        })
-        .collect()
-}
-
 /// 枚举所有已连接的维简设备
 #[tauri::command(async)]
 fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
@@ -161,42 +149,46 @@ fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
         // 检查是否是已知的维简设备
         let known = KNOWN_DEVICES.iter().find(|d| d.vid == vid && d.pid == pid);
 
+        // 固件变体会换 PID（C5 已实测到 0x5053 / 0x5064 两个），所以按厂商 VID 收全，
+        // 而不是只认硬编码型号表：界面上的 VID/PID 输入框是只读的，
+        // 没进枚举列表的设备就再没有别的连接入口。
+        if known.is_none() && vid != WITRN_VID {
+            continue;
+        }
+
         let model_name = known
             .map(|d| d.name.to_string())
-            .unwrap_or_else(|| format!("未知设备 ({:04X}:{:04X})", vid, pid));
+            .unwrap_or_else(|| format!("未知 WITRN 设备 ({:04X}:{:04X})", vid, pid));
 
-        // 枚举列表只展示已知 WITRN 型号；未知 VID/PID 仍可通过手动连接命令使用。
-        if known.is_some() {
-            let serial = device_info.serial_number().map(|s| s.to_string());
-            let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
-            let product = device_info.product_string().map(|s| s.to_string());
+        let serial = device_info.serial_number().map(|s| s.to_string());
+        let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
+        let product = device_info.product_string().map(|s| s.to_string());
 
-            let path = device_info.path().to_string_lossy().to_string();
+        let path = device_info.path().to_string_lossy().to_string();
 
-            // 生成显示名称
-            let display_name = if let Some(ref sn) = serial {
-                if !sn.is_empty() {
-                    format!("{} (SN: {})", model_name, sn)
-                } else {
-                    model_name.clone()
-                }
+        // 生成显示名称
+        let display_name = if let Some(ref sn) = serial {
+            if !sn.is_empty() {
+                format!("{} (SN: {})", model_name, sn)
             } else {
                 model_name.clone()
-            };
+            }
+        } else {
+            model_name.clone()
+        };
 
-            devices.push(DeviceInfo {
-                path,
-                vid,
-                pid,
-                serial_number: serial,
-                manufacturer,
-                product,
-                model_name,
-                display_name,
-                interface_number: device_info.interface_number(),
-                usage_page: device_info.usage_page(),
-            });
-        }
+        devices.push(DeviceInfo {
+            path,
+            vid,
+            pid,
+            serial_number: serial,
+            manufacturer,
+            product,
+            model_name,
+            display_name,
+            interface_number: device_info.interface_number(),
+            usage_page: device_info.usage_page(),
+        });
     }
 
     // 同一物理设备可能同时暴露键盘接口和厂商自定义数据接口。
@@ -481,7 +473,8 @@ fn connect_temp_service(
             if !running_for_thread.load(Ordering::Relaxed) {
                 break;
             }
-            line.clear();
+            // 读超时会带着已读到的半行数据返回 Err，因此只在整行处理完之后才清空缓冲，
+            // 让下一轮把剩余部分续上——每轮开头就清会把半行丢掉，剩下的半行成为坏数据。
             match reader.read_line(&mut line) {
                 Ok(0) => {
                     if running_for_thread.load(Ordering::Relaxed) {
@@ -496,6 +489,7 @@ fn connect_temp_service(
                             let _ = app.emit("temp-data", temp);
                         }
                     }
+                    line.clear();
                 }
                 Err(e)
                     if matches!(
@@ -532,20 +526,6 @@ fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String>
     Ok("已断开温度服务连接".to_string())
 }
 
-/// 获取温度服务连接状态
-#[tauri::command]
-fn get_temp_service_status(state: State<'_, AppState>) -> bool {
-    state
-        .temp_task
-        .lock()
-        .ok()
-        .and_then(|task| {
-            task.as_ref()
-                .map(|task| task.running.load(Ordering::Relaxed))
-        })
-        .unwrap_or(false)
-}
-
 fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
     if buf.len() != 64 || buf[0] != 0xFF {
         return None;
@@ -558,18 +538,27 @@ fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
     let wh = f32_at(18);
     let dp = f32_at(30);
     let dn = f32_at(34);
-    let temperature = f32_at(42);
+    let raw_temperature = f32_at(42);
     let voltage = f32_at(46);
     let current = f32_at(50);
     let cc1 = buf[55] as f32 / 10.0;
     let cc2 = buf[56] as f32 / 10.0;
     let power = voltage * current;
 
+    // 温度的字节偏移只在一个型号上验证过，别的固件那里可能压根不是温度。
+    // 越界时只记为缺失（前端已按 NaN 处理无温度），不能因为这个字段丢掉整帧数据——
+    // 那会让新型号表现为「连上了但没有任何数据」。
+    let temperature = if (-40.0..=150.0).contains(&raw_temperature) {
+        raw_temperature
+    } else {
+        f32::NAN
+    };
+
+    // 电压和电流是绘图与统计的依据，越界即认为该帧不可信。
     // 范围判定对 NaN 一律返回 false，因此下面的取反同时兜住了非有限值。
     // cc1/cc2 由 u8 换算、power 由已校验的电压电流相乘，都无需单独判定。
     if !(0.0..=60.0).contains(&voltage)
         || !(-10.0..=10.0).contains(&current)
-        || !(-40.0..=150.0).contains(&temperature)
         || !ah.is_finite()
         || !wh.is_finite()
         || !dp.is_finite()
@@ -606,11 +595,9 @@ pub fn run() {
             set_sample_rate,
             shutdown,
             enumerate_devices,
-            get_known_devices,
             get_current_device_info,
             connect_temp_service,
-            disconnect_temp_service,
-            get_temp_service_status
+            disconnect_temp_service
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -681,10 +668,16 @@ mod tests {
         let mut frame = valid_frame();
         frame[50..54].copy_from_slice(&10.1f32.to_le_bytes());
         assert!(parse_device_data(&frame).is_none());
+    }
 
+    #[test]
+    fn keeps_frame_but_drops_temperature_when_out_of_range() {
         let mut frame = valid_frame();
         frame[42..46].copy_from_slice(&150.1f32.to_le_bytes());
-        assert!(parse_device_data(&frame).is_none());
+
+        let data = parse_device_data(&frame).expect("越界温度不应丢掉整帧");
+        assert_eq!(data.voltage, 5.0);
+        assert!(data.temperature.is_nan());
     }
 
     #[test]

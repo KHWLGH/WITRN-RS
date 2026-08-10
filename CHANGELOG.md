@@ -8,13 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **未知 PID 的 WITRN 设备无法连接**：设备枚举只匹配硬编码型号表，固件变体不会出现在列表中（C5 已实测到 0x5053 / 0x5064 两个 PID），而界面上的 VID/PID 输入框是只读的，没有手动连接入口，这类设备便完全无法使用。现在按厂商 VID 收全同厂设备，型号不在表内时显示为「未知 WITRN 设备 (VID:PID)」
+- **「仅统计选中范围」对累计量失效**：勾选后累计能量（Wh）与容量（mAh）仍显示全量累计值，只有最值/均值跟随选区。现在两者也按选中区间重新积分；积分时间轴取相对秒（`chartSeries.x`）而非挂钟时间戳，与实时累计口径一致，录制暂停留下的空档不会被当作持续放电计入
 - **退出流程回环**：确认退出后改为调用后端 `shutdown`（停后台线程 → `destroy` 主窗口）。原先走 `window.close()`，而 Tauri v2 起 `close` 会重新派发 close-requested 事件，与前端的退出确认监听器构成回环；旧代码靠「先注销监听器再 close」规避，但注销是异步 IPC，抢先失败时后端仍返回成功，前端便不再尝试其它路径，窗口就此关不掉。`destroy` 不派发该事件，不存在这个竞争
 - **退出时线程 join 死锁**：`shutdown` 标为 `#[tauri::command(async)]`。原 `exit_app` / `close_main_window` 是同步命令，在主线程上 join 后台线程，而后台线程退出前可能仍在 `emit`（需要主线程处理），构成死锁
 - **后台任务生命周期**：HID 与温度连接改为每代独立停止标志并保存线程句柄，重连和退出前等待旧线程结束，避免旧连接复活后重复推送数据
-- **温度服务稳定性**：读取超时缩短到 250ms，并将空闲超时与真实断线分开处理；低频温度源不再被误判为断开
+- **温度服务稳定性**：读取超时缩短到 250ms，并将空闲超时与真实断线分开处理；低频温度源不再被误判为断开。读超时会带着已读到的半行数据返回，该缓冲保留到下一轮续读，不再被清空成一条残缺数据
 - **HID 接口选择**：设备枚举按物理设备分组，有厂商自定义 Usage Page 时优先保留数据接口，并在无法唯一判断时显示接口编号供用户选择
 - **录制测量正确性**：开始和停止录制时重置能量积分基线，暂停时长不再被计入 Wh/mAh；导入数据后续录会从最后一个相对时间点连续追加
-- **数据完整性**：HID 帧增加长度、帧头、有限值和物理范围校验；缺失温度使用 `NaN`，真实的 0°C 可正常进入图表、统计和 CSV 往返
+- **数据完整性**：HID 帧增加长度、帧头以及电压/电流范围校验；温度越界只记为缺失而不丢弃整帧（该字节偏移只在一个型号上验证过，用它否决整帧会让别的固件表现为「连上了但没有数据」）；缺失温度使用 `NaN`，真实的 0°C 可正常进入图表、统计和 CSV 往返
 - **CSV 与设置边界**：导入、导出统一从图表列式数据派生；导入采样间隔和持久化设置均做类型及范围校验；Tauri v2 对话框统一使用 `kind` 字段
 - **交互可访问性**：导出菜单改为语义化按钮，支持 Enter、Space、Escape、上下方向键和 Home/End；录制期间禁用一键重置
 - **前端类型检查**：补回范围时间格式化依赖，修正温度空值与图表窗口状态类型，并隔离父目录 Node 类型污染
@@ -31,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 退出流程从 5 级回退链（`close_main_window` → `exit_app` → `destroy` → `close`）收敛为单一确定路径，`app.js` 该段 110 行降到 27 行；顺带删除只为它存在的 `__withTimeout`。其中前端 `appWindow.destroy()` / `close()` 两级本就是死代码——它们属于 `core:window:allow-*` 权限，而本应用只声明了 `core:default`（窗口部分为只读），调用必被 ACL 拒绝
   - `parse_device_data` 移除长度已校验后不可达的 8 处 `?` 分支，并去掉对 `power`（乘积）和 `cc1`/`cc2`（`u8` 换算）这三个不可能非有限的值的判定
   - `enumerate_devices` 移除 `seen_paths` 去重：hidapi 的设备路径本就唯一，该集合不可能命中
+  - 删除前端从未调用的 `get_known_devices` 与 `get_temp_service_status` 命令，以及随之不再使用的 `serde_json` 直接依赖
   - `normalizeSettings` / `normalizeAutoPause` 从逐字段类型校验（42 行）收敛为默认值合并 + 仅对参与下标换算和下发后端的字段钳位（22 行）
   - 移除温度端口的重复校验（输入框 change 时已校验，且后端命令签名为 `u16`）、`getVisibleDataRange` 中不可达的负值钳位、温度值的二次有限性判定
   - `typeof state.__setRangeControlsEnabled === 'function'` 三处改用可选调用
