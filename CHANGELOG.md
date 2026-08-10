@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.5] - 2026-08-10
 
 ### Fixed
 - **未知 PID 的 WITRN 设备无法连接**：设备枚举只匹配硬编码型号表，固件变体不会出现在列表中（C5 已实测到 0x5053 / 0x5064 两个 PID），而界面上的 VID/PID 输入框是只读的，没有手动连接入口，这类设备便完全无法使用。现在按厂商 VID 收全同厂设备，型号不在表内时显示为「未知 WITRN 设备 (VID:PID)」

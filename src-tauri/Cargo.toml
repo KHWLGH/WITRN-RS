@@ -1,6 +1,6 @@
 [package]
 name = "witrn-rs"
-version = "0.1.4"
+version = "0.1.5"
 description = "WITRN-RS"
 authors = ["KHWLGH"]
 edition = "2021"
