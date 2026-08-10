@@ -4,7 +4,7 @@
  */
 
 import { setSeriesFill, setSeriesVisible } from './chart.js';
-import { updateStatsDisplay } from './data.js';
+import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 
@@ -252,6 +252,7 @@ export async function resetSettings() {
     setSeriesFill(3, state.settings.opacityTemp);
 
     updateStatsDisplay();
+    updateEnergyDisplay();
     updateTempUIVisibility();
 
     // Clear saved settings from store

@@ -12,6 +12,7 @@ import {
   startRecording,
   stopRecording,
   updateChartRange,
+  updateEnergyDisplay,
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
@@ -291,6 +292,7 @@ function setupControls() {
     statsRangeToggle.addEventListener('change', (e) => {
       state.settings.statsRange = /** @type {HTMLInputElement} */ (e.target).checked;
       updateStatsDisplay();
+      updateEnergyDisplay();
       debouncedSaveSettings();
     });
   }

@@ -4,6 +4,7 @@
  */
 
 import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
+import { calculateEnergyInRange } from './measurement.js';
 import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { formatRelativeHMS } from './utils.js';
@@ -69,7 +70,8 @@ export function addDataPoint(data) {
 
   updateRealtimeDisplay({ ...data, current: currentAbs, power: powerAbs, temp: tempValue });
   scheduleStatsUpdate();
-  updateEnergyDisplay();
+  // 全量模式的能量读数是 O(1)，逐点刷新更跟手；范围模式要重扫可见区间，交给上面的节流路径。
+  if (!state.settings.statsRange) updateEnergyDisplay();
 
   const dataCountEl = document.getElementById('data-count');
   if (dataCountEl) dataCountEl.textContent = String(state.chartData.timestamps.length);
@@ -304,12 +306,26 @@ export function updateStatsDisplay() {
   if (avgTempEl) avgTempEl.textContent = displayTempAvg !== null ? displayTempAvg.toFixed(1) : '--';
 }
 
-/** 更新能量显示。 */
+/** 更新能量显示（支持范围模式）。 */
 export function updateEnergyDisplay() {
+  let { wh, mah } = state.energy;
+
+  // 范围模式下累计量也只统计选中区间，与最值/均值口径一致。
+  if (state.settings.statsRange && state.chartData.timestamps.length > 0) {
+    const { startIndex, endIndex } = getVisibleDataRange();
+    ({ wh, mah } = calculateEnergyInRange(
+      state.chartSeries.x,
+      state.chartData.current,
+      state.chartData.power,
+      startIndex,
+      endIndex,
+    ));
+  }
+
   const whEl = document.getElementById('rt-energy');
   const mahEl = document.getElementById('rt-capacity');
-  if (whEl) whEl.textContent = state.energy.wh.toFixed(4);
-  if (mahEl) mahEl.textContent = state.energy.mah.toFixed(2);
+  if (whEl) whEl.textContent = wh.toFixed(4);
+  if (mahEl) mahEl.textContent = mah.toFixed(2);
 }
 
 // ─── Throttled stats refresh ─────────────────────────────────────────────────
@@ -318,7 +334,7 @@ export function updateEnergyDisplay() {
 let __statsUpdateTimer = null;
 
 /**
- * 节流版 updateStatsDisplay。
+ * 节流版 updateStatsDisplay（含能量显示）。
  * 范围统计需要 O(可见点数) 的遍历，流式采样不需要每个点都同步重扫。
  * 250ms 的上限刷新间隔保持 UI 可读性，同时避免长录制时主线程被统计占满。
  */
@@ -327,6 +343,7 @@ export function scheduleStatsUpdate() {
   __statsUpdateTimer = setTimeout(() => {
     __statsUpdateTimer = null;
     updateStatsDisplay();
+    updateEnergyDisplay();
   }, 250);
 }
 
