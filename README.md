@@ -31,6 +31,16 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 *   **轻量级**：基于 Tauri 构建，安装包体积小，运行资源占用低
 *   **自定义采样率**：可调节数据采样频率以适应不同使用场景
 
+## 📸 屏幕截图
+
+### Windows
+
+![WITRN-RS 在 Windows 上的界面](docs/screenshots/windows-screenshot.png)
+
+### Linux
+
+![WITRN-RS 在 Linux 上的界面](docs/screenshots/linux-screenshot.png)
+
 ## 📱 支持的设备
 
 目前支持以下 WITRN 设备：
