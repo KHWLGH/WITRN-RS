@@ -36,3 +36,38 @@ export function hexToRgba(hex, opacityPercent) {
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${opacityPercent / 100})`;
 }
+
+/**
+ * 按采样率下拉框的既有文案约定，把采样间隔渲染成「N 次/秒」。
+ * @param {number} intervalMs - 采样间隔（毫秒）
+ * @returns {string}
+ */
+export function formatSampleRateLabel(intervalMs) {
+  const perSecond = Number((1000 / intervalMs).toFixed(2));
+  return intervalMs > 1000
+    ? `${perSecond} 次/秒 (${Number((intervalMs / 1000).toFixed(2))}秒1次)`
+    : `${perSecond} 次/秒`;
+}
+
+/**
+ * 把采样率写入下拉框。
+ *
+ * 后端与设置允许 10..60000ms 的任意值（CSV 导入会带进预设之外的采样率），
+ * 而下拉框只列了 6 个常用档位。直接赋一个不在列表里的值会让 selectedIndex
+ * 变成 -1、控件显示空白，所以这里按需补一个表示实际值的选项。
+ *
+ * @param {HTMLSelectElement} select
+ * @param {number} intervalMs
+ */
+export function setSampleRateOption(select, intervalMs) {
+  const value = String(intervalMs);
+  if (!Array.from(select.options).some((o) => o.value === value)) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = formatSampleRateLabel(intervalMs);
+    // 按间隔升序插入，与预设选项的排列保持一致。
+    const after = Array.from(select.options).find((o) => Number(o.value) > intervalMs);
+    select.insertBefore(option, after ?? null);
+  }
+  select.value = value;
+}

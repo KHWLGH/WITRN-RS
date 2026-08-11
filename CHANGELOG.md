@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.5] - 2026-08-10
 
 ### Fixed
+- **Linux 下拉框弹出列表为白底**：WebKitGTK 把 `<select>` 展开后的选项列表交给 GTK 原生控件绘制，CSS 完全作用不到，深色主题下永远是白底。改为自定义下拉组件（`src/dropdown.js`）：原生 `<select>` 保留在 DOM 中作为唯一数据源、仅在视觉上隐藏，另渲染纯 DOM 的按钮与列表，调用方的 `.value` / `.options` / `change` 用法无需改动。option 增删与 `disabled` 变化经 `MutationObserver` 同步；`.value` / `.selectedIndex` 赋值经实例属性拦截同步（属性赋值不反射到 attribute，`MutationObserver` 观察不到）。菜单挂在 `body` 上用 `position: fixed`，避开 ribbon 的 overflow 裁剪与层叠上下文。同时补上 `color-scheme: dark`，让滚动条等其余原生控件也走深色
+- **采样率下拉框显示空白**：CSV 导入会把头部 `SampTime(ms)` 的任意值（钳到 10..60000ms）写入下拉框，而列表只有 6 个预设档位；值不在其中时 `selectedIndex` 变成 -1，控件什么都不显示，且该值会被持久化，之后每次启动都是空白。现在按需插入一个表示实际值的选项（10ms → 「100 次/秒」，按间隔升序排列），而不是吸附到最近的预设——`sampleRate` 参与 x 轴换算与能量积分并会下发后端，改动它会让派生量与实际数据对不上
 - **未知 PID 的 WITRN 设备无法连接**：设备枚举只匹配硬编码型号表，固件变体不会出现在列表中（C5 已实测到 0x5053 / 0x5064 两个 PID），而界面上的 VID/PID 输入框是只读的，没有手动连接入口，这类设备便完全无法使用。现在按厂商 VID 收全同厂设备，型号不在表内时显示为「未知 WITRN 设备 (VID:PID)」
 - **「仅统计选中范围」对累计量失效**：勾选后累计能量（Wh）与容量（mAh）仍显示全量累计值，只有最值/均值跟随选区。现在两者也按选中区间重新积分；积分时间轴取相对秒（`chartSeries.x`）而非挂钟时间戳，与实时累计口径一致，录制暂停留下的空档不会被当作持续放电计入
 - **退出流程回环**：确认退出后改为调用后端 `shutdown`（停后台线程 → `destroy` 主窗口）。原先走 `window.close()`，而 Tauri v2 起 `close` 会重新派发 close-requested 事件，与前端的退出确认监听器构成回环；旧代码靠「先注销监听器再 close」规避，但注销是异步 IPC，抢先失败时后端仍返回成功，前端便不再尝试其它路径，窗口就此关不掉。`destroy` 不派发该事件，不存在这个竞争

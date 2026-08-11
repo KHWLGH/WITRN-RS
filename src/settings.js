@@ -7,6 +7,7 @@ import { setSeriesFill, setSeriesVisible } from './chart.js';
 import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { setSampleRateOption } from './utils.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ export async function loadSettings() {
       // 基本控件
       const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
       if (rateSelect) {
-        rateSelect.value = String(state.settings.sampleRate);
+        setSampleRateOption(rateSelect, state.settings.sampleRate);
       }
 
       /** @param {string} id @param {boolean} val */
@@ -199,7 +200,7 @@ export async function resetSettings() {
 
     // Apply to UI
     const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
-    if (rateSelect) rateSelect.value = String(state.settings.sampleRate);
+    if (rateSelect) setSampleRateOption(rateSelect, state.settings.sampleRate);
 
     /** @param {string} id @param {boolean} val */
     const setChecked = (id, val) => {

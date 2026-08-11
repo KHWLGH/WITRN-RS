@@ -15,6 +15,7 @@ import {
 import { buildExportRows, calculateEnergy, parseRelativeTime } from './measurement.js';
 import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { setSampleRateOption } from './utils.js';
 
 const { save, open } = window.__TAURI__.dialog;
 const { writeTextFile, readTextFile } = window.__TAURI__.fs;
@@ -229,7 +230,7 @@ export async function importCSV() {
 
     state.settings.sampleRate = newSampleRate;
     const rateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
-    if (rateEl) rateEl.value = String(newSampleRate);
+    if (rateEl) setSampleRateOption(rateEl, newSampleRate);
     state.lastRecordingStartTime = newStartTime;
 
     state.chartData.timestamps = newTimestamps;

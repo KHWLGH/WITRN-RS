@@ -17,6 +17,7 @@ import {
   updateStatsDisplay,
 } from './data.js';
 import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
+import { enhanceSelects } from './dropdown.js';
 import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
 import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
@@ -517,6 +518,9 @@ async function setupEventListener() {
 window.addEventListener('DOMContentLoaded', async () => {
   // 禁用右键菜单
   document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // 必须早于 loadSettings()，否则它对 select.value 的赋值发生在拦截器安装之前。
+  enhanceSelects();
 
   await setupCloseConfirm();
   await loadSettings();
