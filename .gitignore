@@ -28,6 +28,9 @@ src-tauri/gen/schemas/
 *.deb
 *.rpm
 
+# 本地收集的发布产物，全是二进制，不进仓库
+dist/
+
 # Python (temperature examples)
 __pycache__/
 *.py[cod]
