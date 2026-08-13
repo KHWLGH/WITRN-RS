@@ -1,0 +1,153 @@
+/*
+ * WITRN-RS 设计令牌（Fluent 2 风格，暗色）
+ *
+ * 三层结构：
+ *   1. 原始色（primitives）  — 裸调色板，组件禁止直接引用
+ *   2. 语义角色（semantic）  — 表面 / 文本 / 描边 / 强调 / 状态 / 通道色，组件消费这一层
+ *   3. 组件旋钮（component） — 个别组件需要的尺寸类变量
+ *
+ * 亮色主题：后续在 :root[data-theme="light"] 中仅重新赋值语义层即可，
+ * 组件与图表（src/theme.js 读取）无需改动。
+ */
+
+:root {
+  /* ── 1. 原始色 ─────────────────────────────────────────────── */
+  --gray-8: #141414;
+  --gray-10: #1a1a1a;
+  --gray-12: #1f1f1f;
+  --gray-14: #242424;
+  --gray-16: #292929;
+  --gray-18: #2e2e2e;
+  --gray-24: #3d3d3d;
+  --gray-36: #5c5c5c;
+  --gray-52: #858585;
+  --gray-68: #adadad;
+  --gray-84: #d6d6d6;
+
+  --brand-base: #0078d4;
+  --brand-dark1: #005fb8;
+  --brand-light2: #4cc2ff;
+
+  /* ── 2. 语义角色（暗色值） ─────────────────────────────────── */
+  /* 让 WebKitGTK 用暗色绘制原生控件（滚动条 / spinner / 选择弹窗底色） */
+  color-scheme: dark;
+
+  /* 表面分层（全部实色 — WebKitGTK 上不用 backdrop-filter） */
+  --surface-base: var(--gray-12); /* 壳 chrome：标题栏 / 命令栏 / 状态栏 */
+  --surface-content: var(--gray-14); /* 视图背景 */
+  --surface-card: var(--gray-16); /* 卡片 / 读数栏 / 图表容器 */
+  --surface-flyout: var(--gray-18); /* 菜单 / 弹窗 / toast（实色 + 阴影表达层级） */
+
+  /* 控件填充（半透明白，可叠加在任意表面上） */
+  --fill-control: rgba(255, 255, 255, 0.061);
+  --fill-control-hover: rgba(255, 255, 255, 0.084);
+  --fill-control-pressed: rgba(255, 255, 255, 0.033);
+  --fill-subtle-hover: rgba(255, 255, 255, 0.06);
+  --fill-subtle-pressed: rgba(255, 255, 255, 0.031);
+
+  /* 文本 */
+  --text-primary: #ffffff;
+  --text-secondary: var(--gray-84);
+  --text-tertiary: var(--gray-68);
+  --text-disabled: var(--gray-36);
+  --text-on-accent: #000000; /* Win11 暗色：强调填充为亮色 → 配黑字 */
+
+  /* 描边 */
+  --stroke-divider: rgba(255, 255, 255, 0.083);
+  --stroke-card: rgba(255, 255, 255, 0.055);
+  --stroke-control: rgba(255, 255, 255, 0.07);
+  --stroke-control-strong: rgba(255, 255, 255, 0.093);
+  --stroke-input-underline: rgba(255, 255, 255, 0.4); /* WinUI 输入框底边 */
+  --stroke-focus-outer: #ffffff;
+  --stroke-focus-inner: #000000;
+
+  /* 强调色（Win11 暗色用亮阶做交互填充） */
+  --accent-fill: var(--brand-light2);
+  --accent-fill-hover: #47b1e8;
+  --accent-fill-pressed: #3f9ecf;
+  --accent-text: var(--brand-light2);
+  --accent-fill-faint: rgba(76, 194, 255, 0.12); /* 选区高亮 / 选中底色 */
+
+  /* 状态色 */
+  --status-danger: #ff99a4;
+  --status-danger-bg: rgba(255, 153, 164, 0.1);
+  --status-success: #6ccb5f;
+  --status-success-bg: rgba(108, 203, 95, 0.1);
+  --status-caution: #fce100;
+  --status-caution-bg: rgba(252, 225, 0, 0.08);
+  --status-info-bg: rgba(255, 255, 255, 0.05);
+
+  /* 破坏性操作按钮填充（Win11 danger fill） */
+  --danger-fill: #c42b1c;
+  --danger-fill-hover: #d13438;
+  --danger-fill-pressed: #a52016;
+  --text-on-danger: #ffffff;
+
+  /* 通道色 — 唯一定义处：卡片强调条 / 复选框 / 图例 / 曲线（src/theme.js 读取）全部同源 */
+  --ch-voltage: #4a9eff;
+  --ch-current: #4dd0a0;
+  --ch-power: #ffaa4a;
+  --ch-temp: #ff5f5f;
+  --ch-temp-axis: #ff6f6f; /* 温度轴文字比曲线略亮，保证可读性 */
+  --ch-energy: #c586c0;
+
+  /* 图表基建色（src/theme.js 读取） */
+  --chart-axis-text: #9a9ab8;
+  --chart-grid: rgba(90, 90, 140, 0.75);
+  --chart-grid-voltage: rgba(74, 158, 255, 0.22); /* 电压轴主横网格 */
+  --chart-grid-minor-x: rgba(80, 80, 130, 0.5);
+  --chart-grid-minor-y: rgba(120, 130, 160, 0.25);
+
+  /* 几何 */
+  --radius-control: 4px; /* 按钮 / 输入框 / 下拉 / 菜单项 */
+  --radius-surface: 8px; /* 卡片 / 菜单 / 弹窗 / toast */
+  --radius-full: 999px;
+
+  /* 间距（4px 基距） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* 阴影（Fluent 阴影四档，暗色环境值） */
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.24), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-8: 0 4px 8px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-16: 0 8px 16px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-64: 0 32px 64px rgba(0, 0, 0, 0.56), 0 0 8px rgba(0, 0, 0, 0.4);
+
+  /* 动效 */
+  --dur-fast: 150ms;
+  --dur-normal: 200ms;
+  --dur-gentle: 250ms;
+  --dur-slow: 300ms;
+  --ease-decel: cubic-bezier(0.1, 0.9, 0.2, 1); /* 入场 */
+  --ease-accel: cubic-bezier(0.7, 0, 1, 0.5); /* 出场 */
+  --ease-standard: cubic-bezier(0.33, 0, 0.67, 1);
+
+  /* 字体 */
+  --font-ui:
+    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, "Noto Sans CJK SC",
+    "Noto Sans SC", sans-serif;
+  --font-mono: "Noto Sans Mono", "Cascadia Mono", "Consolas", monospace;
+
+  /* 字阶（仪表类高密度 UI：正文基准 13px，刻意小于 Fluent 默认 14px） */
+  --type-caption: 400 12px / 16px var(--font-ui);
+  --type-body: 400 13px / 18px var(--font-ui);
+  --type-body-strong: 600 13px / 18px var(--font-ui);
+  --type-subtitle: 600 16px / 22px var(--font-ui);
+  --type-title: 600 20px / 28px var(--font-ui);
+  --type-numeral: 700 32px / 36px var(--font-mono);
+
+  /* ── 3. 组件旋钮 ───────────────────────────────────────────── */
+  --dialog-width: 400px;
+  --toast-width: 360px;
+  --titlebar-height: 40px;
+  --statusbar-height: 24px;
+}
+
+/* 亮色主题占位：仅重赋语义层（本版本不交付亮色，结构先就位） */
+:root[data-theme="light"] {
+  color-scheme: light;
+}

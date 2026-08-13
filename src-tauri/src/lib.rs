@@ -636,7 +636,27 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_decorum::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // 自定义标题栏：Windows 由 decorum 注入带贴靠布局浮窗的窗口控制按钮
+            // （前端 styles/app.css 按设计令牌重绘）；Linux 无此支持，改由前端
+            // windowcontrols.js 自绘按钮与边缘调整大小热区。
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                use tauri_plugin_decorum::WebviewWindowExt;
+                let main_window = app
+                    .get_webview_window("main")
+                    .expect("main window must exist");
+                main_window
+                    .create_overlay_titlebar()
+                    .expect("failed to create overlay titlebar");
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connect_device,
             connect_device_by_path,

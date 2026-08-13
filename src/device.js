@@ -5,6 +5,8 @@
 
 import { stopRecording } from './data.js';
 import { state } from './state.js';
+import { toast } from './ui/toast.js';
+import { refreshDeviceIdentifyState } from './views/device.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -98,7 +100,7 @@ export async function connectDevice() {
       const pid = Number(pidStr.trim());
 
       if (Number.isNaN(vid) || Number.isNaN(pid)) {
-        alert('请先选择一个设备或输入有效的VID/PID');
+        toast.warning('请先选择一个设备或输入有效的VID/PID');
         return;
       }
 
@@ -126,7 +128,7 @@ export async function connectDevice() {
       console.error('Failed to apply sample rate on connect:', err);
     }
   } catch (e) {
-    alert('连接失败: ' + e);
+    toast.error(`连接失败: ${e}`);
   }
 }
 
@@ -138,7 +140,7 @@ export async function disconnectDevice() {
     const nameEl = document.getElementById('device-name-text');
     if (nameEl) nameEl.textContent = '--';
   } catch (e) {
-    alert('断开失败: ' + e);
+    toast.error(`断开失败: ${e}`);
   }
 }
 
@@ -166,6 +168,8 @@ export function setConnected(connected) {
   setDisabled('btn-start-record', !connected);
   setDisabled('device-select', connected);
   setDisabled('btn-refresh-devices', connected);
+
+  refreshDeviceIdentifyState();
 
   if (!connected && state.isRecording) {
     stopRecording();

@@ -3,7 +3,14 @@
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
 
-import { initChart, scheduleChartUpdate, setSeriesFill, setSeriesVisible, updateCharts } from './chart.js';
+import {
+  handleMonitorShown,
+  initChart,
+  scheduleChartUpdate,
+  setSeriesFill,
+  setSeriesVisible,
+  updateCharts,
+} from './chart.js';
 import { exportCSV, importCSV } from './csv.js';
 import {
   addDataPoint,
@@ -19,32 +26,45 @@ import {
 import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
 import { enhanceSelects } from './dropdown.js';
 import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
+import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
+import { ask } from './ui/dialog.js';
+import { createFlyout } from './ui/flyout.js';
+import { createMenu } from './ui/menu.js';
+import { initTabBar } from './ui/tabbar.js';
+import { toast } from './ui/toast.js';
+import { initWindowControls } from './ui/windowcontrols.js';
+import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
+import { ingestPdData, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
+import { initSettingsView } from './views/settings-view.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
-const { ask, message } = window.__TAURI__.dialog;
 
 // ─── Close confirmation ──────────────────────────────────────────────────────
 
 let __isClosingWindow = false;
+let __closeConfirmOpen = false;
 
 /**
  * 退出确认。确认后由后端 `shutdown` 停止后台任务并 destroy 主窗口。
  *
  * destroy 不会重新派发 close-requested，因此这里既不需要注销监听器，也不需要备用关闭路径。
- * 关闭动作必须走后端：前端的 `close()` / `destroy()` 属于 `core:window:allow-*` 权限，
- * 本应用的 capability 只声明了 `core:default`（窗口部分是只读的），调用会被 ACL 拒绝。
+ * 自定义标题栏的 ✕ 按钮调用 `appWindow.close()`（capability 已授予 allow-close），
+ * 它只会触发本监听器；真正的销毁动作仍走后端 `shutdown`，以保证先停 HID/温度线程。
  */
 async function setupCloseConfirm() {
   const appWindow = window.__TAURI__.window.getCurrentWindow();
 
   await appWindow.onCloseRequested(async (/** @type {any} */ event) => {
     event.preventDefault();
-    if (__isClosingWindow) return;
+    // 重复点关闭时不再叠加弹窗：确认框是模态的，焦点已在其中
+    if (__isClosingWindow || __closeConfirmOpen) return;
 
+    __closeConfirmOpen = true;
     const confirmed = await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' });
+    __closeConfirmOpen = false;
     if (!confirmed) return;
     __isClosingWindow = true;
 
@@ -298,91 +318,14 @@ function setupControls() {
     });
   }
 
-  // Export dropdown menu
+  // Export dropdown menu — 菜单项 id 保持不变：temperature.js 依赖
+  // getElementById('export-with-temp') 切换其可见性
   const exportBtn = document.getElementById('btn-export');
-  const exportDropdown = document.getElementById('export-dropdown');
-  const exportNoTemp = document.getElementById('export-no-temp');
-  const exportWithTemp = document.getElementById('export-with-temp');
-
-  if (exportBtn && exportDropdown) {
-    const updatePosition = () => {
-      if (exportDropdown.classList.contains('show')) {
-        const rect = exportBtn.getBoundingClientRect();
-        exportDropdown.style.top = `${rect.bottom + 2}px`;
-        exportDropdown.style.left = `${rect.left}px`;
-      }
-    };
-
-    /** @param {boolean} show */
-    const toggleDropdown = (show) => {
-      exportBtn.setAttribute('aria-expanded', String(show));
-      if (show) {
-        exportDropdown.style.position = 'fixed';
-        exportDropdown.style.width = 'auto';
-        exportDropdown.style.minWidth = '120px';
-        exportDropdown.classList.add('show');
-        updatePosition();
-        const firstItem = /** @type {HTMLElement|null} */ (exportDropdown.querySelector('[role="menuitem"]'));
-        if (firstItem) firstItem.focus();
-      } else {
-        exportDropdown.classList.remove('show');
-      }
-    };
-
-    exportBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const isShown = exportDropdown.classList.contains('show');
-      toggleDropdown(!isShown);
-    });
-
-    document.addEventListener('click', (e) => {
-      if (
-        !exportBtn.contains(/** @type {Node} */ (e.target)) &&
-        !exportDropdown.contains(/** @type {Node} */ (e.target))
-      ) {
-        toggleDropdown(false);
-      }
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && exportDropdown.classList.contains('show')) {
-        toggleDropdown(false);
-        exportBtn.focus();
-      }
-    });
-
-    exportDropdown.addEventListener('keydown', (e) => {
-      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-      const candidates = /** @type {NodeListOf<HTMLButtonElement>} */ (
-        exportDropdown.querySelectorAll('[role="menuitem"]')
-      );
-      const items = Array.from(candidates).filter((item) => !item.disabled && !item.classList.contains('hidden'));
-      if (items.length === 0) return;
-
-      e.preventDefault();
-      const activeElement = document.activeElement;
-      const current = activeElement instanceof HTMLButtonElement ? items.indexOf(activeElement) : -1;
-      let next = current;
-      if (e.key === 'Home') next = 0;
-      else if (e.key === 'End') next = items.length - 1;
-      else if (e.key === 'ArrowDown') next = (current + 1 + items.length) % items.length;
-      else next = (current - 1 + items.length) % items.length;
-      items[next].focus();
-    });
-
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-
-    if (exportNoTemp)
-      exportNoTemp.addEventListener('click', () => {
-        toggleDropdown(false);
-        exportCSV(false);
-      });
-    if (exportWithTemp)
-      exportWithTemp.addEventListener('click', () => {
-        toggleDropdown(false);
-        exportCSV(true);
-      });
+  if (exportBtn) {
+    createMenu(exportBtn, [
+      { id: 'export-no-temp', label: '不带温度', onSelect: () => exportCSV(false) },
+      { id: 'export-with-temp', label: '带温度', onSelect: () => exportCSV(true) },
+    ]);
   }
 
   const importBtn = document.getElementById('btn-import');
@@ -394,7 +337,7 @@ function setupControls() {
   });
 
   btn('btn-clear-chart', async () => {
-    const yes = await ask('确定要清空图表并重置所有统计数据吗？', { title: '确认重置', kind: 'warning' });
+    const yes = await ask('确定要清空图表并重置所有统计数据吗？', { title: '确认重置', kind: 'error' });
     if (yes) clearAndResetStats();
   });
 
@@ -417,9 +360,11 @@ function setupControls() {
       const port = Number.parseInt(input.value, 10);
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         input.value = String(state.settings.tempPort);
-        alert('请输入 1 到 65535 之间的有效端口');
+        input.classList.add('input-invalid');
+        toast.warning('请输入 1 到 65535 之间的有效端口');
         return;
       }
+      input.classList.remove('input-invalid');
       state.settings.tempPort = port;
       debouncedSaveSettings();
     });
@@ -485,6 +430,58 @@ function setupControls() {
   if (apDuration) state.autoPauseSettings.duration = parseFloat(apDuration.value) || 0;
 }
 
+// ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────
+
+function setupShell() {
+  registerView({ id: 'monitor', icon: 'codicon-pulse', label: '监控', onShow: handleMonitorShown });
+  registerView({ id: 'pd', icon: 'codicon-zap', label: 'PD 分析', init: initPdView, onShow: syncPdView });
+  // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
+  registerView({
+    id: 'settings',
+    icon: 'codicon-settings-gear',
+    label: '设置',
+    init: () => {
+      initSettingsView();
+      initDeviceView();
+    },
+    onShow: refreshDeviceIdentifyState,
+  });
+
+  const tabsContainer = document.getElementById('titlebar-tabs');
+  const gearBtn = document.getElementById('btn-settings-tab');
+  if (tabsContainer) {
+    const tabbar = initTabBar(
+      tabsContainer,
+      [
+        { id: 'monitor', icon: 'codicon-pulse', label: '监控' },
+        { id: 'pd', icon: 'codicon-zap', label: 'PD 分析' },
+      ],
+      showView,
+    );
+    onSelectionChange((id) => {
+      tabbar.select(id);
+      gearBtn?.classList.toggle('active', id === 'settings');
+    });
+  }
+  gearBtn?.addEventListener('click', () => showView('settings'));
+
+  // 命令栏浮出面板（面板 DOM 在 index.html，保持 ID 契约）
+  /** @param {string} btnId @param {string} panelId */
+  const wireFlyout = (btnId, panelId) => {
+    const anchor = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (anchor && panel) createFlyout(anchor, panel);
+  };
+  wireFlyout('btn-flyout-display', 'flyout-display');
+  wireFlyout('btn-flyout-autopause', 'flyout-autopause');
+  wireFlyout('btn-flyout-temp', 'flyout-temp');
+
+  initWindowControls();
+
+  // 恢复上次的工作区（默认监控）
+  restoreView(state.settings.activeView);
+}
+
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 async function setupEventListener() {
@@ -492,10 +489,16 @@ async function setupEventListener() {
     addDataPoint(event.payload);
   });
 
+  // PD 报文启动即监听（插拔瞬间的握手最有价值，不等用户打开 PD Tab）
+  await listen('pd-data', (/** @type {{ payload: import('./pd-model.js').PdMeta }} */ event) => {
+    ingestPdData(event.payload);
+  });
+
   await listen('device-disconnected', async () => {
     if (state.isConnected) {
       await disconnectDevice();
-      await message('设备连接已断开', { title: '连接断开', kind: 'warning' });
+      markPdDisconnect();
+      toast.warning('设备连接已断开');
     }
   });
 
@@ -516,6 +519,13 @@ async function setupEventListener() {
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // 平台标记（CSS / windowcontrols 依据它分发 Windows decorum 或 Linux 自绘路径）
+  const ua = navigator.userAgent;
+  document.documentElement.setAttribute(
+    'data-os',
+    ua.includes('Windows') ? 'windows' : ua.includes('Mac OS') ? 'macos' : 'linux',
+  );
+
   // 禁用右键菜单
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -527,6 +537,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initChart();
   setupChartToggles();
   setupControls();
+  setupShell();
 
   // Clean recording state on load
   state.isRecording = false;

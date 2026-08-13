@@ -37,6 +37,11 @@ function normalizeSettings(saved) {
   merged.rangeStart = clamp(merged.rangeStart, 0, 1000, defaultSettings.rangeStart);
   merged.rangeEnd = clamp(merged.rangeEnd, 0, 1000, defaultSettings.rangeEnd);
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 10, 60_000, defaultSettings.sampleRate));
+  // activeView 会被 shell 用来切换视图，白名单校验防止坏值卡死在不存在的视图
+  // （'device' 视图已并入 settings，旧存值一并回落到 monitor）
+  if (!['monitor', 'pd', 'settings'].includes(merged.activeView)) {
+    merged.activeView = defaultSettings.activeView;
+  }
   return merged;
 }
 

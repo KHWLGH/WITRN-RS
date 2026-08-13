@@ -17,6 +17,7 @@
  */
 
 import { state } from './state.js';
+import { chartTheme, onThemeChange } from './theme.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -25,11 +26,6 @@ import { formatRelativeHMS, hexToRgba } from './utils.js';
 const FIELDS = ['voltage', 'current', 'power', 'temp'];
 const LABELS = ['电压', '电流', '功率', '温度'];
 const UNITS = [' V', ' A', ' W', ' °C'];
-
-/** 曲线颜色。 */
-const COLORS = { voltage: '#4a9eff', current: '#4aff9f', power: '#ffaa4a', temp: '#ff4a4a' };
-/** 轴标题 / 刻度文字颜色（温度轴与曲线色略有区别，沿用旧版配色）。 */
-const AXIS_COLORS = { voltage: '#4a9eff', current: '#4aff9f', power: '#ffaa4a', temp: '#ff6060' };
 
 const CHART_FONT =
   "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
@@ -158,6 +154,25 @@ export function updateCharts() {
   applyData();
 }
 
+/**
+ * 监控视图重新显示时的尺寸补偿。
+ * 视图隐藏期间 ResizeObserver 只会收到 0×0（已被守卫忽略），重新显示后
+ * 大多数环境会补发一次正确尺寸，但不保证；这里显式对齐宿主尺寸并刷新。
+ */
+export function handleMonitorShown() {
+  /** @param {string} hostId @param {any} chart */
+  const fit = (hostId, chart) => {
+    const host = document.getElementById(hostId);
+    if (!host || !chart) return;
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    if (width > 0 && height > 0) chart.setSize({ width, height });
+  };
+  fit('main-chart', state.mainChart);
+  fit('navigator-chart', state.navigatorChart);
+  updateCharts();
+}
+
 /** 使用 requestAnimationFrame 调度图表更新，避免每个数据点都触发重绘。 */
 export function scheduleChartUpdate() {
   if (state.__chartUpdatePending) return;
@@ -203,8 +218,27 @@ export function setSeriesFill(datasetIndex, opacityPercent) {
   const field = FIELDS[datasetIndex];
   if (!field) return;
   fillStyles[datasetIndex + 1] =
-    opacityPercent > 0 ? hexToRgba(/** @type {any} */ (COLORS)[field], opacityPercent) : null;
+    opacityPercent > 0 ? hexToRgba(/** @type {any} */ (chartTheme)[field], opacityPercent) : null;
   if (state.mainChart) state.mainChart.redraw();
+}
+
+/**
+ * 主题令牌变化后重新应用图表配色。
+ * 曲线 / 轴 / 网格的 stroke 均为读取 chartTheme 的闭包，redraw 即可拾取新值；
+ * 只有填充色是预计算的 rgba 字符串，需要按当前设置重算。
+ */
+export function applyChartTheme() {
+  const s = state.settings;
+  fillStyles = [
+    null,
+    s.opacityVoltage > 0 ? hexToRgba(chartTheme.voltage, s.opacityVoltage) : null,
+    s.opacityCurrent > 0 ? hexToRgba(chartTheme.current, s.opacityCurrent) : null,
+    s.opacityPower > 0 ? hexToRgba(chartTheme.power, s.opacityPower) : null,
+    s.opacityTemp > 0 ? hexToRgba(chartTheme.temp, s.opacityTemp) : null,
+  ];
+  state.mainChart?.redraw();
+  state.navigatorChart?.redraw();
+  renderLegend();
 }
 
 // ─── Scale ranges ────────────────────────────────────────────────────────────
@@ -346,11 +380,12 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
 
 /**
  * 构造一条 Y 轴配置。
+ * 颜色参数为读取 chartTheme 的闭包（uPlot 对 stroke 支持函数形式），换主题后 redraw 即生效。
  * @param {string} scaleKey
  * @param {string} label
- * @param {string} color
+ * @param {() => string} color
  * @param {number} side - 3=左 1=右
- * @param {{show: boolean, stroke?: string}} grid
+ * @param {{show: boolean, stroke?: () => string}} grid
  * @returns {any}
  */
 function mkYAxis(scaleKey, label, color, side, grid) {
@@ -396,7 +431,7 @@ function drawMinorGrid(u) {
   // ── Minor vertical grid lines (x-axis) ──
   const xSplits = u.axes?.[0]?._splits;
   if (Array.isArray(xSplits) && xSplits.length >= 2) {
-    ctx.strokeStyle = 'rgba(80, 80, 130, 0.5)';
+    ctx.strokeStyle = chartTheme.gridMinorX;
     ctx.beginPath();
     for (let i = 0; i < xSplits.length - 1; i++) {
       const step = (xSplits[i + 1] - xSplits[i]) / subdivisions;
@@ -414,7 +449,7 @@ function drawMinorGrid(u) {
   // ── Minor horizontal grid lines (voltage axis only, as the single reference) ──
   const vSplits = u.axes?.[1]?._splits;
   if (u.scales.voltage?.min != null && Array.isArray(vSplits) && vSplits.length >= 2) {
-    ctx.strokeStyle = 'rgba(120, 130, 160, 0.25)';
+    ctx.strokeStyle = chartTheme.gridMinorY;
     ctx.beginPath();
     for (let i = 0; i < vSplits.length - 1; i++) {
       const step = (vSplits[i + 1] - vSplits[i]) / subdivisions;
@@ -440,15 +475,19 @@ function renderLegend() {
   const chart = state.mainChart;
   if (!el || !chart) return;
 
-  const parts = [];
+  const fragment = document.createDocumentFragment();
   for (let si = 1; si < chart.series.length; si++) {
     if (!chart.series[si].show) continue;
-    const color = /** @type {any} */ (COLORS)[FIELDS[si - 1]];
-    parts.push(
-      `<span class="chart-legend-item"><span class="chart-legend-dot" style="background:${color}"></span>${LABELS[si - 1]}</span>`,
-    );
+    const item = document.createElement('span');
+    item.className = 'chart-legend-item';
+    const dot = document.createElement('span');
+    dot.className = 'chart-legend-dot';
+    dot.style.background = /** @type {any} */ (chartTheme)[FIELDS[si - 1]];
+    item.appendChild(dot);
+    item.appendChild(document.createTextNode(LABELS[si - 1]));
+    fragment.appendChild(item);
   }
-  el.innerHTML = parts.join('');
+  el.replaceChildren(fragment);
 }
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
@@ -483,14 +522,25 @@ function tooltipPlugin() {
           return;
         }
 
-        let html = `<div class="chart-tooltip-title">${formatRelativeHMS(Number(xVal))}</div>`;
+        const fragment = document.createDocumentFragment();
+        const title = document.createElement('div');
+        title.className = 'chart-tooltip-title';
+        title.textContent = formatRelativeHMS(Number(xVal));
+        fragment.appendChild(title);
+
         let rows = 0;
         for (let si = 1; si < u.series.length; si++) {
           if (!u.series[si].show) continue;
           const yVal = u.data[si][idx];
           if (yVal == null || !Number.isFinite(yVal)) continue;
-          const color = /** @type {any} */ (COLORS)[FIELDS[si - 1]];
-          html += `<div class="chart-tooltip-row"><span class="chart-tooltip-swatch" style="background:${color}"></span>${LABELS[si - 1]}: ${Number(yVal).toFixed(3)}${UNITS[si - 1]}</div>`;
+          const row = document.createElement('div');
+          row.className = 'chart-tooltip-row';
+          const swatch = document.createElement('span');
+          swatch.className = 'chart-tooltip-swatch';
+          swatch.style.background = /** @type {any} */ (chartTheme)[FIELDS[si - 1]];
+          row.appendChild(swatch);
+          row.appendChild(document.createTextNode(`${LABELS[si - 1]}: ${Number(yVal).toFixed(3)}${UNITS[si - 1]}`));
+          fragment.appendChild(row);
           rows++;
         }
         if (rows === 0) {
@@ -498,7 +548,7 @@ function tooltipPlugin() {
           return;
         }
 
-        tt.innerHTML = html;
+        tt.replaceChildren(fragment);
         tt.style.display = 'block';
 
         // 跟随光标，靠近边缘时翻转到另一侧
@@ -546,10 +596,10 @@ export function initChart() {
   const s = state.settings;
   fillStyles = [
     null,
-    s.opacityVoltage > 0 ? hexToRgba(COLORS.voltage, s.opacityVoltage) : null,
-    s.opacityCurrent > 0 ? hexToRgba(COLORS.current, s.opacityCurrent) : null,
-    s.opacityPower > 0 ? hexToRgba(COLORS.power, s.opacityPower) : null,
-    s.opacityTemp > 0 ? hexToRgba(COLORS.temp, s.opacityTemp) : null,
+    s.opacityVoltage > 0 ? hexToRgba(chartTheme.voltage, s.opacityVoltage) : null,
+    s.opacityCurrent > 0 ? hexToRgba(chartTheme.current, s.opacityCurrent) : null,
+    s.opacityPower > 0 ? hexToRgba(chartTheme.power, s.opacityPower) : null,
+    s.opacityTemp > 0 ? hexToRgba(chartTheme.temp, s.opacityTemp) : null,
   ];
 
   const showInitial = [
@@ -583,7 +633,7 @@ export function initChart() {
         label: LABELS[i],
         scale: field,
         auto: false,
-        stroke: /** @type {any} */ (COLORS)[field],
+        stroke: () => /** @type {any} */ (chartTheme)[field],
         width: 1.5,
         points: { show: false },
         ...(hasPaths ? { paths: adaptivePaths } : {}),
@@ -594,7 +644,7 @@ export function initChart() {
     axes: [
       {
         scale: 'x',
-        stroke: '#9a9ab8',
+        stroke: () => chartTheme.axisText,
         font: `12px ${MONO_FONT}`,
         size: 34,
         gap: 4,
@@ -602,14 +652,14 @@ export function initChart() {
         incrs: TIME_INCRS,
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
           splits.map((v) => formatRelativeHMS(Number(v))),
-        grid: { show: true, stroke: 'rgba(90, 90, 140, 0.75)', width: 1 },
-        ticks: { show: true, stroke: 'rgba(90, 90, 140, 0.75)', width: 1, size: 8 },
+        grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
+        ticks: { show: true, stroke: () => chartTheme.grid, width: 1, size: 8 },
       },
-      mkYAxis('voltage', '电压 (V)', AXIS_COLORS.voltage, 3, { show: true, stroke: 'rgba(74, 158, 255, 0.22)' }),
-      mkYAxis('current', '电流 (A)', AXIS_COLORS.current, 3, { show: false }),
-      mkYAxis('power', '功率 (W)', AXIS_COLORS.power, 1, { show: false }),
+      mkYAxis('voltage', '电压 (V)', () => chartTheme.voltage, 3, { show: true, stroke: () => chartTheme.gridVoltage }),
+      mkYAxis('current', '电流 (A)', () => chartTheme.current, 3, { show: false }),
+      mkYAxis('power', '功率 (W)', () => chartTheme.power, 1, { show: false }),
       {
-        ...mkYAxis('temp', '温度 (°C)', AXIS_COLORS.temp, 1, { show: false }),
+        ...mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1, { show: false }),
         splits: /** @type {any} */ ((/** @type {any} */ u) => tempSplits(u)),
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map((v) => String(Math.round(v))),
       },
@@ -623,6 +673,7 @@ export function initChart() {
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
   observeResize(host, state.mainChart);
   renderLegend();
+  onThemeChange(applyChartTheme);
 
   initNavigatorChart();
 }
@@ -670,7 +721,7 @@ export function initNavigatorChart() {
       {
         scale: 'y',
         auto: false,
-        stroke: '#ffaa4a',
+        stroke: () => chartTheme.power,
         width: 1,
         points: { show: false },
         ...(splineBuilder != null || linearBuilder != null ? { paths: adaptivePaths } : {}),

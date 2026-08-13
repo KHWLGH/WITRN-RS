@@ -1,0 +1,608 @@
+/*
+ * 外壳层：标题栏（Tab 条 + 连接区 + 窗口控制）/ 视图宿主 / 命令栏 / 状态栏 / 浮出面板 / 页面卡片。
+ * 布局骨架见 index.html，行为见 src/shell.js 与 src/ui/*.js。
+ */
+
+/* ── 整体骨架 ─────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--surface-content);
+}
+
+/* Linux 无边框窗口没有 shadow 装饰，加 1px 描边补偿轮廓 */
+:root[data-os="linux"]:not(.is-maximized) .app-shell {
+  border: 1px solid var(--stroke-divider);
+}
+
+/* ── 标题栏 ───────────────────────────────────────────────────── */
+
+.titlebar {
+  display: flex;
+  align-items: stretch;
+  height: var(--titlebar-height);
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--stroke-divider);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Windows：右上角给 decorum 注入的窗口按钮留出空间 */
+:root[data-os="windows"] .titlebar {
+  padding-right: 140px;
+}
+
+.titlebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-tertiary);
+  font: var(--type-body);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.tab:hover {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+.tab .codicon {
+  font-size: 14px;
+}
+
+.tab[aria-selected="true"],
+.tab.active {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+.tab[aria-selected="true"]::after,
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 1px;
+  width: 16px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--accent-fill);
+}
+
+.tab-icon-only {
+  padding: 0;
+  width: 34px;
+  justify-content: center;
+  align-self: center;
+}
+
+.titlebar-drag {
+  flex: 1;
+  min-width: 16px;
+  height: 100%;
+}
+
+.titlebar-connect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.titlebar-connect .ribbon-select {
+  height: 28px;
+  min-width: 140px;
+  max-width: 240px;
+}
+
+.titlebar-connect .status-item {
+  font-size: 12px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* 窄窗口时收起连接状态文字，只留指示点 */
+@media (max-width: 1080px) {
+  .titlebar-connect #connection-text {
+    display: none;
+  }
+  .titlebar-connect .ribbon-select {
+    min-width: 120px;
+  }
+}
+
+/* ── 窗口控制按钮（Linux 自绘；Windows 由 decorum 注入并被下方规则重绘） ── */
+
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+}
+
+.wc-btn {
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.wc-btn:hover {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+.wc-btn:active {
+  background: var(--fill-subtle-pressed);
+}
+
+.wc-btn-close:hover {
+  background: var(--danger-fill);
+  color: var(--text-on-danger);
+}
+
+.wc-btn-close:active {
+  background: var(--danger-fill-pressed);
+  color: var(--text-on-danger);
+}
+
+.wc-btn .codicon {
+  font-size: 14px;
+}
+
+/* decorum 注入的标题栏（仅 Windows）：约束到右上角按钮区，拖拽由我们自己的
+   .titlebar-drag 承担；按钮观感对齐 .wc-btn */
+:root[data-os="windows"] div[data-tauri-decorum-tb] {
+  left: auto !important;
+  right: 0 !important;
+  width: auto !important;
+  height: var(--titlebar-height) !important;
+  background: transparent !important;
+  display: flex !important;
+  align-items: stretch !important;
+}
+
+:root[data-os="windows"] .decorum-tb-btn {
+  width: 46px !important;
+  height: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: default !important;
+}
+
+:root[data-os="windows"] .decorum-tb-btn:hover {
+  background: var(--fill-subtle-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+:root[data-os="windows"] #decorum-tb-close:hover {
+  background: var(--danger-fill) !important;
+  color: var(--text-on-danger) !important;
+}
+
+/* ── Linux 边缘调整大小热区（windowcontrols.js 创建；最大化时隐藏） ── */
+
+.resize-zone {
+  position: fixed;
+  z-index: 4000;
+}
+
+:root.is-maximized .resize-zone {
+  display: none;
+}
+
+.resize-north {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 5px;
+}
+.resize-south {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 5px;
+}
+.resize-east {
+  right: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 5px;
+}
+.resize-west {
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 5px;
+}
+.resize-northeast {
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+}
+.resize-northwest {
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+}
+.resize-southeast {
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+}
+.resize-southwest {
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+}
+
+/* ── 视图宿主 ─────────────────────────────────────────────────── */
+
+.view-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+/* ── 命令栏 ───────────────────────────────────────────────────── */
+
+.commandbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--stroke-divider);
+  flex-shrink: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cmd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+.cmd-btn:hover:not(:disabled) {
+  background: var(--fill-subtle-hover);
+  border-color: var(--stroke-control);
+}
+
+.cmd-btn:active:not(:disabled) {
+  background: var(--fill-subtle-pressed);
+  color: var(--text-secondary);
+}
+
+.cmd-btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.cmd-btn .codicon {
+  font-size: 14px;
+}
+
+.cmd-btn-icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* 录制按钮的红点 */
+#btn-start-record:not(:disabled) .codicon-record {
+  color: var(--status-danger);
+}
+
+.cmd-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px;
+  background: var(--stroke-divider);
+  flex-shrink: 0;
+}
+
+.cmd-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.commandbar .ribbon-select {
+  height: 28px;
+}
+
+.cmd-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* ── 监控视图主体 ─────────────────────────────────────────────── */
+
+.monitor-body {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── 状态栏 ───────────────────────────────────────────────────── */
+
+.statusbar {
+  height: var(--statusbar-height);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  background: var(--surface-base);
+  border-top: 1px solid var(--stroke-divider);
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  user-select: none;
+  overflow: hidden;
+}
+
+.statusbar .status-item {
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.statusbar .status-indicator {
+  width: 8px;
+  height: 8px;
+}
+
+/* ── 浮出面板内容行 ───────────────────────────────────────────── */
+
+.flyout-panel {
+  position: fixed;
+  z-index: 1500;
+  min-width: 260px;
+  padding: 12px;
+  background: var(--surface-flyout);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-16);
+}
+
+.flyout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.flyout-row-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.flyout-divider {
+  height: 1px;
+  background: var(--stroke-divider);
+  margin: 8px 0;
+}
+
+/* ── 页面（PD / 设备 / 设置视图） ─────────────────────────────── */
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.page-title {
+  font: var(--type-title);
+  margin-bottom: var(--space-4);
+}
+
+/* 设置页双栏：左 = 应用设置，右 = 设备信息；窄窗口自动折行 */
+.settings-columns {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.settings-col {
+  flex: 1 1 320px;
+  min-width: 300px;
+  max-width: 640px;
+}
+
+.page-subtitle {
+  font: var(--type-subtitle);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  max-width: 640px;
+}
+
+.card-title {
+  font: var(--type-body-strong);
+  margin-bottom: var(--space-3);
+}
+
+.card-hint {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  margin-top: var(--space-2);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.field-row:last-child {
+  margin-bottom: 0;
+}
+
+.field-row > label {
+  min-width: 64px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.empty-state .codicon {
+  font-size: 36px;
+  opacity: 0.6;
+}
+
+.empty-state-title {
+  font: var(--type-subtitle);
+  color: var(--text-secondary);
+}
+
+/* ── 杂项小件 ─────────────────────────────────────────────────── */
+
+/* 温度相关 UI 默认隐藏，temperature.js 依据数据可用性切换 style.display */
+#temp-card,
+#show-temp-container {
+  display: none;
+}
+
+.opacity-wrap {
+  position: relative;
+  width: 56px;
+  flex-shrink: 0;
+}
+
+.opacity-wrap .ribbon-input {
+  width: 100%;
+  padding-right: 16px;
+}
+
+.opacity-suffix {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.flyout-input-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-label {
+  color: var(--text-tertiary);
+}
+
+.radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.selectable {
+  user-select: text;
+}
+
+.identity-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.pd-filter {
+  width: 160px;
+  font-family: var(--font-ui);
+}
+
+.pd-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

@@ -1,0 +1,331 @@
+/*
+ * 组件层：通用按钮 + 对话框 / toast / 菜单原语的样式。
+ * 消费 styles/tokens.css 的语义令牌；行为在 src/ui/*.js。
+ */
+
+/* ── 通用按钮 ─────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 80px;
+  padding: 5px 12px;
+  font: var(--type-body);
+  color: var(--text-primary);
+  background: var(--fill-control);
+  border: 1px solid var(--stroke-control);
+  border-top-color: var(--stroke-control-strong);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--fill-control-hover);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--fill-control-pressed);
+  color: var(--text-secondary);
+}
+
+.btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.btn-accent {
+  background: var(--accent-fill);
+  border-color: transparent;
+  color: var(--text-on-accent);
+}
+
+.btn-accent:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+
+.btn-accent:active:not(:disabled) {
+  background: var(--accent-fill-pressed);
+  color: var(--text-on-accent);
+}
+
+.btn-danger {
+  background: var(--danger-fill);
+  border-color: transparent;
+  color: var(--text-on-danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-fill-hover);
+}
+
+.btn-danger:active:not(:disabled) {
+  background: var(--danger-fill-pressed);
+  color: var(--text-on-danger);
+}
+
+/* 输入校验失败：danger 下划线 */
+.input-invalid {
+  box-shadow: inset 0 -2px 0 var(--status-danger) !important;
+}
+
+/* ── 对话框（src/ui/dialog.js） ───────────────────────────────── */
+
+.fluent-dialog {
+  /* 全局 * { margin: 0 } 重置会干掉 UA 的 margin: auto 居中，这里补回 */
+  margin: auto;
+  width: min(var(--dialog-width), 90vw);
+  padding: var(--space-6);
+  background: var(--surface-flyout);
+  color: var(--text-primary);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-64);
+}
+
+.fluent-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.44);
+}
+
+.fluent-dialog[open] {
+  animation: dialog-in var(--dur-gentle) var(--ease-decel);
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.fluent-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.fluent-dialog-icon {
+  font-size: 18px;
+}
+
+.fluent-dialog-icon[data-kind="info"] {
+  color: var(--accent-text);
+}
+
+.fluent-dialog-icon[data-kind="warning"] {
+  color: var(--status-caution);
+}
+
+.fluent-dialog-icon[data-kind="error"] {
+  color: var(--status-danger);
+}
+
+.fluent-dialog-title {
+  font: var(--type-subtitle);
+}
+
+.fluent-dialog-body {
+  font: var(--type-body);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  margin-bottom: var(--space-6);
+}
+
+.fluent-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.fluent-dialog-actions .btn {
+  flex: 1;
+  max-width: 50%;
+}
+
+/* ── Toast（src/ui/toast.js） ─────────────────────────────────── */
+
+.toast-region {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--statusbar-height) + var(--space-3));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 3000;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: var(--toast-width);
+  max-width: calc(100vw - 2 * var(--space-4));
+  padding: 10px 12px;
+  background: var(--surface-flyout);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-16);
+  position: relative;
+  overflow: hidden;
+  pointer-events: auto;
+  animation: toast-in var(--dur-fast) var(--ease-decel);
+}
+
+.toast::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+
+.toast-info::before {
+  background: var(--accent-fill);
+}
+.toast-success::before {
+  background: var(--status-success);
+}
+.toast-warning::before {
+  background: var(--status-caution);
+}
+.toast-error::before {
+  background: var(--status-danger);
+}
+
+.toast-icon {
+  font-size: 16px;
+  margin-top: 1px;
+  flex: none;
+}
+
+.toast-info .toast-icon {
+  color: var(--accent-text);
+}
+.toast-success .toast-icon {
+  color: var(--status-success);
+}
+.toast-warning .toast-icon {
+  color: var(--status-caution);
+}
+.toast-error .toast-icon {
+  color: var(--status-danger);
+}
+
+.toast-text {
+  flex: 1;
+  font: var(--type-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  min-width: 0;
+  padding: 2px 10px;
+  flex: none;
+}
+
+.toast-close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px 0 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+.toast-close .codicon {
+  font-size: 14px;
+}
+
+.toast-leaving {
+  animation: toast-out var(--dur-fast) var(--ease-accel) forwards;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ── 菜单（src/ui/menu.js） ───────────────────────────────────── */
+
+.menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--surface-flyout);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-16);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-control);
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.menu-item:hover:not(:disabled) {
+  background: var(--fill-subtle-hover);
+}
+
+.menu-item:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.menu-item.hidden {
+  display: none;
+}
+
+.menu-item-danger {
+  color: var(--status-danger);
+}
+
+.menu-item .codicon {
+  font-size: 14px;
+}

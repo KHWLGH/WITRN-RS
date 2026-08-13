@@ -5,6 +5,7 @@
 
 import { setSeriesVisible } from './chart.js';
 import { state } from './state.js';
+import { toast } from './ui/toast.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -24,7 +25,7 @@ export async function connectTempService() {
     state.settings.tempIp = ip;
     state.settings.tempPort = port;
   } catch (e) {
-    alert('温度服务连接失败: ' + e);
+    toast.error(`温度服务连接失败: ${e}`);
   }
 }
 
@@ -34,7 +35,7 @@ export async function disconnectTempService() {
     await invoke('disconnect_temp_service');
     setTempConnected(false);
   } catch (e) {
-    alert('断开温度服务失败: ' + e);
+    toast.error(`断开温度服务失败: ${e}`);
   }
 }
 

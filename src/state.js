@@ -41,6 +41,7 @@
  * @property {boolean} statsRange
  * @property {string}  tempIp
  * @property {number}  tempPort
+ * @property {string}  activeView       - 上次活动的工作区视图 id
  */
 
 /**
@@ -111,6 +112,7 @@ export const defaultSettings = {
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573,
+  activeView: 'monitor',
 };
 
 /** @type {AutoPauseSettings} */

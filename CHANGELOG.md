@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **界面全面重构为 Fluent 2 多 Tab 工作区**：仿 Office Ribbon 单页布局（默认窗宽即横向溢出）替换为 监控 / PD 分析 / ⚙设置（含设备信息）工作区 Tab；每个工作区容纳"主功能 + 自身设置"（显示通道、自动暂停、温度服务收进监控页命令栏的浮出面板），设备连接区常驻标题栏、任何页面可快速连断；底部新增全局状态栏（记录状态/点数/设备名/温度服务）。视图切换用 `hidden` 属性、监控视图常驻挂载，uPlot 实例跨切换存活，73 万点会话性能路径零改动
+- **设计令牌层**（`src/styles/tokens.css`）：原始色 → 语义角色 → 组件旋钮三层结构；表面分层（壳/内容/卡片/弹层）、统一圆角（控件 4px / 表面 8px）、Fluent 阴影四档与动效曲线、跨平台中文字体回退；亮色主题只需重赋语义层（本版本未交付）。曲线颜色改由 `src/theme.js` 从令牌读取，修复图表曲线色与复选框/卡片色不一致的问题（图例点 = 复选框色块 = 卡片强调条 = 曲线同源）
+- **自定义标题栏**：`decorations: false`，Tab 条 + 连接区 + 窗口按钮合并为一行（Windows Terminal 形态）。Windows 经 `tauri-plugin-decorum` 注入窗口按钮并保留 Win11 贴靠布局浮窗（按设计令牌重绘）；Linux 自绘窗口按钮 + 四边/四角透明热区调 `startResizeDragging()` 实现无边框调整大小，1px 描边补偿无阴影轮廓
+- **对话框体系入前端**：5 处原生 `ask`/`message` 迁移到基于 `<dialog>` 的应用内确认框（签名与 tauri 插件一致；无 `HTMLDialogElement` 的旧 WebKitGTK 透明回退插件实现），10 处阻塞式 `window.alert()` 全部改为右下角非阻塞 toast（错误常驻、其余 4 秒自动消失）；文件选择器保留原生（Tauri v2 经对话框选择授予所选路径的 fs scope）。导出菜单与新增菜单统一为 `src/ui/menu.js` 原语
+
+### Added
+- **PD 协议分析工作区**：接入后端已有的 `pd-data` 事件（完整 USB-PD 解码树），报文列表带时间戳、SOP/SRC/SNK/CBL 徽章与 PDO/RDO 速览摘要，行点击懒加载展开逐字段解码树（含原始位与位置）；支持暂停缓冲、清空、按消息类型过滤、隐藏 GoodCRC（默认开）、自动滚动开关；2000 条环形缓冲 + rAF 批量渲染 + 视图隐藏时跳过 DOM 工作，未节流的报文洪峰不影响图表
+- **设备信息（设置页右栏）**：接入后端已有的 `identify_current_device` 命令，读取产品名、批次序列号与端口无关稳定指纹；录制中禁用（该命令会暂停数据流约 2 秒）；VID/PID/SN 从工具条迁入此处
+- **ID 契约测试**（`test/ids.test.js`）：从 JS 源码提取全部 `getElementById` 字面量，断言每个 id 在 index.html 恰好出现一次，防止结构重排"移丢"控件；**PD 纯逻辑测试**（`test/pd-model.test.js`）覆盖摘要提取、过滤与环形缓冲回绕
+- 活动工作区持久化（`settings.activeView`，白名单校验），启动恢复上次 Tab
+
+### Removed
+- Ribbon 时代死代码：旧 `.status-bar` / `.auto-pause-card` / 导出菜单内联实现及其样式、未引用的模板资产（`tauri.svg` / `javascript.svg`）；`index.html` 不再含任何内联 `style=""`（图例/tooltip 生成代码同步改为 CSSOM 赋值，为后续收紧 CSP 铺路）
+
+### Security（待 Linux 冒烟验证后收紧）
+- capability 计划从 `dialog:default` 收窄为 `dialog:allow-open` + `dialog:allow-save`；CSP 计划去除 `script-src`/`style-src` 的 `'unsafe-inline'`。两项均需先在 WebKitGTK 上冒烟验证，本次未合入
+
 ## [0.1.5] - 2026-08-10
 
 ### Fixed

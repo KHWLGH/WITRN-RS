@@ -1,0 +1,60 @@
+/*
+ * 基础层：焦点环 / 滚动条 / 选区 / 动效偏好。
+ * 只放与具体组件无关的全局配方；组件样式在 styles.css（后续拆分至 styles/components.css）。
+ */
+
+/* hidden 属性必须永远生效：任何带显式 display 的类（.empty-state 等）都压不过它 */
+[hidden] {
+  display: none !important;
+}
+
+/* Fluent 焦点环：仅键盘焦点显示（:focus-visible），2px 亮描边 + 1px 间隙 */
+:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: 1px;
+}
+
+/* 强调填充（亮底）上的控件用内圈加对比，形成 Fluent 双环 */
+.btn-accent:focus-visible,
+.range-handle:focus-visible {
+  box-shadow: 0 0 0 1px var(--stroke-focus-inner);
+}
+
+/* 文本选区 */
+::selection {
+  background: var(--accent-fill-faint);
+}
+
+/* 滚动条（WebKit）：细、圆角、悬停加深 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-24);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-36);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 动效偏好：用户要求减弱动效时全部归零 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

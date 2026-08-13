@@ -1,0 +1,190 @@
+- generic [ref=e2]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 设备
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - combobox "选择要连接的设备" [ref=e9] [cursor=pointer]:
+            - option "-- 点击刷新扫描设备 --" [selected]
+          - button "" [ref=e10] [cursor=pointer]
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - button " 连接" [ref=e14] [cursor=pointer]:
+              - generic [ref=e15]: 
+              - generic [ref=e17]: 连接
+            - button " 断开" [disabled] [ref=e18]:
+              - generic [ref=e19]: 
+              - generic [ref=e21]: 断开
+          - generic [ref=e23]:
+            - generic [ref=e24]: 未连接
+            - generic [ref=e27]:
+              - generic [ref=e28]: "记录:"
+              - generic [ref=e29]: 停止
+            - generic [ref=e30]:
+              - generic [ref=e31]: "设备:"
+              - generic [ref=e32]: "--"
+            - generic [ref=e33]:
+              - generic [ref=e34]: "点数:"
+              - generic [ref=e35]: "0"
+    - generic [ref=e37]:
+      - generic [ref=e38]: 记录
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - button " 开始记录" [disabled] [ref=e41]:
+            - generic [ref=e42]: 
+            - generic [ref=e44]: 开始记录
+          - button " 停止记录" [disabled] [ref=e45]:
+            - generic [ref=e46]: 
+            - generic [ref=e48]: 停止记录
+        - combobox "采样率（显示为 每秒次数；值为毫秒）" [ref=e50] [cursor=pointer]:
+          - option "10 次/秒"
+          - option "4 次/秒" [selected]
+          - option "2 次/秒"
+          - option "1 次/秒"
+          - option "0.2 次/秒 (5秒1次)"
+          - option "0.1 次/秒 (10秒1次)"
+    - generic [ref=e51]:
+      - generic [ref=e52]: 统计
+      - generic [ref=e53]:
+        - generic [ref=e54]:
+          - button " 导出CSV ▼" [ref=e55] [cursor=pointer]:
+            - generic [ref=e56]: 
+            - generic [ref=e58]: 导出CSV ▼
+          - button " 导入CSV" [ref=e59] [cursor=pointer]:
+            - generic [ref=e60]: 
+            - generic [ref=e62]: 导入CSV
+          - button " 一键重置" [ref=e63] [cursor=pointer]:
+            - generic [ref=e64]: 
+            - generic [ref=e66]: 一键重置
+        - generic [ref=e67]:
+          - generic "勾选后仅统计当前选中范围的数据" [ref=e68] [cursor=pointer]: 仅统计选中范围
+          - button " 重置配置" [ref=e70] [cursor=pointer]:
+            - generic [ref=e71]: 
+            - generic [ref=e72]: 重置配置
+    - generic [ref=e74]:
+      - generic [ref=e75]: 显示通道
+      - generic [ref=e76]:
+        - generic [ref=e77]:
+          - generic "显示/隐藏电压曲线" [ref=e78] [cursor=pointer]: 电压
+          - generic "填充不透明度（0 = 关闭填充）" [ref=e80]:
+            - spinbutton [ref=e81]: "15"
+            - generic: "%"
+        - generic [ref=e82]:
+          - generic "显示/隐藏电流曲线" [ref=e83] [cursor=pointer]: 电流
+          - generic "填充不透明度（0 = 关闭填充）" [ref=e85]:
+            - spinbutton [ref=e86]: "15"
+            - generic: "%"
+        - generic [ref=e87]:
+          - generic "显示/隐藏功率曲线" [ref=e88] [cursor=pointer]: 功率
+          - generic "填充不透明度（0 = 关闭填充）" [ref=e90]:
+            - spinbutton [ref=e91]: "15"
+            - generic: "%"
+        - generic [ref=e92]:
+          - generic "显示/隐藏温度曲线" [ref=e93] [cursor=pointer]: 温度
+          - generic "填充不透明度（0 = 关闭填充）" [ref=e95]:
+            - spinbutton [ref=e96]: "15"
+            - generic: "%"
+    - generic [ref=e98]:
+      - generic [ref=e99]: 自动暂停
+      - generic [ref=e100]:
+        - generic [ref=e101] [cursor=pointer]: 启用
+        - combobox [ref=e104] [cursor=pointer]:
+          - option "无" [selected]
+          - option "电压 <"
+          - option "电流 <"
+          - option "功率 <"
+        - spinbutton "触发阈值" [ref=e106]: "0.00"
+        - generic [ref=e107]:
+          - spinbutton "s" [ref=e108]: "10"
+          - generic [ref=e109]: s
+    - generic [ref=e111]:
+      - generic [ref=e112]: 设备参数
+      - generic [ref=e113]:
+        - generic [ref=e114]:
+          - generic [ref=e115]: "VID:"
+          - textbox "VID:" [ref=e116]: "0x0716"
+        - generic [ref=e117]:
+          - generic [ref=e118]: "PID:"
+          - textbox "PID:" [ref=e119]: "0x5060"
+        - generic [ref=e120]:
+          - generic [ref=e121]: "SN:"
+          - textbox "SN:" [ref=e122]: "--"
+    - generic [ref=e124]:
+      - generic [ref=e125]: 温度服务
+      - generic [ref=e126]:
+        - generic [ref=e127]:
+          - generic [ref=e128]:
+            - generic [ref=e129]: "IP:"
+            - textbox "IP:" [ref=e130]: 127.0.0.1
+          - generic [ref=e131]:
+            - generic [ref=e132]: "端口:"
+            - spinbutton "端口:" [ref=e133]: "1573"
+        - generic [ref=e134]:
+          - button " 连接" [ref=e135] [cursor=pointer]:
+            - generic [ref=e136]: 
+            - generic [ref=e138]: 连接
+          - button " 断开" [disabled] [ref=e139]:
+            - generic [ref=e140]: 
+            - generic [ref=e142]: 断开
+          - generic [ref=e143]: 未连接
+  - generic [ref=e147]:
+    - generic [ref=e148]:
+      - generic [ref=e149]:
+        - generic [ref=e150]: 电压
+        - generic [ref=e151]:
+          - generic [ref=e152]: "--"
+          - generic [ref=e153]: V
+        - generic [ref=e154]:
+          - generic [ref=e155]:
+            - text: "最小:"
+            - generic [ref=e156]: "--"
+          - generic [ref=e157]:
+            - text: "最大:"
+            - generic [ref=e158]: "--"
+      - generic [ref=e159]:
+        - generic [ref=e160]: 电流
+        - generic [ref=e161]:
+          - generic [ref=e162]: "--"
+          - generic [ref=e163]: A
+        - generic [ref=e164]:
+          - generic [ref=e165]:
+            - text: "最小:"
+            - generic [ref=e166]: "--"
+          - generic [ref=e167]:
+            - text: "最大:"
+            - generic [ref=e168]: "--"
+      - generic [ref=e169]:
+        - generic [ref=e170]: 功率
+        - generic [ref=e171]:
+          - generic [ref=e172]: "--"
+          - generic [ref=e173]: W
+        - generic [ref=e174]:
+          - generic [ref=e175]: 平均
+          - generic [ref=e176]: "--"
+          - generic [ref=e177]: W
+        - generic [ref=e178]:
+          - generic [ref=e179]:
+            - text: "最小:"
+            - generic [ref=e180]: "--"
+          - generic [ref=e181]:
+            - text: "最大:"
+            - generic [ref=e182]: "--"
+      - generic [ref=e183]:
+        - generic [ref=e184]: 累计能量
+        - generic [ref=e185]:
+          - generic [ref=e186]: "--"
+          - generic [ref=e187]: Wh
+        - generic [ref=e188]:
+          - generic [ref=e189]: 容量
+          - generic [ref=e190]: "--"
+          - generic [ref=e191]: mAh
+    - generic [ref=e196]:
+      - generic [ref=e197]:
+        - generic [ref=e198]: "--"
+        - generic [ref=e199]: 全部
+        - generic [ref=e200]: "--"
+      - generic [ref=e203]:
+        - slider "范围起点" [ref=e204]
+        - slider "范围终点" [ref=e205]
+        - slider: "0"
+        - slider: "1000"

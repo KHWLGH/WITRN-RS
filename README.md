@@ -17,12 +17,15 @@ WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (
 
 ### 核心功能
 *   **实时监控**：实时读取并显示电压、电流、功率和温度；容量 (mAh) 与能量 (Wh) 由软件按录制区间积分
+*   **USB-PD 协议分析**：实时捕获并解码 USB-PD 报文（Source_Capabilities / Request / PPS 等），报文列表带角色徽章与 PDO/RDO 速览，可逐字段展开解码树
 *   **图表显示**：支持实时数据图表显示和历史数据导航
 *   **数据导出**：支持 CSV 格式数据导出（可选择是否包含温度数据）
 *   **统计信息**：显示最小值、最大值、平均值等统计数据
-*   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接
+*   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接；设备页可读取产品名、批次序列号与稳定指纹
 
 ### 高级功能
+*   **多 Tab 工作区**：监控 / PD 分析 各占一个 Tab，功能与其设置同页（设备信息在设置页右栏）；设备连接常驻标题栏，任何页面可快速连断
+*   **Fluent 2 暗色界面**：设计令牌驱动的现代深色主题，自定义标题栏（Windows 保留 Win11 贴靠布局浮窗）
 *   **密集网格显示**：主图支持细分网格线绘制，提升读取趋势和局部变化时的参考精度
 *   **平滑退出机制**：退出确认后由后端统一停止后台线程并 `destroy` 主窗口，避免 `close` 重新派发关闭事件造成的回环
 *   **填充控制简化**：曲线填充改为由透明度直接控制（0 = 关闭填充，1-100 = 开启填充）
@@ -149,21 +152,29 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
 
 ### 前端 (Vanilla JavaScript)
 - **位置**：`src/`
+- **界面外壳**：多 Tab 工作区（监控 / PD 分析 / 设置·设备），Fluent 2 风格暗色主题，自定义标题栏（Windows 经 `tauri-plugin-decorum` 保留贴靠布局，Linux 自绘窗口按钮与边缘调整热区）
 - **模块结构**（ES Modules，启用 `// @ts-check` 类型检查）：
-  - `app.js` - 应用入口、Tauri API 导入、窗口关闭、UI 事件绑定
+  - `app.js` - 应用入口、Tauri API 导入、窗口关闭、UI 事件绑定、外壳装配
+  - `shell.js` - 视图注册表（多 Tab 工作区切换、活动视图持久化）
   - `state.js` - 共享应用状态与类型定义
+  - `theme.js` - 主题桥（把 CSS 设计令牌暴露给 uPlot 等 canvas 侧消费者）
   - `chart.js` - uPlot 图表初始化、渲染调度、tooltip/图例交互
   - `data.js` - 数据采集、统计计算、录制逻辑
   - `measurement.js` - 相对时间解析、能量/容量积分、导出行构造（不依赖 DOM 与 Tauri 的纯函数，供单元测试直接调用）
+  - `pd-model.js` - PD 报文摘要提取、环形缓冲、过滤（纯函数，供单元测试直接调用）
   - `device.js` - HID 设备连接管理
   - `csv.js` - CSV 导入/导出
   - `settings.js` - 设置加载/保存（防抖持久化）
   - `temperature.js` - 温度服务网络连接
+  - `dropdown.js` - 自定义下拉组件（WebKitGTK 原生弹层不可主题化的替代方案）
   - `utils.js` - 通用工具函数
+  - `ui/` - 界面原语：`dialog.js`（应用内确认/消息框）、`toast.js`（非阻塞通知）、`menu.js`（菜单）、`flyout.js`（浮出面板）、`tabbar.js`（Tab 条）、`windowcontrols.js`（窗口控制）
+  - `views/` - 工作区视图：`pd.js`（PD 协议分析）、`device.js`（设备身份）、`settings-view.js`（设置页）
   - `global.d.ts` - Tauri 全局 API 类型声明
 - **其他文件**：
   - `index.html` - 应用界面结构
-  - `styles.css` - 界面样式
+  - `styles/` - 设计令牌（`tokens.css`）、全局配方（`base.css`）、弹层原语（`components.css`）、外壳布局（`app.css`）、视图样式（`views.css`）
+  - `styles.css` - 组件皮肤（下拉/输入框/读数卡片/图表容器/时间线）
 - **前端运行时依赖**（均已 vendor 到 `src/vendor/`，本地运行无网络依赖）：
   - uPlot - 图表绘制（轻量高性能，替代原 Chart.js）
   - Tauri Plugin Store - 设置持久化
@@ -175,6 +186,8 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
 
 - `measurement.test.js` - 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分、导出行构造
 - `recording.test.js` - 录制会话边界重置积分基线、导入后续录从最后一个相对时间点继续
+- `pd-model.test.js` - PD 报文摘要提取（SOP/角色/速览）、GoodCRC 过滤、环形缓冲回绕
+- `ids.test.js` - HTML↔JS 的 DOM id 契约（JS 引用的每个 id 在 index.html 恰好出现一次）
 
 Rust 侧测试以 `#[cfg(test)]` 内联在 `src-tauri/src/lib.rs`，覆盖 HID 帧解析校验与多接口筛选。硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
 

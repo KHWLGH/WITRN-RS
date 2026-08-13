@@ -1,4 +1,8 @@
-/* WITRN-RS - Dark Theme */
+/*
+ * 组件皮肤（历史文件，逐步瘦身中）：自定义下拉 / 输入框 / 复选框 / 读数卡片 /
+ * 图表容器 / 时间线滑块 / 状态指示点。
+ * 设计令牌见 styles/tokens.css；外壳布局见 styles/app.css；弹层原语见 styles/components.css。
+ */
 @font-face {
   font-family: "Noto Sans Mono";
   src: url("assets/fonts/NotoSansMono-Regular.ttf") format("truetype");
@@ -13,243 +17,16 @@
 }
 
 :root {
-  /* VS2022 Dark Theme Colors */
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d30;
-  --bg-card: #252526;
-  --bg-hover: #3e3e42;
-  --text-primary: #d4d4d4;
-  --text-secondary: #cccccc;
-  --text-muted: #858585;
-  --accent-blue: #007acc;
-  --accent-green: #4ec9b0; /* VS Code Green-ish */
-  --accent-orange: #ce9178;
-  --accent-red: #f44747;
-  --accent-purple: #c586c0;
-
-  /* Keep these for chart colors, maybe adjust slightly */
-  --voltage-color: #569cd6; /* VS Blue */
-  --current-color: #4ec9b0; /* VS Green */
-  --power-color: #dcdcaa; /* VS Yellow/Orange */
-  --temp-color: #f44747; /* Temperature Red */
-
-  --border-color: #3f3f46;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-
-  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "Noto Sans Mono", "Consolas", "Monaco", monospace;
-
-  /* Tell the engine this is a dark UI so native widgets (WebKitGTK form
-     controls, scrollbars, the select popup) are painted dark instead of
-     defaulting to the light GTK theme. */
-  color-scheme: dark;
-
   font-family: var(--font-ui);
-  font-size: 13px; /* VS uses slightly smaller font usually */
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
-  background-color: var(--bg-primary);
+  background-color: var(--surface-content);
 }
 
 body {
   overflow: hidden;
   height: 100vh;
-}
-
-.app-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: var(--bg-primary);
-}
-
-/* Ribbon Styles */
-.ribbon {
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-color);
-  user-select: none;
-}
-
-.ribbon-content {
-  display: flex;
-  padding: 8px 10px;
-  gap: 10px;
-  align-items: stretch;
-  min-height: auto;
-  background: var(--bg-primary); /* Match active tab */
-  border-bottom: 1px solid var(--border-color);
-  overflow-x: auto;
-  overflow-y: visible;
-  white-space: nowrap;
-  position: relative;
-}
-
-/* Custom scrollbar for ribbon content */
-.ribbon-content::-webkit-scrollbar {
-  height: 6px;
-}
-
-.ribbon-content::-webkit-scrollbar-track {
-  background: var(--bg-tertiary);
-}
-
-.ribbon-content::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.ribbon-content::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
-
-.ribbon-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 0 8px;
-  flex-shrink: 0; /* Prevent shrinking */
-}
-
-.ribbon-group-title {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-transform: none;
-  letter-spacing: normal;
-  text-align: center;
-  margin-top: auto;
-  padding-top: 4px;
-}
-
-.ribbon-group-content {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  flex: 1;
-}
-
-.ribbon-separator {
-  width: 1px;
-  background: var(--border-color);
-  margin: 0 4px;
-  align-self: stretch;
-  flex-shrink: 0;
-}
-
-.ribbon-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.1s ease;
-  min-width: 60px;
-}
-
-.ribbon-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-color);
-  transform: none;
-}
-
-.ribbon-btn:active:not(:disabled) {
-  background: var(--accent-blue);
-  color: white;
-}
-
-.ribbon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ribbon-btn-icon {
-  font-size: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ribbon-btn-text {
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.ribbon-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: transparent;
-  border-radius: 2px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-primary);
-  transition: none;
-}
-
-.ribbon-checkbox:hover {
-  background: var(--bg-hover);
-}
-
-.ribbon-checkbox input {
-  display: none;
-}
-
-.ribbon-checkbox .checkmark {
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--text-muted);
-  border-radius: 2px;
-  position: relative;
-  transition: none;
-  background: var(--bg-primary);
-}
-
-.ribbon-checkbox .checkmark.voltage {
-  border-color: var(--voltage-color);
-}
-.ribbon-checkbox .checkmark.current {
-  border-color: var(--current-color);
-}
-.ribbon-checkbox .checkmark.power {
-  border-color: var(--power-color);
-}
-.ribbon-checkbox .checkmark.temp {
-  border-color: var(--temp-color);
-}
-
-.ribbon-checkbox input:checked + .checkmark {
-  background: currentColor;
-}
-
-.ribbon-checkbox input:checked + .checkmark::after {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 1px;
-  width: 3px;
-  height: 7px;
-  border: solid var(--bg-primary);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.ribbon-checkbox input:checked + .checkmark.voltage {
-  background: var(--voltage-color);
-}
-.ribbon-checkbox input:checked + .checkmark.current {
-  background: var(--current-color);
-}
-.ribbon-checkbox input:checked + .checkmark.power {
-  background: var(--power-color);
-}
-.ribbon-checkbox input:checked + .checkmark.temp {
-  background: var(--temp-color);
 }
 
 /* WebKitGTK (Linux) paints native <select> with the GTK theme and ignores our
@@ -259,46 +36,45 @@ body {
 select {
   -webkit-appearance: none;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23cccccc' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23d6d6d6' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 6px center;
   background-size: 10px 6px;
-  background-color: var(--bg-primary);
+  background-color: var(--fill-control);
   color: var(--text-primary);
 }
 
 .ribbon-select {
   padding: 4px 20px 4px 8px;
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 2px;
+  background-color: var(--fill-control);
+  border: 1px solid var(--stroke-control);
+  border-bottom-color: var(--stroke-input-underline);
+  border-radius: var(--radius-control);
   color: var(--text-primary);
   font-size: 12px;
   cursor: pointer;
   min-width: 100px;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+.ribbon-select:hover:not(:disabled) {
+  background-color: var(--fill-control-hover);
 }
 
 .ribbon-select:focus {
   outline: none;
-  border-color: var(--accent-blue);
+  box-shadow: inset 0 -2px 0 var(--accent-fill);
 }
 
 .ribbon-select:disabled {
-  opacity: 0.5;
+  color: var(--text-disabled);
+  border-bottom-color: var(--stroke-control);
   cursor: not-allowed;
 }
 
 .ribbon-select option {
-  background-color: var(--bg-secondary);
+  background-color: var(--surface-flyout);
   color: var(--text-primary);
-}
-
-/* Device Selection Styles */
-.device-select-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 4px;
 }
 
 .device-dropdown {
@@ -306,76 +82,7 @@ select {
   max-width: 280px;
 }
 
-.device-buttons-row {
-  display: flex;
-  gap: 4px;
-}
-
-.ribbon-btn-small {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.1s ease;
-  height: 24px;
-  width: 24px;
-}
-
-.ribbon-btn-small-text {
-  width: auto;
-  justify-content: flex-start;
-  gap: 6px;
-}
-
-.ribbon-btn-small:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-color);
-}
-
-.ribbon-btn-small:active:not(:disabled) {
-  background: var(--accent-blue);
-  color: white;
-}
-
-.ribbon-btn-small:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ribbon-btn-small i {
-  font-size: 14px;
-}
-
-/* Device Info Group */
-.device-info-group {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.device-info-group .ribbon-input-group {
-  gap: 4px;
-}
-
-.device-info-group .ribbon-input-group label {
-  width: 28px;
-  text-align: right;
-}
-
-.device-info-group .ribbon-input {
-  width: 75px;
-}
-
-.device-sn-input {
-  width: 120px !important;
-}
-
-/* Status Bar Device Name */
+/* 状态栏里的设备名（超长省略） */
 .device-name-status {
   max-width: 200px;
   overflow: hidden;
@@ -383,27 +90,107 @@ select {
   white-space: nowrap;
 }
 
-.ribbon-input-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.device-sn-input {
+  width: 160px !important;
 }
 
-.ribbon-input-group label {
+/* ── 复选框（flyout / PD 命令栏共用） ─────────────────────────── */
+
+.ribbon-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  border-radius: var(--radius-control);
+  cursor: pointer;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-standard);
 }
+
+.ribbon-checkbox:hover {
+  background: var(--fill-subtle-hover);
+}
+
+.ribbon-checkbox input {
+  display: none;
+}
+
+.ribbon-checkbox .checkmark {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--stroke-input-underline);
+  border-radius: 3px;
+  position: relative;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.ribbon-checkbox .checkmark.voltage {
+  border-color: var(--ch-voltage);
+}
+.ribbon-checkbox .checkmark.current {
+  border-color: var(--ch-current);
+}
+.ribbon-checkbox .checkmark.power {
+  border-color: var(--ch-power);
+}
+.ribbon-checkbox .checkmark.temp {
+  border-color: var(--ch-temp);
+}
+
+.ribbon-checkbox input:checked + .checkmark {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+
+.ribbon-checkbox input:checked + .checkmark::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+  height: 7px;
+  border: solid var(--text-on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.ribbon-checkbox input:checked + .checkmark.voltage {
+  background: var(--ch-voltage);
+  border-color: var(--ch-voltage);
+}
+.ribbon-checkbox input:checked + .checkmark.current {
+  background: var(--ch-current);
+  border-color: var(--ch-current);
+}
+.ribbon-checkbox input:checked + .checkmark.power {
+  background: var(--ch-power);
+  border-color: var(--ch-power);
+}
+.ribbon-checkbox input:checked + .checkmark.temp {
+  background: var(--ch-temp);
+  border-color: var(--ch-temp);
+}
+
+/* ── 输入框 ───────────────────────────────────────────────────── */
 
 .ribbon-input {
   padding: 4px 6px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 0;
+  background: var(--fill-control);
+  border: 1px solid var(--stroke-control);
+  border-bottom-color: var(--stroke-input-underline);
+  border-radius: var(--radius-control);
   color: var(--text-primary);
   font-size: 12px;
   font-family: var(--font-mono);
   width: 80px;
   height: 24px; /* Fixed height for alignment */
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 
 /* Hide spin buttons for number inputs with class .no-spin */
@@ -416,32 +203,38 @@ select {
   -moz-appearance: textfield; /* Firefox */
 }
 
-.ribbon-input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
+.ribbon-input:hover:not(:disabled):not([readonly]) {
+  background: var(--fill-control-hover);
 }
 
-/* Windows 10 Style Spin Buttons */
+.ribbon-input:focus {
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--accent-fill);
+}
+
+.ribbon-input[readonly] {
+  background: transparent;
+  border-color: var(--stroke-control);
+  color: var(--text-secondary);
+}
+
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   opacity: 1;
   cursor: pointer;
   margin-left: 4px;
   height: 100%;
-  /* Make them slightly larger/wider if possible */
   transform: scale(1.1);
   transform-origin: right center;
 }
 
-.ribbon-input-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* ── 时间线导航器 ─────────────────────────────────────────────── */
+
 .timeline-container {
   height: 80px;
-  background: var(--bg-card);
-  border-radius: 8px;
+  background: var(--surface-card);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -458,8 +251,8 @@ input[type="number"]::-webkit-outer-spin-button {
 .timeline-track {
   position: relative;
   flex: 1;
-  background: var(--bg-secondary);
-  border-radius: 4px;
+  background: var(--surface-base);
+  border-radius: var(--radius-control);
   overflow: hidden;
 }
 
@@ -528,12 +321,13 @@ input[type="number"]::-webkit-outer-spin-button {
   height: 100%;
   width: 18px;
   transform: translateX(-50%);
-  background: var(--text-primary);
-  border: 1px solid var(--bg-card);
-  border-radius: 3px;
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+  background: var(--gray-68);
+  border: 1px solid var(--surface-card);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-2);
   cursor: ew-resize;
   z-index: 4;
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 
 .range-handle::before {
@@ -549,21 +343,16 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .range-handle:hover {
-  background: var(--accent-blue);
-}
-
-.range-handle:focus {
-  outline: 2px solid var(--accent-blue);
-  outline-offset: 2px;
+  background: var(--accent-fill);
 }
 
 .slider-track-fill {
   position: absolute;
   top: 0;
   height: 100%;
-  background: rgba(74, 158, 255, 0.1); /* Light blue highlight for selected area */
-  border-left: 1px solid rgba(255, 255, 255, 0.3);
-  border-right: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--accent-fill-faint);
+  border-left: 1px solid var(--stroke-input-underline);
+  border-right: 1px solid var(--stroke-input-underline);
   transform: none;
   border-radius: 0;
   opacity: 1;
@@ -573,41 +362,15 @@ input[type="number"]::-webkit-outer-spin-button {
   pointer-events: none;
 }
 
-/* Main Content */
-.main-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 15px;
-  gap: 15px;
-  overflow: hidden;
-}
-
-.content-row {
-  display: flex;
-  flex: 1;
-  gap: 15px;
-  overflow: hidden;
-}
+/* ── 监控视图布局件 ───────────────────────────────────────────── */
 
 .chart-area {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 12px;
   overflow: hidden;
   min-width: 0; /* Prevent flex item from overflowing */
-}
-
-/* Status Bar */
-.status-bar {
-  display: flex;
-  gap: 20px;
-  padding: 8px 15px;
-  background: var(--bg-card);
-  border-radius: 8px;
-  font-size: 12px;
-  flex-shrink: 0;
 }
 
 .status-item {
@@ -620,18 +383,22 @@ input[type="number"]::-webkit-outer-spin-button {
 .status-indicator {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
-  background: var(--accent-red);
-  box-shadow: 0 0 8px var(--accent-red);
-  transition: all 0.3s ease;
+  border-radius: var(--radius-full);
+  background: var(--status-danger);
+  box-shadow: 0 0 8px var(--status-danger-bg);
+  transition:
+    background var(--dur-slow) var(--ease-standard),
+    box-shadow var(--dur-slow) var(--ease-standard);
+  flex-shrink: 0;
 }
 
 .status-indicator.connected {
-  background: var(--accent-green);
-  box-shadow: 0 0 8px var(--accent-green);
+  background: var(--status-success);
+  box-shadow: 0 0 8px var(--status-success-bg);
 }
 
-/* Real-time Panel */
+/* ── 实时读数栏 ───────────────────────────────────────────────── */
+
 .realtime-panel {
   display: flex;
   flex-direction: column;
@@ -640,8 +407,9 @@ input[type="number"]::-webkit-outer-spin-button {
   flex-shrink: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
+  background: var(--surface-card);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
   padding: 0;
 }
 
@@ -651,8 +419,8 @@ input[type="number"]::-webkit-outer-spin-button {
   padding: 8px 12px;
   text-align: left;
   border: none;
-  border-bottom: 1px solid var(--border-color);
-  transition: background 0.2s ease;
+  border-bottom: 1px solid var(--stroke-divider);
+  transition: background var(--dur-fast) var(--ease-standard);
   position: relative;
   overflow: hidden;
   display: flex;
@@ -672,32 +440,28 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .realtime-card.voltage::before {
-  background: var(--voltage-color);
+  background: var(--ch-voltage);
 }
 .realtime-card.current::before {
-  background: var(--current-color);
+  background: var(--ch-current);
 }
 .realtime-card.power::before {
-  background: var(--power-color);
+  background: var(--ch-power);
 }
 .realtime-card.temperature::before {
-  background: var(--temp-color);
+  background: var(--ch-temp);
 }
 .realtime-card.energy::before {
-  background: var(--accent-purple);
+  background: var(--ch-energy);
 }
 
 .realtime-card:hover {
-  background: var(--bg-hover);
-  transform: none;
-  box-shadow: none;
+  background: var(--fill-subtle-hover);
 }
 
 .realtime-label {
   font-size: 12px;
   color: var(--text-secondary);
-  text-transform: none;
-  letter-spacing: normal;
   margin-bottom: 2px;
   font-weight: 600;
   align-self: flex-start;
@@ -711,34 +475,32 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .realtime-value {
-  font-size: 32px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  line-height: 1.1;
+  font: var(--type-numeral);
   text-align: center;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .realtime-card.voltage .realtime-value {
-  color: var(--voltage-color);
+  color: var(--ch-voltage);
 }
 .realtime-card.current .realtime-value {
-  color: var(--current-color);
+  color: var(--ch-current);
 }
 .realtime-card.power .realtime-value {
-  color: var(--power-color);
+  color: var(--ch-power);
 }
 .realtime-card.temperature .realtime-value {
-  color: var(--temp-color);
+  color: var(--ch-temp);
 }
 .realtime-card.energy .realtime-value {
-  color: var(--accent-purple);
+  color: var(--ch-energy);
 }
 
 .realtime-unit {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   margin-left: 4px;
 }
 
@@ -760,14 +522,14 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .realtime-average-unit {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 .realtime-card.power .realtime-average-value {
-  color: var(--power-color);
+  color: var(--ch-power);
 }
 .realtime-card.temperature .realtime-average-value {
-  color: var(--temp-color);
+  color: var(--ch-temp);
 }
 
 .realtime-stats {
@@ -776,10 +538,10 @@ input[type="number"]::-webkit-outer-spin-button {
   width: 100%;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--stroke-divider);
 }
 
 .realtime-sub {
@@ -794,14 +556,14 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .realtime-sub-value {
   font-weight: 700;
-  color: var(--accent-purple);
+  color: var(--ch-energy);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .realtime-sub-unit {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 .realtime-stats span {
@@ -818,13 +580,14 @@ input[type="number"]::-webkit-outer-spin-button {
   font-variant-numeric: tabular-nums;
 }
 
-/* Chart Container */
+/* ── 图表容器 ─────────────────────────────────────────────────── */
+
 .chart-container {
   flex: 1;
-  background: var(--bg-card);
-  border-radius: 10px;
+  background: var(--surface-card);
+  border-radius: var(--radius-surface);
   padding: 15px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--stroke-card);
   position: relative;
   min-height: 300px;
   display: flex;
@@ -848,7 +611,7 @@ input[type="number"]::-webkit-outer-spin-button {
   gap: 4px 18px;
   min-height: 16px;
   font-size: 12px;
-  color: #a0a0b0;
+  color: var(--text-tertiary);
   user-select: none;
   flex-shrink: 0;
 }
@@ -863,7 +626,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .chart-legend-dot {
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   flex: none;
 }
 
@@ -874,19 +637,19 @@ input[type="number"]::-webkit-outer-spin-button {
   top: 0;
   z-index: 20;
   pointer-events: none;
-  background: rgba(30, 30, 50, 0.95);
-  border: 1px solid #2a2a4a;
-  border-radius: 6px;
+  background: var(--surface-flyout);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
   padding: 8px 12px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #a0a0b0;
+  color: var(--text-secondary);
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-8);
 }
 
 .chart-tooltip-title {
-  color: #e8e8f0;
+  color: var(--text-primary);
   font-weight: 600;
   margin-bottom: 6px;
 }
@@ -912,215 +675,6 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .u-cursor-x {
   border-right: 1px dashed rgba(154, 154, 184, 0.45);
-}
-
-/* Scrollbar Styles */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--bg-tertiary);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .content-row {
-    flex-direction: column;
-  }
-
-  .realtime-panel {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 8px;
-    overflow-x: auto;
-  }
-
-  .realtime-card {
-    flex: 1 1 140px;
-    min-width: 140px;
-    min-height: 80px;
-    padding: 8px 10px;
-  }
-
-  .realtime-value {
-    font-size: 20px;
-  }
-  .realtime-average {
-    font-size: 10px;
-  }
-  .realtime-stats {
-    font-size: 10px;
-  }
-  .realtime-stats span {
-    width: 100%;
-  }
-
-  .ribbon-group-content {
-    flex-wrap: wrap;
-  }
-}
-
-/* Auto Pause Card Styles */
-.realtime-card.auto-pause-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--bg-tertiary); /* Slightly darker background to distinguish */
-  border-bottom: 1px solid var(--border-color);
-}
-
-.realtime-card.auto-pause-card::before {
-  display: none; /* No colored bar */
-}
-
-.auto-pause-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.auto-pause-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.auto-pause-toggle {
-  background: transparent;
-  border: 1px solid var(--text-muted);
-  color: var(--text-muted);
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 2px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.auto-pause-toggle.active {
-  background: var(--accent-blue);
-  border-color: var(--accent-blue);
-  color: white;
-}
-
-.auto-pause-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.auto-pause-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.auto-pause-row select,
-.auto-pause-row input {
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 2px 4px;
-  font-size: 11px;
-  border-radius: 2px;
-  width: 80px;
-  text-align: right;
-}
-
-.auto-pause-row select {
-  padding-right: 18px;
-}
-
-.auto-pause-row select:focus,
-.auto-pause-row input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
-
-.duration-input-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.duration-input-wrapper input {
-  width: 60px;
-}
-
-/* Temperature Card Styles */
-.realtime-card.temperature::before {
-  background: var(--temp-color);
-}
-.realtime-card.temperature .realtime-value {
-  color: var(--temp-color);
-}
-
-/* Dropdown Menu Styles */
-.dropdown-container {
-  position: relative;
-  display: inline-block;
-}
-
-.dropdown-menu {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  min-width: 120px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  box-shadow: var(--shadow);
-  z-index: 1000;
-  margin-top: 2px;
-}
-
-.dropdown-item.hidden {
-  display: none;
-}
-
-.dropdown-menu.show {
-  display: block;
-}
-
-.dropdown-item {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  padding: 8px 12px;
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.dropdown-item:hover {
-  background: var(--bg-hover);
-}
-
-.dropdown-item:first-child {
-  border-radius: 4px 4px 0 0;
-}
-
-.dropdown-item:last-child {
-  border-radius: 0 0 4px 4px;
 }
 
 /* Custom Select (src/dropdown.js) — replaces the native <select> popup, which
@@ -1176,34 +730,49 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .cs-menu {
   position: fixed;
-  z-index: 1000;
+  /* 高于 .flyout-panel(1500)：flyout 内的下拉展开时菜单必须浮在面板之上 */
+  z-index: 2000;
   box-sizing: border-box;
   overflow-y: auto;
-  padding: 2px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 2px;
-  box-shadow: var(--shadow);
+  padding: 4px;
+  background-color: var(--surface-flyout);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-16);
   font-size: 12px;
   color: var(--text-primary);
 }
 
+/* Win11 组合框选项：圆角项 + 选中项左侧 accent 指示条 */
 .cs-option {
-  padding: 4px 8px;
-  border-radius: 2px;
+  position: relative;
+  padding: 5px 10px;
+  border-radius: var(--radius-control);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .cs-option.is-selected {
-  color: var(--accent-blue);
+  background-color: var(--fill-subtle-hover);
+}
+
+.cs-option.is-selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--accent-fill);
 }
 
 .cs-option.is-active {
-  background-color: var(--bg-hover);
+  background-color: var(--fill-subtle-hover);
 }
 
 .cs-option[aria-disabled="true"] {
-  opacity: 0.5;
+  color: var(--text-disabled);
   cursor: not-allowed;
 }

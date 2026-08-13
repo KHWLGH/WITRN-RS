@@ -15,8 +15,12 @@ import {
 import { buildExportRows, calculateEnergy, parseRelativeTime } from './measurement.js';
 import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { ask } from './ui/dialog.js';
+import { toast } from './ui/toast.js';
 import { setSampleRateOption } from './utils.js';
 
+// 文件选择器保留原生实现：Tauri v2 通过对话框选择在运行时授予所选路径的 fs scope，
+// 换成应用内实现会直接破坏 writeTextFile / readTextFile 的权限。
 const { save, open } = window.__TAURI__.dialog;
 const { writeTextFile, readTextFile } = window.__TAURI__.fs;
 
@@ -30,7 +34,7 @@ export async function exportCSV(withTemp = false) {
   const data = buildExportRows(state.chartData, state.chartSeries);
 
   if (data.length === 0) {
-    alert('没有数据可导出');
+    toast.warning('没有数据可导出');
     return;
   }
 
@@ -92,17 +96,15 @@ export async function exportCSV(withTemp = false) {
 
     if (path) {
       await writeTextFile(path, csv);
-      alert('导出成功');
+      toast.success('导出成功');
     }
   } catch (e) {
     console.error(e);
-    alert('导出失败: ' + e);
+    toast.error(`导出失败: ${e}`);
   }
 }
 
 // ─── Import ──────────────────────────────────────────────────────────────────
-
-const { ask } = window.__TAURI__.dialog;
 
 /** 从 CSV 文件导入数据。 */
 export async function importCSV() {
@@ -283,9 +285,9 @@ export async function importCSV() {
 
     updateTempUIVisibility();
 
-    alert(`成功导入 ${newTimestamps.length} 条数据`);
+    toast.success(`成功导入 ${newTimestamps.length} 条数据`);
   } catch (e) {
     console.error(e);
-    alert('导入失败: ' + /** @type {Error} */ (e).message);
+    toast.error(`导入失败: ${/** @type {Error} */ (e).message}`);
   }
 }
