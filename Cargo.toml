@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "crates/usbpd-parser",
+    "crates/witrn-hid",
+]
+
+[workspace.package]
+# The whole workspace releases as one product; crates are not published
+# independently, so they share the application's version.
+version = "0.1.5"
+edition = "2021"
+rust-version = "1.75"
+license = "LGPL-3.0-or-later"
+repository = "https://github.com/KHWLGH/WITRN-RS"
+authors = ["KHWLGH"]
+
+[workspace.dependencies]
+usbpd-parser = { path = "crates/usbpd-parser" }
+witrn-hid = { path = "crates/witrn-hid" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hidapi = "2.6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

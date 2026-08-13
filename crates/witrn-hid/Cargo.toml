@@ -1,0 +1,24 @@
+[package]
+name = "witrn-hid"
+description = "A Rust API for WITRN HID devices (K2, U3, C5 and friends)."
+readme = "README.md"
+keywords = ["witrn", "hid", "usb-pd", "usb-meter"]
+categories = ["hardware-support", "embedded"]
+# Maintained inside the WITRN-RS workspace and versioned with the application.
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+usbpd-parser.workspace = true
+hidapi.workspace = true
+chrono.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde", "usbpd-parser/serde"]

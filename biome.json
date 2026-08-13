@@ -43,6 +43,7 @@
       "**",
       "!**/src/vendor",
       "!**/src/assets",
+      "!**/target",
       "!**/src-tauri/target",
       "!**/src-tauri/gen",
       "!**/.vscode",

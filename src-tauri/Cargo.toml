@@ -1,6 +1,6 @@
 [package]
 name = "witrn-rs"
-version = "0.1.5"
+version.workspace = true
 description = "WITRN-RS"
 authors = ["KHWLGH"]
 edition = "2021"
@@ -23,8 +23,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-serde = { version = "1", features = ["derive"] }
-hidapi = "2.6.3"
+serde.workspace = true
+hidapi.workspace = true
+witrn-hid.workspace = true
 tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"

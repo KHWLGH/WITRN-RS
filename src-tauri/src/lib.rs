@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
+use witrn_hid::{decode_general_sample, decode_pd_report, Parser, ReportKind, WitrnDev};
 
 /// 已知的维简设备型号
 #[derive(Clone)]
@@ -59,6 +60,17 @@ pub struct DeviceInfo {
     pub display_name: String,
     pub interface_number: i32,
     pub usage_page: u16,
+}
+
+/// 身份命令返回的稳定摘要；实时监控仍使用 `DeviceInfo` 和 `device-data`。
+#[derive(Clone, Serialize, Debug, PartialEq)]
+pub struct DeviceIdentity {
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub product: Option<String>,
+    pub usb_serial: Option<String>,
+    pub path: String,
+    pub fingerprint: String,
 }
 
 type PhysicalDeviceKey = (u16, u16, String);
@@ -228,6 +240,62 @@ fn get_current_device_info(state: State<'_, AppState>) -> Option<DeviceInfo> {
     state.current_device_info.lock().unwrap().clone()
 }
 
+/// 在不污染实时读取线程的前提下读取当前设备身份，然后恢复原连接。
+///
+/// `WitrnDev::identity` 会主动等待一个可用于签名的普通报告，因此它只在
+/// 读取任务停止后调用。无论身份读取成功还是失败，都会尝试按原 path 重建
+/// 读取任务；设备拔出时恢复失败会作为原始身份错误的附加日志保留。
+#[tauri::command(async)]
+fn identify_current_device(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<DeviceIdentity, String> {
+    let path = {
+        let info = state
+            .current_device_info
+            .lock()
+            .map_err(|_| "设备信息状态已损坏".to_string())?;
+        info.as_ref()
+            .map(|device| device.path.clone())
+            .ok_or_else(|| "当前没有已连接的设备".to_string())?
+    };
+
+    {
+        let mut task = state
+            .device_task
+            .lock()
+            .map_err(|_| "设备任务状态已损坏".to_string())?;
+        stop_task(&mut task);
+    }
+
+    let identity_result = (|| {
+        let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
+        let mut device = WitrnDev::new();
+        device
+            .open_path(path_cstr.as_c_str())
+            .map_err(|e| format!("无法打开设备读取身份: {e}"))?;
+        let identity = device
+            .identity(2_000)
+            .map_err(|e| format!("读取设备身份失败: {e}"))?;
+        let fingerprint = identity.fingerprint();
+        Ok::<DeviceIdentity, String>(DeviceIdentity {
+            vendor_id: identity.vendor_id,
+            product_id: identity.product_id,
+            product: identity.product,
+            usb_serial: identity.usb_serial,
+            path: identity.path,
+            fingerprint,
+        })
+    })();
+
+    let restore_result = connect_device_by_path(path, state, app);
+    if let Err(error) = restore_result {
+        eprintln!("身份读取后恢复设备连接失败: {error}");
+    }
+
+    identity_result
+}
+
 #[tauri::command(async)]
 fn connect_device_by_path(
     path: String,
@@ -306,6 +374,8 @@ fn connect_device_by_path(
         let mut buf = [0u8; 64];
         let mut last_emit = Instant::now();
         let mut pending: Option<DeviceData> = None;
+        // PD state belongs to this connection and is discarded with the thread.
+        let mut pd_parser = Parser::new();
 
         loop {
             // Check if still running
@@ -323,7 +393,24 @@ fn connect_device_by_path(
             // even if the device reports faster.
             let read_timeout_ms = rate_ms.min(20) as i32;
             let maybe_sample = match device.read_timeout(&mut buf, read_timeout_ms) {
-                Ok(_) => parse_device_data(&buf),
+                Ok(read_len) => {
+                    let report = &buf[..read_len.min(buf.len())];
+                    match ReportKind::of(report) {
+                        Some(ReportKind::General) => parse_device_data(report),
+                        Some(ReportKind::Pd) => {
+                            match decode_pd_report(&mut pd_parser, report) {
+                                Ok(metadata) => {
+                                    let _ = app.emit("pd-data", metadata);
+                                }
+                                Err(error) => {
+                                    eprintln!("PD 报告解析错误: {}", error);
+                                }
+                            }
+                            None
+                        }
+                        Some(_) | None => None,
+                    }
+                }
                 Err(_) => {
                     if running_for_thread.load(Ordering::Relaxed) {
                         let _ = app.emit("device-disconnected", ());
@@ -527,57 +614,19 @@ fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String>
 }
 
 fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
-    if buf.len() != 64 || buf[0] != 0xFF {
-        return None;
-    }
-
-    // 长度已确认为 64，下列定长读取不会越界。
-    let f32_at = |o: usize| f32::from_le_bytes([buf[o], buf[o + 1], buf[o + 2], buf[o + 3]]);
-
-    let ah = f32_at(14);
-    let wh = f32_at(18);
-    let dp = f32_at(30);
-    let dn = f32_at(34);
-    let raw_temperature = f32_at(42);
-    let voltage = f32_at(46);
-    let current = f32_at(50);
-    let cc1 = buf[55] as f32 / 10.0;
-    let cc2 = buf[56] as f32 / 10.0;
-    let power = voltage * current;
-
-    // 温度的字节偏移只在一个型号上验证过，别的固件那里可能压根不是温度。
-    // 越界时只记为缺失（前端已按 NaN 处理无温度），不能因为这个字段丢掉整帧数据——
-    // 那会让新型号表现为「连上了但没有任何数据」。
-    let temperature = if (-40.0..=150.0).contains(&raw_temperature) {
-        raw_temperature
-    } else {
-        f32::NAN
-    };
-
-    // 电压和电流是绘图与统计的依据，越界即认为该帧不可信。
-    // 范围判定对 NaN 一律返回 false，因此下面的取反同时兜住了非有限值。
-    // cc1/cc2 由 u8 换算、power 由已校验的电压电流相乘，都无需单独判定。
-    if !(0.0..=60.0).contains(&voltage)
-        || !(-10.0..=10.0).contains(&current)
-        || !ah.is_finite()
-        || !wh.is_finite()
-        || !dp.is_finite()
-        || !dn.is_finite()
-    {
-        return None;
-    }
-
+    let sample = decode_general_sample(buf).ok()?;
     Some(DeviceData {
-        voltage,
-        current,
-        power,
-        dp,
-        dn,
-        cc1,
-        cc2,
-        temperature,
-        ah,
-        wh,
+        voltage: sample.voltage,
+        current: sample.current,
+        power: sample.power,
+        dp: sample.dp,
+        dn: sample.dn,
+        cc1: sample.cc1,
+        cc2: sample.cc2,
+        // Preserve the existing JSON shape and frontend NaN handling.
+        temperature: sample.temperature.unwrap_or(f32::NAN),
+        ah: sample.ah,
+        wh: sample.wh,
     })
 }
 
@@ -596,6 +645,7 @@ pub fn run() {
             shutdown,
             enumerate_devices,
             get_current_device_info,
+            identify_current_device,
             connect_temp_service,
             disconnect_temp_service
         ])

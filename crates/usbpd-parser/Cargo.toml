@@ -1,0 +1,28 @@
+[package]
+name = "usbpd-parser"
+description = "A Rust API for parsing USB Power Delivery messages."
+readme = "README.md"
+keywords = ["usb", "usb-pd", "power-delivery", "parser"]
+categories = ["parser-implementations", "embedded"]
+# Maintained inside the WITRN-RS workspace and versioned with the application.
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+default = ["serde", "vendor-ids"]
+# Derive `Serialize` for `Metadata` and friends (handy behind a Tauri IPC boundary).
+serde = ["dep:serde"]
+# Embed the 13,542-entry USB-IF vendor-ID table used by the renderer (~500 KB of
+# `&'static str`). Without it `vendor_name` always returns `None`.
+vendor-ids = []
