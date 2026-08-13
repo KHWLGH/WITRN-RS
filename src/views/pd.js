@@ -11,6 +11,8 @@
  */
 
 import { childrenOf, createRing, matchesFilter, summarize } from '../pd-model.js';
+import { debouncedSaveSettings } from '../settings.js';
+import { state } from '../state.js';
 
 /** @typedef {import('../pd-model.js').PdMeta} PdMeta */
 /** @typedef {import('../pd-model.js').PdEntry} PdEntry */
@@ -41,6 +43,7 @@ const els = {
   filter: () => /** @type {HTMLInputElement|null} */ (document.getElementById('pd-filter')),
   hideGoodCrc: () => /** @type {HTMLInputElement|null} */ (document.getElementById('pd-hide-goodcrc')),
   autoscroll: () => /** @type {HTMLInputElement|null} */ (document.getElementById('pd-autoscroll')),
+  followRecording: () => /** @type {HTMLInputElement|null} */ (document.getElementById('pd-follow-recording')),
 };
 
 function currentFilterText() {
@@ -55,6 +58,10 @@ function autoscrollEnabled() {
   return els.autoscroll()?.checked ?? true;
 }
 
+function followRecordingEnabled() {
+  return state.settings.pdFollowRecording;
+}
+
 function viewHidden() {
   return els.view()?.hidden ?? true;
 }
@@ -66,6 +73,7 @@ function viewHidden() {
  * @param {PdMeta} meta
  */
 export function ingestPdData(meta) {
+  if (followRecordingEnabled() && !state.isRecording) return;
   /** @type {PdEntry} */
   const entry = { t: Date.now(), ...summarize(meta), meta };
   ring.push(entry);
@@ -77,6 +85,11 @@ export function ingestPdData(meta) {
   if (viewHidden()) return; // 重新显示时 syncPdView 整体重建
   pendingEntries.push(entry);
   scheduleRender();
+}
+
+/** 当前 PD 环形缓冲中的条目数（用于诊断与测试）。 */
+export function getPdBufferLength() {
+  return ring.length;
 }
 
 /** 设备断开时插入分隔行，区分两次会话。 */
@@ -302,6 +315,14 @@ export function initPdView() {
     }, 150);
   });
   els.hideGoodCrc()?.addEventListener('change', () => rebuildAll());
+  const followRecording = els.followRecording();
+  if (followRecording) {
+    followRecording.checked = state.settings.pdFollowRecording;
+    followRecording.addEventListener('change', () => {
+      state.settings.pdFollowRecording = followRecording.checked;
+      debouncedSaveSettings();
+    });
+  }
   // 打开自动滚动时立即跳到底部
   els.autoscroll()?.addEventListener('change', (e) => {
     const list = els.list();

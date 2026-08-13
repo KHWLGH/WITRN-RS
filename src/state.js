@@ -42,6 +42,7 @@
  * @property {string}  tempIp
  * @property {number}  tempPort
  * @property {string}  activeView       - 上次活动的工作区视图 id
+ * @property {boolean} pdFollowRecording - PD 采集是否跟随主记录状态
  */
 
 /**
@@ -113,6 +114,7 @@ export const defaultSettings = {
   tempIp: '127.0.0.1',
   tempPort: 1573,
   activeView: 'monitor',
+  pdFollowRecording: true,
 };
 
 /** @type {AutoPauseSettings} */

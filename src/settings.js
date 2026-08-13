@@ -98,6 +98,7 @@ export async function loadSettings() {
       setChecked('show-current', state.settings.showCurrent);
       setChecked('show-power', state.settings.showPower);
       setChecked('show-temp', state.settings.showTemp);
+      setChecked('pd-follow-recording', state.settings.pdFollowRecording);
 
       // Temperature service settings
       const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
@@ -216,6 +217,7 @@ export async function resetSettings() {
     setChecked('show-current', state.settings.showCurrent);
     setChecked('show-power', state.settings.showPower);
     setChecked('show-temp', state.settings.showTemp);
+    setChecked('pd-follow-recording', state.settings.pdFollowRecording);
 
     const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
     if (tempIp) tempIp.value = state.settings.tempIp;
