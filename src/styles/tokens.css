@@ -90,6 +90,10 @@
   --ch-temp: #ff5f5f;
   --ch-temp-axis: #ff6f6f; /* 温度轴文字比曲线略亮，保证可读性 */
   --ch-energy: #c586c0;
+  --ch-dp: #e8c84a;
+  --ch-dn: #b98ef5;
+  --ch-cc1: #4adade;
+  --ch-cc2: #f28ab8;
 
   /* 图表基建色（src/theme.js 读取） */
   --chart-axis-text: #9a9ab8;
@@ -138,7 +142,7 @@
   --type-body-strong: 600 13px / 18px var(--font-ui);
   --type-subtitle: 600 16px / 22px var(--font-ui);
   --type-title: 600 20px / 28px var(--font-ui);
-  --type-numeral: 700 32px / 36px var(--font-mono);
+  --type-numeral: 700 28px / 32px var(--font-mono);
 
   /* ── 3. 组件旋钮 ───────────────────────────────────────────── */
   --dialog-width: 400px;

@@ -18,14 +18,16 @@ import { formatRelativeHMS } from './utils.js';
 export function addDataPoint(data) {
   const now = new Date();
 
-  const currentAbs = Math.abs(data.current);
+  // 有符号电流：开启后保留方向（正=正向 / 负=反向）；关闭时按旧行为记录绝对值。
+  // 功率恒取绝对值（电压非负，功率符号与电流一致，不损失信息）。
+  const currentValue = state.settings.signedCurrent ? data.current : Math.abs(data.current);
   const powerAbs = Math.abs(data.power);
   // 后端只推送有限温度值（见 lib.rs 的 temp-data 分支），此处只需区分「有 / 无」。
   const tempValue = state.currentTemp ?? Number.NaN;
 
   // 仅录制模式：未录制时只更新实时显示
   if (!state.isRecording) {
-    updateRealtimeDisplay({ ...data, current: currentAbs, power: powerAbs, temp: tempValue });
+    updateRealtimeDisplay({ ...data, current: currentValue, power: powerAbs, temp: tempValue });
     const el = document.getElementById('data-count');
     if (el) el.textContent = String(state.chartData.timestamps.length);
     return;
@@ -35,40 +37,53 @@ export function addDataPoint(data) {
   const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
   const relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
 
+  const dpValue = Number.isFinite(data.dp) ? /** @type {number} */ (data.dp) : Number.NaN;
+  const dnValue = Number.isFinite(data.dn) ? /** @type {number} */ (data.dn) : Number.NaN;
+  const cc1Value = Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN;
+  const cc2Value = Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN;
+
   // 全精度原始数据
   state.chartData.timestamps.push(nowMs);
   state.chartData.voltage.push(data.voltage);
-  state.chartData.current.push(currentAbs);
+  state.chartData.current.push(currentValue);
   state.chartData.power.push(powerAbs);
   state.chartData.temp.push(tempValue);
+  state.chartData.dp.push(dpValue);
+  state.chartData.dn.push(dnValue);
+  state.chartData.cc1.push(cc1Value);
+  state.chartData.cc2.push(cc2Value);
 
   // x/y 序列（uPlot 列式格式，与 chartData 同步追加）
   state.chartSeries.x.push(relSeconds);
   state.chartSeries.voltage.push(data.voltage);
-  state.chartSeries.current.push(currentAbs);
+  state.chartSeries.current.push(currentValue);
   state.chartSeries.power.push(powerAbs);
   state.chartSeries.temp.push(tempValue);
+  state.chartSeries.dp.push(dpValue);
+  state.chartSeries.dn.push(dnValue);
+  state.chartSeries.cc1.push(cc1Value);
+  state.chartSeries.cc2.push(cc2Value);
 
   updateChartRange();
 
   updateStats('voltage', data.voltage);
-  updateStats('current', currentAbs);
+  updateStats('current', currentValue);
   updateStats('power', powerAbs);
   if (state.isTempConnected && Number.isFinite(tempValue)) {
     updateStats('temp', tempValue);
   }
 
-  // 能量累计
+  // 能量累计（方向开启时反向电流同样计入消耗，取绝对值积分）
   if (state.energy.lastTimestamp !== null) {
     const dt = (nowMs - state.energy.lastTimestamp) / 3600000;
     if (dt >= 0) {
       state.energy.wh += powerAbs * dt;
-      state.energy.mah += currentAbs * 1000 * dt;
+      state.energy.mah += Math.abs(currentValue) * 1000 * dt;
     }
   }
   state.energy.lastTimestamp = now.getTime();
 
-  updateRealtimeDisplay({ ...data, current: currentAbs, power: powerAbs, temp: tempValue });
+  updateRealtimeDisplay({ ...data, current: currentValue, power: powerAbs, temp: tempValue });
   scheduleStatsUpdate();
   // 全量模式的能量读数是 O(1)，逐点刷新更跟手；范围模式要重扫可见区间，交给上面的节流路径。
   if (!state.settings.statsRange) updateEnergyDisplay();
@@ -76,13 +91,13 @@ export function addDataPoint(data) {
   const dataCountEl = document.getElementById('data-count');
   if (dataCountEl) dataCountEl.textContent = String(state.chartData.timestamps.length);
 
-  // Auto Pause 逻辑
+  // Auto Pause 逻辑（电流/功率阈值恒按幅值比较，与方向设置无关）
   if (state.isRecording && state.autoPauseSettings.enabled && state.autoPauseSettings.basis !== 'none') {
     let value;
     if (state.autoPauseSettings.basis === 'voltage') {
       value = data.voltage;
     } else if (state.autoPauseSettings.basis === 'current') {
-      value = currentAbs;
+      value = Math.abs(currentValue);
     } else {
       value = powerAbs;
     }
@@ -187,15 +202,28 @@ export function updateStats(field, value) {
 
 /**
  * 更新实时数据显示面板。
- * @param {{ voltage: number, current: number, power: number, temp: number }} data
+ * @param {{ voltage: number, current: number, power: number, temp: number, dp?: number, dn?: number, cc1?: number, cc2?: number }} data
  */
 export function updateRealtimeDisplay(data) {
   const vEl = document.getElementById('rt-voltage');
   const cEl = document.getElementById('rt-current');
   const pEl = document.getElementById('rt-power');
   if (vEl) vEl.textContent = data.voltage.toFixed(4);
-  if (cEl) cEl.textContent = data.current.toFixed(4);
+  // 电流数值恒显示幅值，方向由箭头表达（需求：不用正负号）
+  if (cEl) cEl.textContent = Math.abs(data.current).toFixed(4);
   if (pEl) pEl.textContent = data.power.toFixed(4);
+
+  const dirEl = /** @type {HTMLElement|null} */ (document.getElementById('rt-current-dir'));
+  if (dirEl) {
+    const showDir = state.settings.signedCurrent && Number.isFinite(data.current) && data.current !== 0;
+    dirEl.hidden = !showDir;
+    if (showDir) {
+      dirEl.classList?.toggle('codicon-arrow-small-right', data.current > 0);
+      dirEl.classList?.toggle('codicon-arrow-small-left', data.current < 0);
+      dirEl.title = data.current > 0 ? '正向电流' : '反向电流';
+    }
+  }
+
   if (state.isTempConnected && Number.isFinite(data.temp)) {
     const tEl = document.getElementById('rt-temp');
     if (tEl) tEl.textContent = data.temp.toFixed(1);
@@ -203,6 +231,16 @@ export function updateRealtimeDisplay(data) {
     const tEl = document.getElementById('rt-temp');
     if (tEl) tEl.textContent = '--';
   }
+
+  /** @param {string} id @param {number|undefined} val */
+  const setSignal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = Number.isFinite(val) ? /** @type {number} */ (val).toFixed(2) : '--';
+  };
+  setSignal('rt-dp', data.dp);
+  setSignal('rt-dn', data.dn);
+  setSignal('rt-cc1', data.cc1);
+  setSignal('rt-cc2', data.cc2);
 }
 
 /**
@@ -369,8 +407,18 @@ export function resetEnergy() {
 /** 清空图表数据和相关状态。 */
 export function clearChart() {
   if (state.isRecording) stopRecording();
-  state.chartData = { timestamps: [], voltage: [], current: [], power: [], temp: [] };
-  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [] };
+  state.chartData = {
+    timestamps: [],
+    voltage: [],
+    current: [],
+    power: [],
+    temp: [],
+    dp: [],
+    dn: [],
+    cc1: [],
+    cc2: [],
+  };
+  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [], dp: [], dn: [], cc1: [], cc2: [] };
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
 
@@ -424,6 +472,9 @@ export function startRecording() {
   if (btnClear) btnClear.disabled = true;
 
   state.__setRangeControlsEnabled?.(false);
+
+  // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
+  document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
 }
 
 /** 停止录制。 */
@@ -446,6 +497,9 @@ export function stopRecording() {
   if (btnClear) btnClear.disabled = false;
 
   state.__setRangeControlsEnabled?.(true);
+
+  // 单一咽喉点：手动停止 / 自动暂停 / 拔设备 / CSV 导入引发的停止都会走到这里
+  document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
 }
 
 /** 清空图表并重置统计和能量。 */

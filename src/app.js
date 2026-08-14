@@ -3,9 +3,11 @@
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
 
+import { initAutoFit } from './autofit.js';
 import {
   handleMonitorShown,
   initChart,
+  refreshChartScales,
   scheduleChartUpdate,
   setSeriesFill,
   setSeriesVisible,
@@ -136,6 +138,22 @@ function setupChartToggles() {
       });
     }
   });
+
+  // D+/D- 与 CC1/CC2 叠加曲线：一个复选框控制一对 series（复用电压 scale，无透明度输入）
+  /** @param {string} id @param {'showDpDn'|'showCc'} key @param {number[]} datasetIndexes */
+  const wirePairToggle = (id, key, datasetIndexes) => {
+    const checkbox = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+    if (!checkbox) return;
+    state.settings[key] = checkbox.checked;
+    for (const index of datasetIndexes) setSeriesVisible(index, checkbox.checked);
+    checkbox.addEventListener('change', () => {
+      state.settings[key] = checkbox.checked;
+      for (const index of datasetIndexes) setSeriesVisible(index, checkbox.checked);
+      debouncedSaveSettings();
+    });
+  };
+  wirePairToggle('show-dpdn', 'showDpDn', [4, 5]);
+  wirePairToggle('show-cc', 'showCc', [6, 7]);
 }
 
 // ─── Controls ────────────────────────────────────────────────────────────────
@@ -335,6 +353,46 @@ function setupControls() {
   btn('btn-reset-settings', async () => {
     const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
     if (yes) await resetSettings();
+  });
+
+  // Chart headroom（设置页 外观 卡）
+  const headroomAuto = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-auto'));
+  const headroomCustom = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-custom'));
+  const headroomPercent = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-percent'));
+
+  /** @param {'auto'|'custom'} mode */
+  const applyHeadroomMode = (mode) => {
+    state.settings.chartHeadroomMode = mode;
+    if (headroomPercent) headroomPercent.disabled = mode !== 'custom';
+    refreshChartScales();
+    debouncedSaveSettings();
+  };
+  headroomAuto?.addEventListener('change', () => {
+    if (headroomAuto.checked) applyHeadroomMode('auto');
+  });
+  headroomCustom?.addEventListener('change', () => {
+    if (headroomCustom.checked) applyHeadroomMode('custom');
+  });
+  headroomPercent?.addEventListener('input', () => {
+    let val = Number.parseInt(headroomPercent.value, 10);
+    if (Number.isNaN(val)) val = 25;
+    if (val < 0) val = 0;
+    if (val > 100) val = 100;
+    state.settings.chartHeadroomPercent = val;
+    refreshChartScales();
+    debouncedSaveSettings();
+  });
+
+  // 记录电流方向（设置页 外观 卡）
+  const signedCurrentEl = /** @type {HTMLInputElement|null} */ (document.getElementById('signed-current'));
+  signedCurrentEl?.addEventListener('change', () => {
+    state.settings.signedCurrent = signedCurrentEl.checked;
+    // 关闭后侧栏箭头立即消失，不等下一个数据点
+    if (!signedCurrentEl.checked) {
+      const dirEl = document.getElementById('rt-current-dir');
+      if (dirEl) dirEl.hidden = true;
+    }
+    debouncedSaveSettings();
   });
 
   btn('btn-clear-chart', async () => {
@@ -546,6 +604,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupChartToggles();
   setupControls();
   setupShell();
+  initAutoFit();
 
   // Clean recording state on load
   state.isRecording = false;

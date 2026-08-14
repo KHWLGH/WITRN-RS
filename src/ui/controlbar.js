@@ -21,7 +21,6 @@ export function syncAutoPauseUI(enabled) {
 export function syncTempUI(connected, busy = false) {
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-temp-toggle'));
   const label = document.getElementById('temp-toggle-label');
-  const icon = document.getElementById('temp-toggle-icon');
   if (!button) return;
 
   const text = busy ? (connected ? '温度已连接' : '连接中...') : connected ? '温度已连接' : '温度服务';
@@ -33,8 +32,29 @@ export function syncTempUI(connected, busy = false) {
   button.title = busy ? text : action;
   button.setAttribute('aria-label', button.title);
   if (label) label.textContent = text;
-  if (icon) {
-    icon.classList.toggle('codicon-plug', !connected);
-    icon.classList.toggle('codicon-check', connected);
+}
+
+/**
+ * PD 采集状态镜像。显示优先级：手动暂停 > 跟随记录等待 > 采集中。
+ * 状态本体在 views/pd.js（getPdCaptureState），这里只做 DOM 同步。
+ * @param {{ paused: boolean, followSuspended: boolean }} s
+ */
+export function syncPdCaptureUI(s) {
+  const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-pd-pause'));
+  if (!button) return;
+
+  if (s.paused) {
+    button.innerHTML = '<i class="codicon codicon-debug-start"></i>继续';
+    button.title = '恢复报文列表刷新';
+  } else if (s.followSuspended) {
+    button.innerHTML = '<i class="codicon codicon-clock"></i>等待记录';
+    button.title = '跟随记录已启用，开始记录后自动继续采集';
+  } else {
+    button.innerHTML = '<i class="codicon codicon-debug-pause"></i>暂停';
+    button.title = '暂停报文列表刷新（后台继续缓冲）';
   }
+  button.classList.toggle('is-active', s.paused);
+  button.classList.toggle('is-waiting', !s.paused && s.followSuspended);
+  button.setAttribute('aria-pressed', String(s.paused));
+  button.setAttribute('aria-label', button.title);
 }

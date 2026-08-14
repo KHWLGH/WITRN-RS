@@ -142,6 +142,12 @@ select {
 .ribbon-checkbox .checkmark.temp {
   border-color: var(--ch-temp);
 }
+.ribbon-checkbox .checkmark.dpdn {
+  border-color: var(--ch-dp);
+}
+.ribbon-checkbox .checkmark.cc {
+  border-color: var(--ch-cc1);
+}
 
 .ribbon-checkbox input:checked + .checkmark {
   background: var(--accent-fill);
@@ -175,6 +181,14 @@ select {
 .ribbon-checkbox input:checked + .checkmark.temp {
   background: var(--ch-temp);
   border-color: var(--ch-temp);
+}
+.ribbon-checkbox input:checked + .checkmark.dpdn {
+  background: var(--ch-dp);
+  border-color: var(--ch-dp);
+}
+.ribbon-checkbox input:checked + .checkmark.cc {
+  background: var(--ch-cc1);
+  border-color: var(--ch-cc1);
 }
 
 /* ── 输入框 ───────────────────────────────────────────────────── */
@@ -416,7 +430,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .realtime-card {
   background: transparent;
   border-radius: 0;
-  padding: 8px 12px;
+  padding: 6px 10px;
   text-align: left;
   border: none;
   border-bottom: 1px solid var(--stroke-divider);
@@ -454,6 +468,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .realtime-card.energy::before {
   background: var(--ch-energy);
 }
+.realtime-card.signals::before {
+  background: linear-gradient(180deg, var(--ch-dp), var(--ch-dn), var(--ch-cc1), var(--ch-cc2));
+}
 
 .realtime-card:hover {
   background: var(--fill-subtle-hover);
@@ -471,7 +488,7 @@ input[type="number"]::-webkit-outer-spin-button {
   display: flex;
   align-items: baseline;
   justify-content: center;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .realtime-value {
@@ -502,6 +519,13 @@ input[type="number"]::-webkit-outer-spin-button {
   font-weight: 600;
   color: var(--text-tertiary);
   margin-left: 4px;
+}
+
+.realtime-direction {
+  font-size: 18px;
+  color: var(--ch-current);
+  align-self: center;
+  margin-right: 2px;
 }
 
 .realtime-average {
@@ -578,6 +602,51 @@ input[type="number"]::-webkit-outer-spin-button {
 #data-count {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── 信号线读数（D+/D-/CC1/CC2） ─────────────────────────────── */
+
+.signal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 12px;
+  padding: 2px 0;
+}
+
+.signal-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.signal-name {
+  font-weight: 600;
+}
+.signal-name.dp {
+  color: var(--ch-dp);
+}
+.signal-name.dn {
+  color: var(--ch-dn);
+}
+.signal-name.cc1 {
+  color: var(--ch-cc1);
+}
+.signal-name.cc2 {
+  color: var(--ch-cc2);
+}
+
+.signal-value {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.signal-unit {
+  font-size: 10px;
+  color: var(--text-tertiary);
 }
 
 /* ── 图表容器 ─────────────────────────────────────────────────── */

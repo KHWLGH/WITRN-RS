@@ -119,16 +119,6 @@
   white-space: nowrap;
 }
 
-/* 窄窗口时收起连接状态文字，只留指示点 */
-@media (max-width: 1080px) {
-  .titlebar-connect #connection-text {
-    display: none;
-  }
-  .titlebar-connect .ribbon-select {
-    min-width: 120px;
-  }
-}
-
 /* ── 窗口控制按钮（Linux 自绘；Windows 由 decorum 注入并被下方规则重绘） ── */
 
 .titlebar-controls {
@@ -363,6 +353,11 @@
 
 .cmd-state-btn.is-active:hover:not(:disabled) {
   background: rgba(76, 194, 255, 0.18);
+}
+
+/* PD 暂停按钮的「等待记录」态：采集被跟随记录挂起，弱化显示 */
+.cmd-state-btn.is-waiting {
+  color: var(--text-tertiary);
 }
 
 .cmd-settings-btn {

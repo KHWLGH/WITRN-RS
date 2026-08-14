@@ -3,8 +3,8 @@
  * @file uPlot 图表初始化、渲染调度、交互（tooltip / 图例 / X 轴窗口）。
  *
  * uPlot 由 vendor/uPlot.iife.min.js 以全局变量方式载入（本地文件，无网络依赖）。
- * 数据为列式（columnar）格式：state.chartSeries = { x, voltage, current, power, temp }，
- * 主图直接引用这些数组（[x, v, c, p, t]），追加数据后调用 setData 即可刷新。
+ * 数据为列式（columnar）格式：state.chartSeries = { x, voltage, current, power, temp, dp, dn, cc1, cc2 }，
+ * 主图直接引用这些数组（[x, v, c, p, t, dp, dn, cc1, cc2]），追加数据后调用 setData 即可刷新。
  *
  * 对外 API：
  * - initChart()           初始化主图 + 导航图
@@ -22,10 +22,16 @@ import { formatRelativeHMS, hexToRgba } from './utils.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/** 数据集顺序（与复选框 / 设置字段一一对应；uPlot series 下标 = 此下标 + 1）。 */
-const FIELDS = ['voltage', 'current', 'power', 'temp'];
-const LABELS = ['电压', '电流', '功率', '温度'];
-const UNITS = [' V', ' A', ' W', ' °C'];
+/**
+ * 数据集顺序（与复选框 / 设置字段一一对应；uPlot series 下标 = 此下标 + 1）。
+ * ⚠ 只允许追加，不允许重排：seriesMax[3]（功率）是导航图的量程来源，
+ * drawMinorGrid / tempSplits 依赖 axes[1]（电压）作为唯一参照轴。
+ */
+const FIELDS = ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'];
+const LABELS = ['电压', '电流', '功率', '温度', 'D+', 'D-', 'CC1', 'CC2'];
+const UNITS = [' V', ' A', ' W', ' °C', ' V', ' V', ' V', ' V'];
+/** 各 series 挂靠的 scale：D+/D-/CC1/CC2 复用电压 scale（不新增轴）。 */
+const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
 const CHART_FONT =
   "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
@@ -39,9 +45,9 @@ const TIME_INCRS = [
 
 // ─── Module state ────────────────────────────────────────────────────────────
 
-/** 主图数据（列式）：[x, voltage, current, power, temp]，元素直接引用 state.chartSeries 的数组。 */
+/** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]，元素直接引用 state.chartSeries 的数组。 */
 /** @type {number[][]} */
-let mainData = [[], [], [], [], []];
+let mainData = [[], [], [], [], [], [], [], [], []];
 /** 导航图数据：[x, power]。 */
 /** @type {number[][]} */
 let navData = [[], []];
@@ -50,19 +56,19 @@ let navData = [[], []];
 /** @type {{ min: number|null, max: number|null }} */
 const xWindow = { min: null, max: null };
 
-/** 每条曲线的填充色（按 series 下标 1..4，null = 不填充）。 */
+/** 每条曲线的填充色（按 series 下标 1..8，null = 不填充；D+/D-/CC 叠加曲线不填充）。 */
 /** @type {(string|null)[]} */
-let fillStyles = [null, null, null, null, null];
+let fillStyles = [null, null, null, null, null, null, null, null, null];
 
 /**
- * 每条曲线全量数据的最大值（按 series 下标 1..4）。
+ * 每条曲线全量数据的最大值（按 series 下标 1..8）。
  * Y 轴量程基于全量数据而非可见窗口（与旧版 Chart.js 行为一致，避免拖动滑块时 Y 轴跳动）。
  */
 /** @type {number[]} */
-let seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity];
+let seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
 /** 每条曲线全量数据的最小值（温度轴需要保留负值）。 */
 /** @type {number[]} */
-let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity];
+let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
 /** 已扫描过最大值的数据长度（增量扫描游标）。 */
 let scannedLen = 0;
 
@@ -101,10 +107,10 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
  */
 export function syncChartSeries() {
   const cs = state.chartSeries;
-  mainData = [cs.x, cs.voltage, cs.current, cs.power, cs.temp];
+  mainData = [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
   navData = [cs.x, cs.power];
-  seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity];
-  seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity];
+  seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
+  seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
   scannedLen = 0;
   dataGen++;
   trackNewPoints();
@@ -117,7 +123,7 @@ function trackNewPoints() {
     scannedLen = len;
     return;
   }
-  for (let si = 1; si <= 4; si++) {
+  for (let si = 1; si < mainData.length; si++) {
     const arr = mainData[si];
     let max = seriesMax[si];
     let min = seriesMin[si];
@@ -151,6 +157,16 @@ function applyData() {
 
 /** 立即刷新两个图表。 */
 export function updateCharts() {
+  applyData();
+}
+
+/**
+ * 显示设置（纵向余量等）变化后刷新两图量程。
+ * dataGen++ 迫使 applyData 对导航图重发 setData：它的 gen/length 快路径
+ * 否则会跳过重建，把旧余量留在缩略图上。
+ */
+export function refreshChartScales() {
+  dataGen++;
   applyData();
 }
 
@@ -198,7 +214,7 @@ export function setChartXWindow(min, max) {
 
 /**
  * 显示 / 隐藏指定曲线。对应的 Y 轴会自动跟随显隐（scale 无可见序列时返回空量程）。
- * @param {number} datasetIndex - 0=电压 1=电流 2=功率 3=温度
+ * @param {number} datasetIndex - 0=电压 1=电流 2=功率 3=温度 4=D+ 5=D- 6=CC1 7=CC2
  * @param {boolean} show
  */
 export function setSeriesVisible(datasetIndex, show) {
@@ -235,6 +251,10 @@ export function applyChartTheme() {
     s.opacityCurrent > 0 ? hexToRgba(chartTheme.current, s.opacityCurrent) : null,
     s.opacityPower > 0 ? hexToRgba(chartTheme.power, s.opacityPower) : null,
     s.opacityTemp > 0 ? hexToRgba(chartTheme.temp, s.opacityTemp) : null,
+    null,
+    null,
+    null,
+    null,
   ];
   state.mainChart?.redraw();
   state.navigatorChart?.redraw();
@@ -266,27 +286,77 @@ function xRange() {
 }
 
 /**
- * 构造 Y 轴范围函数：0 起点 + 全量数据最大值上方 5% 余量。
- * 序列隐藏时返回空量程，uPlot 会自动隐藏对应的轴并释放空间。
- * 注意：量程完全来自模块内的 seriesMax 增量跟踪，因此各 series 均设置
- * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
- * @param {number} si - series 下标（1..4）
+ * 挂靠在电压 scale 上的 series 下标集合。
+ * D+/D-/CC1/CC2 叠加曲线与电压共用一个 scale：量程必须聚合所有挂靠曲线，
+ * 否则隐藏电压时叠加曲线会失去量程（mkYRange 旧实现只看电压一条）。
  */
-function mkYRange(si) {
+const VOLTAGE_SCALE_SERIES = [1, 5, 6, 7, 8];
+
+/**
+ * 图表纵向余量（0-1 小数）。auto = 25%（曲线保持中高位置），custom 读设置值。
+ * @returns {number}
+ */
+function headroomFrac() {
+  const s = state.settings;
+  if (s.chartHeadroomMode === 'custom') {
+    const p = Number(s.chartHeadroomPercent);
+    if (Number.isFinite(p)) return Math.min(100, Math.max(0, p)) / 100;
+  }
+  return 0.25;
+}
+
+/**
+ * 聚合一组挂靠在同一 scale 上的可见 series 的全量 min/max。
+ * @param {any} u @param {number[]} seriesIndexes
+ * @returns {{min: number, max: number}|{empty: true}|null} 全部隐藏 → null（轴自动隐藏）；可见但无有限数据 → {empty:true}
+ */
+function aggregateVisible(u, seriesIndexes) {
+  let anyVisible = false;
+  let max = -Infinity;
+  let min = Infinity;
+  for (const si of seriesIndexes) {
+    if (!u.series[si] || !u.series[si].show) continue;
+    anyVisible = true;
+    if (Number.isFinite(seriesMax[si]) && seriesMax[si] > max) max = seriesMax[si];
+    if (Number.isFinite(seriesMin[si]) && seriesMin[si] < min) min = seriesMin[si];
+  }
+  if (!anyVisible) return null;
+  if (!Number.isFinite(max)) return { empty: true };
+  return { min, max };
+}
+
+/**
+ * 0 基线 + 顶部余量；出现负值时（有符号电流）底部按同比例外扩。
+ * @param {number} min @param {number} max @param {number} h
+ * @returns {[number, number]}
+ */
+function paddedZeroBased(min, max, h) {
+  const lo = min < 0 ? min * (1 + h) : 0;
+  const hi = max > 0 ? max * (1 + h) : min < 0 ? 0 : 1;
+  return lo < hi ? [lo, hi] : [lo - 0.5, hi + 0.5];
+}
+
+/**
+ * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，0 起点 + 可配置余量。
+ * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
+ * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
+ * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
+ * @param {boolean} [symmetric=false] - 温度轴：对称余量，保留负值
+ */
+function mkYRange(seriesIndexes, symmetric = false) {
   return /** @type {any} */ (
     /** @param {any} u */
     (u) => {
-      if (!u.series[si] || !u.series[si].show) return [null, null];
-      const max = seriesMax[si];
-      const min = seriesMin[si];
-      if (!Number.isFinite(max)) return [0, 1];
-      if (si === 4) {
-        const span = max - min;
-        const padding = span > 0 ? span * 0.05 : 1;
-        return [min - padding, max + padding];
+      const agg = aggregateVisible(u, seriesIndexes);
+      if (agg === null) return [null, null];
+      if ('empty' in agg) return [0, 1];
+      const h = headroomFrac();
+      if (symmetric) {
+        const span = agg.max - agg.min;
+        const padding = span > 0 ? span * h : 1;
+        return [agg.min - padding, agg.max + padding];
       }
-      if (max <= 0) return [0, 1];
-      return [0, max * 1.05];
+      return paddedZeroBased(agg.min, agg.max, h);
     }
   );
 }
@@ -399,11 +469,12 @@ function mkYAxis(scaleKey, label, color, side, grid) {
     labelGap: 2,
     font: `12px ${MONO_FONT}`,
     gap: 4,
-    space: 40,
+    space: 30,
     size: axisAutoSize,
     values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(smartTick),
     grid: grid.show ? { show: true, stroke: grid.stroke, width: 1 } : { show: false },
-    ticks: grid.show ? { show: true, stroke: grid.stroke, width: 1, size: 6 } : { show: false },
+    // 刻度线与网格解耦：无网格的轴（电流/功率/温度）也画通道色刻度线，轴的可读性由此而来
+    ticks: { show: true, stroke: grid.show && grid.stroke ? grid.stroke : color, width: 1, size: 6 },
   };
 }
 
@@ -600,6 +671,10 @@ export function initChart() {
     s.opacityCurrent > 0 ? hexToRgba(chartTheme.current, s.opacityCurrent) : null,
     s.opacityPower > 0 ? hexToRgba(chartTheme.power, s.opacityPower) : null,
     s.opacityTemp > 0 ? hexToRgba(chartTheme.temp, s.opacityTemp) : null,
+    null,
+    null,
+    null,
+    null,
   ];
 
   const showInitial = [
@@ -607,6 +682,10 @@ export function initChart() {
     s.showCurrent,
     s.showPower,
     s.showTemp && (state.isTempConnected || state.hasTempData),
+    s.showDpDn,
+    s.showDpDn,
+    s.showCc,
+    s.showCc,
   ];
 
   const opts = {
@@ -622,19 +701,20 @@ export function initChart() {
     },
     scales: {
       x: { time: false, range: /** @type {any} */ (xRange) },
-      voltage: { range: mkYRange(1) },
-      current: { range: mkYRange(2) },
-      power: { range: mkYRange(3) },
-      temp: { range: mkYRange(4) },
+      voltage: { range: mkYRange(VOLTAGE_SCALE_SERIES) },
+      current: { range: mkYRange([2]) },
+      power: { range: mkYRange([3]) },
+      temp: { range: mkYRange([4], true) },
     },
     series: [
       {},
       ...FIELDS.map((field, i) => ({
         label: LABELS[i],
-        scale: field,
+        scale: SERIES_SCALES[i],
         auto: false,
         stroke: () => /** @type {any} */ (chartTheme)[field],
-        width: 1.5,
+        // D+/D-/CC 叠加曲线更细，避免与主通道曲线抢焦点
+        width: i >= 4 ? 1 : 1.5,
         points: { show: false },
         ...(hasPaths ? { paths: adaptivePaths } : {}),
         fill: () => fillStyles[i + 1],
@@ -648,7 +728,7 @@ export function initChart() {
         font: `12px ${MONO_FONT}`,
         size: 34,
         gap: 4,
-        space: 80,
+        space: 64,
         incrs: TIME_INCRS,
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
           splits.map((v) => formatRelativeHMS(Number(v))),
@@ -711,7 +791,7 @@ export function initNavigatorChart() {
         range: /** @type {any} */ (
           () => {
             const max = seriesMax[3];
-            return [0, Number.isFinite(max) && max > 0 ? max * 1.05 : 1];
+            return [0, Number.isFinite(max) && max > 0 ? max * (1 + headroomFrac()) : 1];
           }
         ),
       },

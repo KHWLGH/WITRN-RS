@@ -15,6 +15,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
     "core:window:allow-toggle-maximize",
+    "core:webview:allow-set-webview-zoom",
     "decorum:allow-show-snap-overlay",
     "dialog:default",
     "fs:default",

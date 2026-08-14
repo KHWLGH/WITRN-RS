@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildExportRows, calculateEnergy, calculateEnergyInRange, parseRelativeTime } from '../src/measurement.js';
+import {
+  buildExportRows,
+  calculateEnergy,
+  calculateEnergyInRange,
+  mapCsvColumns,
+  parseRelativeTime,
+} from '../src/measurement.js';
 
 test('parses day-prefixed and fractional relative times', () => {
   assert.equal(parseRelativeTime('0.01:02:03.500'), 3723.5);
@@ -45,11 +51,51 @@ test('integrates only the selected index range in seconds', () => {
 
 test('builds export rows from the chart data source', () => {
   const rows = buildExportRows(
-    { timestamps: [1000, 2000], voltage: [5, 6], current: [1, 2], power: [5, 12], temp: [Number.NaN, 0] },
+    {
+      timestamps: [1000, 2000],
+      voltage: [5, 6],
+      current: [1, 2],
+      power: [5, 12],
+      temp: [Number.NaN, 0],
+      dp: [2.7, 0.6],
+      dn: [2.7, Number.NaN],
+      cc1: [1.7, 0],
+      cc2: [0, 1.7],
+    },
     { x: [0, 1] },
   );
   assert.deepEqual(rows, [
-    { relSeconds: 0, voltage: 5, current: 1, power: 5, temp: Number.NaN },
-    { relSeconds: 1, voltage: 6, current: 2, power: 12, temp: 0 },
+    { relSeconds: 0, voltage: 5, current: 1, power: 5, temp: Number.NaN, dp: 2.7, dn: 2.7, cc1: 1.7, cc2: 0 },
+    { relSeconds: 1, voltage: 6, current: 2, power: 12, temp: 0, dp: 0.6, dn: Number.NaN, cc1: 0, cc2: 1.7 },
   ]);
+});
+
+test('maps optional CSV columns from legacy and current headers', () => {
+  // 本应用旧格式（无信号线列）
+  assert.deepEqual(mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),'), {
+    tempIdx: -1,
+    dpIdx: -1,
+    dnIdx: -1,
+    cc1Idx: -1,
+    cc2Idx: -1,
+  });
+  assert.deepEqual(mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),'), {
+    tempIdx: 4,
+    dpIdx: -1,
+    dnIdx: -1,
+    cc1Idx: -1,
+    cc2Idx: -1,
+  });
+  // 新格式（带信号线列，含/不含温度）
+  assert.deepEqual(mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),'), {
+    tempIdx: -1,
+    dpIdx: 4,
+    dnIdx: 5,
+    cc1Idx: 6,
+    cc2Idx: 7,
+  });
+  assert.deepEqual(
+    mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),'),
+    { tempIdx: 4, dpIdx: 5, dnIdx: 6, cc1Idx: 7, cc2Idx: 8 },
+  );
 });

@@ -1,6 +1,38 @@
 /*
- * 视图层样式：PD 协议分析列表 / 字段树。设备与设置视图复用 app.css 的 .page/.card。
+ * 视图层样式：PD 协议分析（左列表 + 右详情）。设备与设置视图复用 app.css 的 .page/.card。
  */
+
+/* ── PD 主从分栏 ─────────────────────────────────────────────── */
+
+.pd-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.pd-master {
+  flex: 0 1 55%;
+  min-width: 380px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--stroke-divider);
+}
+
+.pd-detail-pane {
+  flex: 1;
+  min-width: 260px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--surface-base);
+}
+
+.pd-detail-body {
+  padding: 10px 16px;
+  font-size: 12px;
+}
 
 /* ── PD 报文列表 ─────────────────────────────────────────────── */
 
@@ -19,7 +51,7 @@
   background: var(--fill-subtle-hover);
 }
 
-.pd-row.expanded {
+.pd-row.selected {
   background: var(--accent-fill-faint);
 }
 
@@ -84,14 +116,7 @@
   user-select: none;
 }
 
-/* ── 展开的字段树 ─────────────────────────────────────────────── */
-
-.pd-detail {
-  padding: 6px 16px 10px 52px;
-  background: var(--surface-base);
-  border-bottom: 1px solid var(--stroke-divider);
-  font-size: 12px;
-}
+/* ── 右栏字段树 ──────────────────────────────────────────────── */
 
 .pd-node > summary {
   cursor: pointer;

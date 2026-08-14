@@ -76,9 +76,9 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex) {
 
 /**
  * 从唯一的图表数据源生成导出行，避免录制缓冲与图表内容分叉。
- * @param {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[] }} chartData
+ * @param {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[], dp: number[], dn: number[], cc1: number[], cc2: number[] }} chartData
  * @param {{ x: number[] }} chartSeries
- * @returns {{ relSeconds: number, voltage: number, current: number, power: number, temp: number }[]}
+ * @returns {{ relSeconds: number, voltage: number, current: number, power: number, temp: number, dp: number, dn: number, cc1: number, cc2: number }[]}
  */
 export function buildExportRows(chartData, chartSeries) {
   return chartSeries.x.map((relSeconds, i) => ({
@@ -87,5 +87,31 @@ export function buildExportRows(chartData, chartSeries) {
     current: chartData.current[i],
     power: chartData.power[i],
     temp: chartData.temp[i],
+    dp: chartData.dp[i],
+    dn: chartData.dn[i],
+    cc1: chartData.cc1[i],
+    cc2: chartData.cc2[i],
   }));
+}
+
+/**
+ * 解析 CSV 表头行，定位可选列的下标（-1 = 该列不存在）。
+ * 电压/电流/功率固定在 1/2/3 列（官方与本应用新旧格式一致），
+ * 温度与 D+/D-/CC1/CC2 列的位置随格式版本变化，按表头名定位。
+ * @param {string} headerLine
+ * @returns {{ tempIdx: number, dpIdx: number, dnIdx: number, cc1Idx: number, cc2Idx: number }}
+ */
+export function mapCsvColumns(headerLine) {
+  const cols = String(headerLine)
+    .split(',')
+    .map((c) => c.trim());
+  /** @param {string} prefix */
+  const find = (prefix) => cols.findIndex((c) => c.startsWith(prefix));
+  return {
+    tempIdx: find('Temp'),
+    dpIdx: find('D+'),
+    dnIdx: find('D-'),
+    cc1Idx: find('CC1'),
+    cc2Idx: find('CC2'),
+  };
 }

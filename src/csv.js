@@ -12,7 +12,7 @@ import {
   updateStats,
   updateStatsDisplay,
 } from './data.js';
-import { buildExportRows, calculateEnergy, parseRelativeTime } from './measurement.js';
+import { buildExportRows, calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
 import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -70,21 +70,25 @@ export async function exportCSV(withTemp = false) {
   csv += `DateTime,${dateTimeStr}\n\n`;
 
   if (withTemp) {
-    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),\n';
+    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),\n';
   } else {
-    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),\n';
+    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),\n';
   }
+
+  /** 信号线电压列：设备分辨率 0.01 V，缺失（旧数据导入）时留空。 @param {number} v */
+  const sig = (v) => (Number.isFinite(v) ? v.toFixed(2) : '');
 
   data.forEach((row) => {
     const timeStr = formatExcelTime(row.relSeconds || 0);
     const v = Number(row.voltage).toFixed(4);
     const c = Number(row.current).toFixed(4);
     const p = Number(row.power).toFixed(4);
+    const signals = `${sig(row.dp)},${sig(row.dn)},${sig(row.cc1)},${sig(row.cc2)}`;
     if (withTemp) {
       const t = Number.isFinite(row.temp) ? row.temp.toFixed(1) : '';
-      csv += `${timeStr},${v},${c},${p},${t},\n`;
+      csv += `${timeStr},${v},${c},${p},${t},${signals},\n`;
     } else {
-      csv += `${timeStr},${v},${c},${p},\n`;
+      csv += `${timeStr},${v},${c},${p},${signals},\n`;
     }
   });
 
@@ -149,12 +153,17 @@ export async function importCSV() {
     /** @type {number[]} */ let newCurrent = [];
     /** @type {number[]} */ let newPower = [];
     /** @type {number[]} */ let newTemp = [];
+    /** @type {number[]} */ let newDp = [];
+    /** @type {number[]} */ let newDn = [];
+    /** @type {number[]} */ let newCc1 = [];
+    /** @type {number[]} */ let newCc2 = [];
 
     let newSampleRate = state.settings.sampleRate;
     let newStartTime = Date.now();
 
     const headerLine = lines[dataStartIndex - 1] || '';
-    const hasTemp = headerLine.includes('Temp');
+    // 旧格式（官方 / 本应用早期导出）没有温度或信号线列，按表头名定位，缺失列记 NaN
+    const colMap = mapCsvColumns(headerLine);
 
     const sampTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('SampTime(ms),'));
     if (sampTimeLine) {
@@ -176,6 +185,16 @@ export async function importCSV() {
     // 时间列格式 "D.hh:mm:ss.ms"（官方软件带天数前缀）或 "hh:mm:ss.ms"（本应用导出）。
     // 注意不能用 split(':') + parseInt 解析首段——"0.01" 会被 parseInt 截成 0，丢失小时字段，
     // 导致 x 非单调（uPlot 依赖有序 x 做二分切片，乱序会造成空白 / 无法显示）。
+    /**
+     * 读取按表头定位的可选列（行尾逗号会产生尾部空元素，需双向越界检查）。
+     * @param {string[]} parts @param {number} idx
+     */
+    const optCol = (parts, idx) => {
+      if (idx < 0 || idx >= parts.length) return Number.NaN;
+      const parsed = parseFloat(parts[idx]);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    };
+
     for (let i = dataStartIndex; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -185,10 +204,11 @@ export async function importCSV() {
 
       const timeStr = parts[0].replace(/[="]/g, '').trim();
       const voltage = parseFloat(parts[1]);
-      const current = Math.abs(parseFloat(parts[2]));
+      const currentRaw = parseFloat(parts[2]);
+      // 与实时摄入同一规则：方向开启保留符号，关闭取绝对值
+      const current = state.settings.signedCurrent ? currentRaw : Math.abs(currentRaw);
       const power = parseFloat(parts[3]);
-      const parsedTemp = hasTemp && parts.length > 4 ? parseFloat(parts[4]) : Number.NaN;
-      const temp = Number.isFinite(parsedTemp) ? parsedTemp : Number.NaN;
+      const temp = optCol(parts, colMap.tempIdx);
 
       if (Number.isNaN(voltage) || Number.isNaN(current) || Number.isNaN(power)) continue;
 
@@ -201,6 +221,10 @@ export async function importCSV() {
       newCurrent.push(current);
       newPower.push(power);
       newTemp.push(temp);
+      newDp.push(optCol(parts, colMap.dpIdx));
+      newDn.push(optCol(parts, colMap.dnIdx));
+      newCc1.push(optCol(parts, colMap.cc1Idx));
+      newCc2.push(optCol(parts, colMap.cc2Idx));
     }
 
     if (newTimestamps.length === 0) {
@@ -225,6 +249,10 @@ export async function importCSV() {
       newCurrent = reorder(newCurrent);
       newPower = reorder(newPower);
       newTemp = reorder(newTemp);
+      newDp = reorder(newDp);
+      newDn = reorder(newDn);
+      newCc1 = reorder(newCc1);
+      newCc2 = reorder(newCc2);
     }
 
     // Commit changes
@@ -240,6 +268,10 @@ export async function importCSV() {
     state.chartData.current = newCurrent;
     state.chartData.power = newPower;
     state.chartData.temp = newTemp;
+    state.chartData.dp = newDp;
+    state.chartData.dn = newDn;
+    state.chartData.cc1 = newCc1;
+    state.chartData.cc2 = newCc2;
     // 导出始终从 chartData/chartSeries 这一份数据源按需派生。
 
     // uPlot 列式序列 — 数值数组需复制，避免与 chartData 共享引用导致后续双重追加
@@ -249,6 +281,10 @@ export async function importCSV() {
       current: newCurrent.slice(),
       power: newPower.slice(),
       temp: newTemp.slice(),
+      dp: newDp.slice(),
+      dn: newDn.slice(),
+      cc1: newCc1.slice(),
+      cc2: newCc2.slice(),
     };
 
     // Re-calculate stats

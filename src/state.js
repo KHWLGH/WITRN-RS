@@ -43,6 +43,11 @@
  * @property {number}  tempPort
  * @property {string}  activeView       - 上次活动的工作区视图 id
  * @property {boolean} pdFollowRecording - PD 采集是否跟随主记录状态
+ * @property {'auto'|'custom'} chartHeadroomMode - 图表纵向余量：auto=软件决定，custom=用户自定义
+ * @property {number}  chartHeadroomPercent - 自定义纵向余量百分比（0-100）
+ * @property {boolean} showDpDn - 图表叠加 D+/D- 曲线
+ * @property {boolean} showCc   - 图表叠加 CC1/CC2 曲线
+ * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  */
 
 /**
@@ -80,6 +85,10 @@
  * @property {number[]} current
  * @property {number[]} power
  * @property {number[]} temp
+ * @property {number[]} dp
+ * @property {number[]} dn
+ * @property {number[]} cc1
+ * @property {number[]} cc2
  */
 
 /**
@@ -115,6 +124,11 @@ export const defaultSettings = {
   tempPort: 1573,
   activeView: 'monitor',
   pdFollowRecording: true,
+  chartHeadroomMode: 'auto',
+  chartHeadroomPercent: 25,
+  showDpDn: false,
+  showCc: false,
+  signedCurrent: false,
 };
 
 /** @type {AutoPauseSettings} */
@@ -144,13 +158,17 @@ export const state = {
   __setRangeControlsEnabled: null,
 
   // ── Raw data storage ──
-  /** @type {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[] }} */
+  /** @type {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[], dp: number[], dn: number[], cc1: number[], cc2: number[] }} */
   chartData: {
     timestamps: [],
     voltage: [],
     current: [],
     power: [],
     temp: [],
+    dp: [],
+    dn: [],
+    cc1: [],
+    cc2: [],
   },
 
   /** @type {ChartSeriesColumns} */
@@ -160,6 +178,10 @@ export const state = {
     current: [],
     power: [],
     temp: [],
+    dp: [],
+    dn: [],
+    cc1: [],
+    cc2: [],
   },
 
   // ── Statistics ──

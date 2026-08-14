@@ -3,7 +3,7 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { setSeriesFill, setSeriesVisible } from './chart.js';
+import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js';
 import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
@@ -38,12 +38,33 @@ function normalizeSettings(saved) {
   merged.rangeStart = clamp(merged.rangeStart, 0, 1000, defaultSettings.rangeStart);
   merged.rangeEnd = clamp(merged.rangeEnd, 0, 1000, defaultSettings.rangeEnd);
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 10, 60_000, defaultSettings.sampleRate));
+  // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
+  if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
+    merged.chartHeadroomMode = defaultSettings.chartHeadroomMode;
+  }
+  merged.chartHeadroomPercent = Math.round(
+    clamp(merged.chartHeadroomPercent, 0, 100, defaultSettings.chartHeadroomPercent),
+  );
   // activeView 会被 shell 用来切换视图，白名单校验防止坏值卡死在不存在的视图
   // （'device' 视图已并入 settings，旧存值一并回落到 monitor）
   if (!['monitor', 'pd', 'settings'].includes(merged.activeView)) {
     merged.activeView = defaultSettings.activeView;
   }
   return merged;
+}
+
+/** 回显图表纵向余量控件（loadSettings / resetSettings 共用）。 */
+function echoHeadroomUI() {
+  const isCustom = state.settings.chartHeadroomMode === 'custom';
+  const auto = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-auto'));
+  const custom = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-custom'));
+  const percent = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-percent'));
+  if (auto) auto.checked = !isCustom;
+  if (custom) custom.checked = isCustom;
+  if (percent) {
+    percent.value = String(state.settings.chartHeadroomPercent);
+    percent.disabled = !isCustom;
+  }
 }
 
 /** @param {unknown} saved @returns {import('./state.js').AutoPauseSettings} */
@@ -99,7 +120,13 @@ export async function loadSettings() {
       setChecked('show-current', state.settings.showCurrent);
       setChecked('show-power', state.settings.showPower);
       setChecked('show-temp', state.settings.showTemp);
+      setChecked('show-dpdn', state.settings.showDpDn);
+      setChecked('show-cc', state.settings.showCc);
+      setChecked('signed-current', state.settings.signedCurrent);
       setChecked('pd-follow-recording', state.settings.pdFollowRecording);
+      echoHeadroomUI();
+      // 跟随记录设置可能与默认不同，PD 暂停按钮状态需要重新镜像
+      document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
 
       // Temperature service settings
       const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
@@ -215,7 +242,18 @@ export async function resetSettings() {
     setChecked('show-current', state.settings.showCurrent);
     setChecked('show-power', state.settings.showPower);
     setChecked('show-temp', state.settings.showTemp);
+    setChecked('show-dpdn', state.settings.showDpDn);
+    setChecked('show-cc', state.settings.showCc);
+    setChecked('signed-current', state.settings.signedCurrent);
     setChecked('pd-follow-recording', state.settings.pdFollowRecording);
+    echoHeadroomUI();
+
+    // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位
+    const dirEl = document.getElementById('rt-current-dir');
+    if (dirEl) dirEl.hidden = true;
+
+    // 跟随记录设置已回落默认值，PD 暂停按钮状态需要重新镜像
+    document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
 
     const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
     if (tempIp) tempIp.value = state.settings.tempIp;
@@ -251,10 +289,15 @@ export async function resetSettings() {
     setSeriesVisible(0, state.settings.showVoltage);
     setSeriesVisible(1, state.settings.showCurrent);
     setSeriesVisible(2, state.settings.showPower);
+    setSeriesVisible(4, state.settings.showDpDn);
+    setSeriesVisible(5, state.settings.showDpDn);
+    setSeriesVisible(6, state.settings.showCc);
+    setSeriesVisible(7, state.settings.showCc);
     setSeriesFill(0, state.settings.opacityVoltage);
     setSeriesFill(1, state.settings.opacityCurrent);
     setSeriesFill(2, state.settings.opacityPower);
     setSeriesFill(3, state.settings.opacityTemp);
+    refreshChartScales();
 
     updateStatsDisplay();
     updateEnergyDisplay();

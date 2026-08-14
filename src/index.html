@@ -52,7 +52,7 @@
               <i class="codicon codicon-record"></i>开始记录
             </button>
             <button type="button" class="cmd-btn" id="btn-stop-record" disabled>
-              <i class="codicon codicon-debug-stop"></i>停止
+              <i class="codicon codicon-primitive-square"></i>停止
             </button>
             <span class="cmd-sep"></span>
             <span class="cmd-label">采样率</span>
@@ -67,10 +67,10 @@
             <span class="cmd-sep"></span>
             <button type="button" class="cmd-btn" id="btn-export"><i class="codicon codicon-export"></i>导出CSV</button>
             <button type="button" class="cmd-btn" id="btn-import">
-              <i class="codicon codicon-cloud-upload"></i>导入CSV
+              <i class="codicon codicon-desktop-download"></i>导入CSV
             </button>
             <button type="button" class="cmd-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
-              <i class="codicon codicon-trash"></i>一键重置
+              <i class="codicon codicon-clear-all"></i>一键重置
             </button>
             <span class="cmd-spacer"></span>
             <button type="button" class="cmd-btn" id="btn-flyout-display"><i class="codicon codicon-eye"></i>显示</button>
@@ -91,7 +91,7 @@
             </div>
             <div class="cmd-action-group" id="temperature-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
-                <i class="codicon codicon-plug" id="temp-toggle-icon"></i>
+                <i class="codicon codicon-flame" aria-hidden="true"></i>
                 <span id="temp-toggle-label">温度服务</span>
               </button>
               <button
@@ -123,6 +123,7 @@
               <div class="realtime-card current">
                 <div class="realtime-label">电流</div>
                 <div class="realtime-content">
+                  <i class="codicon codicon-arrow-small-right realtime-direction" id="rt-current-dir" hidden></i>
                   <div class="realtime-value" id="rt-current">--</div>
                   <div class="realtime-unit">A</div>
                 </div>
@@ -173,6 +174,31 @@
                   <span>容量</span>
                   <span class="realtime-sub-value" id="rt-capacity">--</span>
                   <span class="realtime-sub-unit">mAh</span>
+                </div>
+              </div>
+              <div class="realtime-card signals">
+                <div class="realtime-label">信号线</div>
+                <div class="signal-grid">
+                  <div class="signal-cell">
+                    <span class="signal-name dp">D+</span>
+                    <span class="signal-value" id="rt-dp">--</span>
+                    <span class="signal-unit">V</span>
+                  </div>
+                  <div class="signal-cell">
+                    <span class="signal-name dn">D-</span>
+                    <span class="signal-value" id="rt-dn">--</span>
+                    <span class="signal-unit">V</span>
+                  </div>
+                  <div class="signal-cell">
+                    <span class="signal-name cc1">CC1</span>
+                    <span class="signal-value" id="rt-cc1">--</span>
+                    <span class="signal-unit">V</span>
+                  </div>
+                  <div class="signal-cell">
+                    <span class="signal-name cc2">CC2</span>
+                    <span class="signal-value" id="rt-cc2">--</span>
+                    <span class="signal-unit">V</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -229,11 +255,18 @@
         <!-- ── PD 协议分析工作区 ── -->
         <section class="view" id="view-pd" role="tabpanel" aria-labelledby="tab-pd" hidden>
           <div class="commandbar">
-            <button type="button" class="cmd-btn" id="btn-pd-pause" disabled>
+            <button type="button" class="cmd-btn cmd-state-btn" id="btn-pd-pause" disabled>
               <i class="codicon codicon-debug-pause"></i>暂停
             </button>
             <button type="button" class="cmd-btn" id="btn-pd-clear" disabled>
-              <i class="codicon codicon-trash"></i>清空
+              <i class="codicon codicon-clear-all"></i>清空
+            </button>
+            <span class="cmd-sep"></span>
+            <button type="button" class="cmd-btn" id="btn-pd-export" disabled>
+              <i class="codicon codicon-export"></i>导出
+            </button>
+            <button type="button" class="cmd-btn" id="btn-pd-import" disabled>
+              <i class="codicon codicon-desktop-download"></i>导入
             </button>
             <span class="cmd-sep"></span>
             <input type="text" id="pd-filter" class="ribbon-input pd-filter" placeholder="按消息类型过滤…" />
@@ -255,11 +288,23 @@
             <span class="cmd-spacer"></span>
             <span class="cmd-label" id="pd-counter"></span>
           </div>
-          <div class="pd-list" id="pd-list" hidden></div>
-          <div class="empty-state" id="pd-empty">
-            <i class="codicon codicon-zap"></i>
-            <div class="empty-state-title">等待 USB-PD 通信</div>
-            <div>连接设备后自动捕获 USB-PD 报文（插拔充电器时的握手最有价值）</div>
+          <div class="pd-split">
+            <div class="pd-master">
+              <div class="pd-list" id="pd-list" hidden></div>
+              <div class="empty-state" id="pd-empty">
+                <i class="codicon codicon-zap"></i>
+                <div class="empty-state-title">等待 USB-PD 通信</div>
+                <div>连接设备后自动捕获 USB-PD 报文（插拔充电器时的握手最有价值）</div>
+              </div>
+            </div>
+            <div class="pd-detail-pane">
+              <div class="empty-state" id="pd-detail-empty">
+                <i class="codicon codicon-list-selection"></i>
+                <div class="empty-state-title">选择报文查看详情</div>
+                <div>点击左侧列表中的报文行，此处显示完整字段解码</div>
+              </div>
+              <div class="pd-detail-body" id="pd-detail-body" hidden></div>
+            </div>
           </div>
         </section>
 
@@ -276,6 +321,39 @@
                     <label>主题</label>
                     <label class="radio-label"><input type="radio" name="theme-choice" checked disabled /> 深色</label>
                     <label class="radio-label"><input type="radio" name="theme-choice" disabled /> 浅色（即将推出）</label>
+                  </div>
+                  <div class="field-row">
+                    <label>图表纵向余量</label>
+                    <label class="radio-label">
+                      <input type="radio" name="headroom-mode" id="headroom-mode-auto" checked /> 自动
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" name="headroom-mode" id="headroom-mode-custom" /> 自定义
+                    </label>
+                    <span class="opacity-wrap">
+                      <input
+                        type="number"
+                        id="headroom-percent"
+                        value="25"
+                        min="0"
+                        max="100"
+                        class="ribbon-input no-spin"
+                        disabled
+                      />
+                      <span class="opacity-suffix">%</span>
+                    </span>
+                  </div>
+                  <div class="card-hint">曲线顶部预留的空白比例；自动约为 25%，让曲线保持中高位置。</div>
+                  <div class="field-row">
+                    <label>记录电流方向</label>
+                    <label class="ribbon-checkbox">
+                      <input type="checkbox" id="signed-current" />
+                      <span class="checkmark"></span>
+                      启用
+                    </label>
+                  </div>
+                  <div class="card-hint">
+                    开启后新记录/导入的数据保留电流符号（正向为正、反向为负），侧栏以箭头指示方向；关闭时记录绝对值。不改写已有数据，导出跟随当前记录值。
                   </div>
                 </div>
                 <div class="card">
@@ -409,6 +487,21 @@
           <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
+      </div>
+      <div class="flyout-divider"></div>
+      <div class="flyout-row">
+        <label class="ribbon-checkbox" title="在图表中叠加 D+/D- 曲线（复用电压坐标轴）">
+          <input type="checkbox" id="show-dpdn" />
+          <span class="checkmark dpdn"></span>
+          D+ / D-
+        </label>
+      </div>
+      <div class="flyout-row">
+        <label class="ribbon-checkbox" title="在图表中叠加 CC1/CC2 曲线（复用电压坐标轴）">
+          <input type="checkbox" id="show-cc" />
+          <span class="checkmark cc"></span>
+          CC1 / CC2
+        </label>
       </div>
       <div class="flyout-divider"></div>
       <div class="flyout-row">

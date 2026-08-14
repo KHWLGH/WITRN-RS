@@ -123,3 +123,71 @@ export function createRing(cap) {
     },
   };
 }
+
+// ─── 捕获文件（导入 / 导出） ─────────────────────────────────────────────────
+
+/** @typedef {{ app: string, kind: 'pd-capture', version: 1, exportedAt: string, entries: (PdEntry|PdDivider)[] }} PdCaptureFile */
+
+/** meta 递归校验的深度上限（真实 PD 解码树不超过 5 层，防御构造的深嵌套文件）。 */
+const META_MAX_DEPTH = 32;
+
+/**
+ * 校验一棵 PdMeta 树的结构（与 serde 序列化的 usbpd-parser::Metadata 对齐）。
+ * @param {unknown} meta
+ * @param {number} [depth=0]
+ * @returns {meta is PdMeta}
+ */
+function isValidMeta(meta, depth = 0) {
+  if (depth > META_MAX_DEPTH) return false;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return false;
+  const m = /** @type {Record<string, unknown>} */ (meta);
+  if (typeof m.raw !== 'string' || typeof m.field !== 'string') return false;
+  const loc = m.bit_loc;
+  if (loc != null && !(Array.isArray(loc) && loc.length === 2 && loc.every((n) => Number.isFinite(n)))) return false;
+  for (const key of ['quick_pdo', 'quick_rdo', 'full_raw']) {
+    if (m[key] !== undefined && typeof m[key] !== 'string') return false;
+  }
+  const value = m.value;
+  if (Array.isArray(value)) return value.every((child) => isValidMeta(child, depth + 1));
+  return value === null || ['boolean', 'number', 'string'].includes(typeof value);
+}
+
+/**
+ * 构造导出文件对象（entries 直接引用传入数组，序列化前不做拷贝）。
+ * @param {(PdEntry|PdDivider)[]} entries
+ * @returns {PdCaptureFile}
+ */
+export function buildPdCaptureFile(entries) {
+  return { app: 'WITRN-RS', kind: 'pd-capture', version: 1, exportedAt: new Date().toISOString(), entries };
+}
+
+/**
+ * 解析并校验捕获文件（传入已 JSON.parse 的对象）。
+ * 合法条目会用 summarize(meta) 重算摘要字段：防手改文件破坏列表显示，
+ * 同时保证导入后的过滤 / 展示行为与实时捕获完全一致（无损往返）。
+ * @param {unknown} raw
+ * @returns {{ ok: true, entries: (PdEntry|PdDivider)[] } | { ok: false, error: string }}
+ */
+export function parsePdCaptureFile(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: '不是有效的捕获文件' };
+  const file = /** @type {Record<string, unknown>} */ (raw);
+  if (file.kind !== 'pd-capture') return { ok: false, error: '文件类型不匹配（缺少 pd-capture 标记）' };
+  if (file.version !== 1) return { ok: false, error: `不支持的文件版本: ${String(file.version)}` };
+  if (!Array.isArray(file.entries)) return { ok: false, error: '缺少报文数组' };
+
+  /** @type {(PdEntry|PdDivider)[]} */
+  const entries = [];
+  for (const item of file.entries) {
+    if (!item || typeof item !== 'object') return { ok: false, error: '存在非法报文条目' };
+    const t = /** @type {Record<string, unknown>} */ (item).t;
+    if (!Number.isFinite(t)) return { ok: false, error: '存在缺少时间戳的条目' };
+    if (/** @type {Record<string, unknown>} */ (item).divider === true) {
+      entries.push({ t: /** @type {number} */ (t), divider: true });
+      continue;
+    }
+    const meta = /** @type {Record<string, unknown>} */ (item).meta;
+    if (!isValidMeta(meta)) return { ok: false, error: '存在无法解析的报文结构' };
+    entries.push({ t: /** @type {number} */ (t), ...summarize(meta), meta });
+  }
+  return { ok: true, entries };
+}
