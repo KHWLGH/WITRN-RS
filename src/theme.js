@@ -25,9 +25,7 @@ const TOKEN_MAP = /** @type {const} */ ({
   energy: '--ch-energy',
   axisText: '--chart-axis-text',
   grid: '--chart-grid',
-  gridVoltage: '--chart-grid-voltage',
-  gridMinorX: '--chart-grid-minor-x',
-  gridMinorY: '--chart-grid-minor-y',
+  gridMinor: '--chart-grid-minor',
 });
 
 /** 令牌缺失时的兜底值（与 tokens.css 暗色值一致，防止 CSS 加载异常时图表全黑）。 */
@@ -43,10 +41,8 @@ const FALLBACK = {
   tempAxis: '#ff6f6f',
   energy: '#c586c0',
   axisText: '#9a9ab8',
-  grid: 'rgba(90, 90, 140, 0.75)',
-  gridVoltage: 'rgba(74, 158, 255, 0.22)',
-  gridMinorX: 'rgba(80, 80, 130, 0.5)',
-  gridMinorY: 'rgba(120, 130, 160, 0.25)',
+  grid: '#4b4b61',
+  gridMinor: '#37374a',
 };
 
 /** 图表用到的全部主题色。模块加载时填充，refreshTheme() 原地更新（引用稳定）。 */

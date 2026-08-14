@@ -3,7 +3,7 @@
  * @file HID 设备枚举、连接、断开。
  */
 
-import { stopRecording } from './data.js';
+import { refreshRecordButton, stopRecording } from './data.js';
 import { state } from './state.js';
 import { toast } from './ui/toast.js';
 import { refreshDeviceIdentifyState } from './views/device.js';
@@ -165,13 +165,18 @@ export function setConnected(connected) {
 
   setDisabled('btn-connect', connected);
   setDisabled('btn-disconnect', !connected);
-  setDisabled('btn-start-record', !connected);
   setDisabled('device-select', connected);
   setDisabled('btn-refresh-devices', connected);
 
+  refreshRecordButton();
   refreshDeviceIdentifyState();
 
   if (!connected && state.isRecording) {
     stopRecording();
+    return; // stopRecording 已广播
   }
+
+  // PD 视图的采集按钮在「跟随记录」开启时就是记录开关，未连接时要禁用 —— 连接
+  // 状态变化同样要广播（stopRecording 只覆盖「拔设备时正在记录」这一种情况）
+  document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }

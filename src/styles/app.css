@@ -355,10 +355,44 @@
   background: rgba(76, 194, 255, 0.18);
 }
 
-/* PD 暂停按钮的「等待记录」态：采集被跟随记录挂起，弱化显示 */
-.cmd-state-btn.is-waiting {
-  color: var(--text-tertiary);
+/* 记录按钮 — 命令栏中唯一的实心强调按钮。
+   PD 视图的采集按钮在「跟随记录」开启时也挂上这套样式：那时它就是同一个开关。
+   min-width 让 开始 / 继续 / 暂停 三种文案切换时命令栏不跳动。 */
+.cmd-primary-btn {
+  min-width: 96px;
+  justify-content: center;
+  font-weight: 600;
+  background: var(--accent-fill);
+  border-color: transparent;
+  color: var(--text-on-accent);
 }
+
+.cmd-primary-btn:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+  border-color: transparent;
+}
+
+.cmd-primary-btn:active:not(:disabled) {
+  background: var(--accent-fill-pressed);
+  color: var(--text-on-accent);
+}
+
+.cmd-primary-btn:disabled {
+  background: var(--fill-control);
+  color: var(--text-disabled);
+}
+
+.cmd-primary-btn.is-recording {
+  background: var(--danger-fill);
+  color: var(--text-on-danger);
+}
+
+.cmd-primary-btn.is-recording:hover:not(:disabled) {
+  background: var(--danger-fill-hover);
+}
+
+/* 图标不单独配色，一律继承按钮文字色（未记录=亮蓝底黑字，记录中=红底白字），
+   图标与文字始终同色 */
 
 .cmd-settings-btn {
   width: 24px;
@@ -368,11 +402,6 @@
 
 .cmd-settings-btn:hover:not(:disabled) {
   color: var(--text-primary);
-}
-
-/* 录制按钮的红点 */
-#btn-start-record:not(:disabled) .codicon-record {
-  color: var(--status-danger);
 }
 
 .cmd-sep {

@@ -156,6 +156,15 @@ export const state = {
   __chartUpdatePending: false,
   /** @type {((enabled: boolean) => void)|null} */
   __setRangeControlsEnabled: null,
+  /**
+   * 由 app.js 注入的两个跨视图动作，供 views/pd.js 在「跟随记录」联动时调用。
+   * 用注入而非直接 import：pd.js → data.js 会把 chart.js / temperature.js
+   * （顶层解构 window.__TAURI__）拖进 test/pd-*.test.js 的最小 stub 环境。
+   */
+  /** @type {(() => void)|null} 切换主记录（开始 / 暂停） */
+  __toggleRecording: null,
+  /** @type {(() => void)|null} 清空图表并重置统计与能量 */
+  __clearMonitorData: null,
 
   // ── Raw data storage ──
   /** @type {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[], dp: number[], dn: number[], cc1: number[], cc2: number[] }} */

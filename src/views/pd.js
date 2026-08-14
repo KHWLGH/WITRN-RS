@@ -113,7 +113,7 @@ export function getPdBufferLength() {
 
 /**
  * 当前 PD 采集状态（供命令栏镜像与测试断言）。
- * - paused：手动暂停（报文仍进缓冲，仅停止渲染）
+ * - paused：手动暂停（报文仍进缓冲，仅停止渲染）—— 仅在跟随记录关闭时可达
  * - followSuspended：跟随记录启用且未在记录（报文在 ingest 处直接丢弃）
  * - capturing：既未手动暂停也未被跟随挂起
  */
@@ -122,12 +122,28 @@ export function getPdCaptureState() {
   return { paused, followSuspended, capturing: !paused && !followSuspended };
 }
 
-// 记录状态 / 跟随设置变化时同步暂停按钮与计数器。
-// data.js / settings.js 通过 document 自定义事件广播，避免向既有的
-// pd.js → settings.js → data.js import 链再添加反向边。
-document.addEventListener?.('witrn:recording-changed', () => {
-  syncPdCaptureUI(getPdCaptureState());
+/**
+ * 把当前状态同步到 PD 命令栏：采集按钮外观 + 计数器。
+ * 跟随记录开启时采集按钮就是主记录开关，未连接设备则禁用（懒初始化前不接管 disabled）。
+ * 两侧清空按钮的联动提示由 app.js 统一刷新（那是跨视图的事）。
+ */
+function syncPdUi() {
+  const follow = followRecordingEnabled();
+  syncPdCaptureUI(getPdCaptureState(), {
+    followEnabled: follow,
+    connected: state.isConnected,
+    recording: state.isRecording,
+  });
+  const button = els.pauseBtn();
+  if (button && initialized) button.disabled = follow && !state.isConnected;
   updateCounter();
+}
+
+// 记录 / 连接 / 跟随设置任一变化时同步采集按钮、联动提示与计数器。
+// data.js、device.js、settings.js 通过 document 自定义事件广播，避免向既有的
+// pd.js → settings.js → data.js import 链再添加反向边。
+document.addEventListener?.('witrn:monitor-changed', () => {
+  syncPdUi();
 });
 
 /** 设备断开时插入分隔行，区分两次会话。 */
@@ -334,6 +350,39 @@ function clearSelection() {
   if (empty) empty.hidden = false;
 }
 
+// ─── 清空 ────────────────────────────────────────────────────────────────────
+
+/**
+ * 纯清空：无确认、无联动。监控面板的「一键重置」在跟随记录开启时调用它，
+ * 两侧各自只调用对方的无级联版本，因此不会互相递归。
+ */
+export function clearPdEntries() {
+  ring.clear();
+  bufferedWhilePaused = 0;
+  clearSelection();
+  rebuildAll();
+}
+
+/**
+ * 「清空」动作：确认 → 清空 → 跟随记录开启时级联清空监控数据。
+ * 与监控侧的「一键重置」同规格（都走 ui/dialog.js 的 ask）。
+ */
+export async function requestPdClear() {
+  const follow = followRecordingEnabled();
+  // 两侧都没东西可清时不打扰用户
+  if (ring.length === 0 && !follow) return;
+
+  // 缓冲为空但开着跟随时，真正的动作在监控那一侧，文案要如实说清楚
+  const head = ring.length > 0 ? `确定要清空已捕获的 ${ring.length} 条报文吗？` : 'PD 报文列表已是空的，确定要继续吗？';
+  const linked = follow ? '\n跟随记录已开启，监控图表、统计与累计能量也会一并重置。' : '';
+
+  const confirmed = await ask(head + linked, { title: '确认清空', kind: follow ? 'error' : 'warning' });
+  if (!confirmed) return;
+
+  clearPdEntries();
+  if (follow) state.__clearMonitorData?.();
+}
+
 // ─── 导入 / 导出 ─────────────────────────────────────────────────────────────
 
 // Tauri 对话框在运行时授予所选路径的 fs scope（见 csv.js 顶部说明）。
@@ -443,30 +492,28 @@ export function initPdView() {
   if (pauseBtn) {
     pauseBtn.disabled = false;
     pauseBtn.addEventListener('click', () => {
-      const capture = getPdCaptureState();
-      // 跟随记录挂起时按钮显示「等待记录」：点击只解释原因，不产生隐藏的状态覆盖
-      if (capture.followSuspended && !capture.paused) {
-        toast.info('跟随记录已启用，开始记录后自动继续采集');
+      // 跟随记录开启时这颗按钮就是主记录开关：采集被记录状态唯一决定，
+      // 不再叠加本地 paused，避免出现两个语义相同却互相覆盖的暂停位。
+      if (followRecordingEnabled()) {
+        if (!state.isRecording && !state.isConnected) {
+          toast.warning('请先连接设备');
+          return;
+        }
+        state.__toggleRecording?.();
         return;
       }
+
       paused = !paused;
       if (!paused) {
         bufferedWhilePaused = 0;
         rebuildAll();
-      } else {
-        updateCounter();
       }
-      syncPdCaptureUI(getPdCaptureState());
+      syncPdUi();
     });
   }
   if (clearBtn) {
     clearBtn.disabled = false;
-    clearBtn.addEventListener('click', () => {
-      ring.clear();
-      bufferedWhilePaused = 0;
-      clearSelection();
-      rebuildAll();
-    });
+    clearBtn.addEventListener('click', () => void requestPdClear());
   }
 
   const exportBtn = els.exportBtn();
@@ -495,9 +542,17 @@ export function initPdView() {
     followRecording.checked = state.settings.pdFollowRecording;
     followRecording.addEventListener('change', () => {
       state.settings.pdFollowRecording = followRecording.checked;
+      // 开启跟随后采集只由记录状态决定，清掉可能残留的本地暂停，
+      // 免得留下一个界面上看不出来的隐藏状态
+      if (followRecording.checked && paused) {
+        paused = false;
+        bufferedWhilePaused = 0;
+        rebuildAll();
+      }
       debouncedSaveSettings();
-      syncPdCaptureUI(getPdCaptureState());
-      updateCounter();
+      // 广播而非直接同步：PD 自己的命令栏与监控侧记录按钮的提示语都跟着这个开关变，
+      // 由各自的监听器去刷新（见本文件的 witrn:monitor-changed 监听与 app.js）
+      document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
     });
   }
   // 打开自动滚动时立即跳到底部
@@ -507,7 +562,7 @@ export function initPdView() {
   });
 
   // 懒初始化前按钮不可交互，此处补齐当前状态（跟随挂起 / 手动暂停可能早于首次打开发生）
-  syncPdCaptureUI(getPdCaptureState());
+  syncPdUi();
 }
 
 /** 每次切到 PD 视图：补齐隐藏期间收到的报文。 */

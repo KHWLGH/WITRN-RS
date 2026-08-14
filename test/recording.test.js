@@ -11,7 +11,16 @@ const elements = new Map();
 globalThis.document = {
   getElementById(id) {
     if (!elements.has(id)) {
-      elements.set(id, { textContent: '', disabled: false });
+      // 命令栏镜像（ui/controlbar.js）会写 innerHTML / title / classList / aria-*，
+      // stub 需要这些成员，否则 startRecording 会在同步 UI 时抛错
+      elements.set(id, {
+        textContent: '',
+        disabled: false,
+        innerHTML: '',
+        title: '',
+        classList: { toggle() {} },
+        setAttribute() {},
+      });
     }
     return elements.get(id);
   },

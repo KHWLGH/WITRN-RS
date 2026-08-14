@@ -51,11 +51,8 @@
         <!-- ── 监控工作区 ── -->
         <section class="view" id="view-monitor" role="tabpanel" aria-labelledby="tab-monitor">
           <div class="commandbar">
-            <button type="button" class="cmd-btn" id="btn-start-record" title="开始记录" disabled>
+            <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
               <i class="codicon codicon-record"></i>开始记录
-            </button>
-            <button type="button" class="cmd-btn" id="btn-stop-record" title="停止记录" disabled>
-              <i class="codicon codicon-primitive-square"></i>停止
             </button>
             <span class="cmd-sep"></span>
             <span class="cmd-label">采样率</span>
@@ -136,15 +133,13 @@
                 </div>
               </div>
               <div class="realtime-card power">
-                <div class="realtime-label">功率</div>
+                <div class="realtime-label">
+                  <span>功率</span>
+                  <span class="realtime-average">平均 <span id="avg-power">--</span></span>
+                </div>
                 <div class="realtime-content">
                   <div class="realtime-value" id="rt-power">--</div>
                   <div class="realtime-unit">W</div>
-                </div>
-                <div class="realtime-average">
-                  <span>平均</span>
-                  <span class="realtime-average-value" id="avg-power">--</span>
-                  <span class="realtime-average-unit">W</span>
                 </div>
                 <div class="realtime-stats">
                   <span>最小: <span id="min-power">--</span></span>
@@ -152,15 +147,13 @@
                 </div>
               </div>
               <div class="realtime-card temperature" id="temp-card">
-                <div class="realtime-label">温度</div>
+                <div class="realtime-label">
+                  <span>温度</span>
+                  <span class="realtime-average">平均 <span id="avg-temp">--</span></span>
+                </div>
                 <div class="realtime-content">
                   <div class="realtime-value" id="rt-temp">--</div>
                   <div class="realtime-unit">°C</div>
-                </div>
-                <div class="realtime-average">
-                  <span>平均</span>
-                  <span class="realtime-average-value" id="avg-temp">--</span>
-                  <span class="realtime-average-unit">°C</span>
                 </div>
                 <div class="realtime-stats">
                   <span>最低: <span id="min-temp">--</span></span>
@@ -283,7 +276,10 @@
               <span class="checkmark"></span>
               自动滚动
             </label>
-            <label class="ribbon-checkbox" title="仅在主监控处于记录状态时采集 PD 报文">
+            <label
+              class="ribbon-checkbox"
+              title="跟随记录：开启后 PD 分析与主监控完全联动&#10;· 仅在主监控记录时采集 PD 报文（未记录时报文直接丢弃，不进缓冲）&#10;· 左侧的开始/暂停按钮同时控制主监控的记录&#10;· 两侧的清空互相联动，清空任意一侧都会同时清空图表与报文&#10;关闭后三者互不影响：PD 独立采集、独立暂停、独立清空。"
+            >
               <input type="checkbox" id="pd-follow-recording" checked />
               <span class="checkmark"></span>
               跟随记录

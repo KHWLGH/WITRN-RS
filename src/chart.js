@@ -24,8 +24,7 @@ import { formatRelativeHMS, hexToRgba } from './utils.js';
 
 /**
  * 数据集顺序（与复选框 / 设置字段一一对应；uPlot series 下标 = 此下标 + 1）。
- * ⚠ 只允许追加，不允许重排：seriesMax[3]（功率）是导航图的量程来源，
- * drawMinorGrid / tempSplits 依赖 axes[1]（电压）作为唯一参照轴。
+ * ⚠ 只允许追加，不允许重排：seriesMax[3]（功率）是导航图的量程来源。
  */
 const FIELDS = ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'];
 const LABELS = ['电压', '电流', '功率', '温度', 'D+', 'D-', 'CC1', 'CC2'];
@@ -351,8 +350,80 @@ function paddedZeroBased(min, max, h) {
   return lo < hi ? [lo, hi] : [lo - 0.5, hi + 0.5];
 }
 
+/** 挂在纵轴上的全部 scale（网格 / 等分对齐的作用域）。 */
+const Y_SCALES = ['voltage', 'current', 'power', 'temp'];
+
 /**
- * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，0 起点 + 可配置余量。
+ * 全部 Y 轴共用的等分格数。
+ *
+ * 多轴网格对齐的关键：对齐不要求各轴数值相同，只要求刻度落在相同的高度比例上。
+ * 于是取一个全局等分数 N，把每条轴的量程量化成 N 个整齐步长（quantizeRange），
+ * 刻度用 min + (max-min)·i/N 生成（uniformSplits）—— 第 i 条刻度在每条轴上都是
+ * 同一像素行，四条轴的网格线因此严格重合。
+ *
+ * 用 u.height（画布总高）而非 u.bbox.height 推算：bbox 依赖轴宽、轴宽依赖刻度
+ * 文字、刻度又依赖等分数，读 bbox 会形成布局循环。60 是坐标轴与标签的大致占用，
+ * 余下按约 80px/格换算——只随窗口尺寸变化，不随数据抖动。
+ * @param {any} u
+ * @returns {number}
+ */
+function yDivisions(u) {
+  const plotHeight = Math.max(80, (Number(u?.height) || 300) - 60);
+  return Math.min(7, Math.max(3, Math.round(plotHeight / 80)));
+}
+
+/**
+ * 量程量化时实际采用的等分数。
+ *
+ * 刻度（uniformSplits）与次网格必须复用它，而不是各自再调一次 yDivisions：
+ * 量程只在 setData / setScale 时重算，而 yDivisions 随窗口高度即时变化，
+ * 两者若不同步就会出现「按 7 等分量化的量程被切成 5 份」——刻度落在 5.6、11.2
+ * 这种非整数上。窗口高度变化后由 syncDivisionsAfterResize 补一次量程重算。
+ */
+let appliedYDivisions = 0;
+
+/** 绘图区高度变了 → 等分数可能变，安排一次量程重算，让刻度值回到整齐步长。 */
+let divisionSyncPending = false;
+function syncDivisionsAfterResize(/** @type {any} */ u) {
+  if (divisionSyncPending || yDivisions(u) === appliedYDivisions) return;
+  divisionSyncPending = true;
+  requestAnimationFrame(() => {
+    divisionSyncPending = false;
+    refreshChartScales();
+  });
+}
+
+/** 量化步长的候选尾数。比常见的 1/2/5 更细，用于压低量化引入的额外余量。 */
+const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+
+/**
+ * 把量程量化为「整齐步长 × 等分数」，使刻度既是整数值又正好铺满绘图区。
+ *
+ * 代价：量化只向上取整，实际纵向余量可能比设置值多出至多一个步长（细候选表把
+ * 超出压在 20% 上下，粗糙的 1/2/5 阶梯会翻倍）。这是「整齐刻度 + 严格对齐」不可
+ * 避免的开销。
+ * @param {number} lo @param {number} hi @param {number} divisions
+ * @returns {[number, number]}
+ */
+function quantizeRange(lo, hi, divisions) {
+  const span = hi - lo;
+  if (!(span > 0) || !Number.isFinite(span)) return [lo, hi];
+  const mag = 10 ** Math.floor(Math.log10(span / divisions));
+  // 起点下取整最多把跨度撑大一个步长，因此候选需覆盖到 span/(divisions-1)；
+  // divisions ≥ 3 时该值 < 1.5×原始步长，两个数量级的候选表足够。
+  for (const decade of [mag, mag * 10]) {
+    for (const step of NICE_STEPS) {
+      const incr = step * decade;
+      const start = Math.floor(lo / incr + 1e-9) * incr;
+      if (start + incr * divisions >= hi - Math.abs(hi) * 1e-9) return [start, start + incr * divisions];
+    }
+  }
+  return [lo, hi];
+}
+
+/**
+ * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，0 起点 + 可配置余量，
+ * 最后量化到全局等分格（与其余 Y 轴共线）。
  * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
  * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
  * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
@@ -363,15 +434,22 @@ function mkYRange(seriesIndexes, symmetric = false) {
     /** @param {any} u */
     (u) => {
       const agg = aggregateVisible(u, seriesIndexes);
+      const divisions = yDivisions(u);
+      appliedYDivisions = divisions;
       if (agg === null) return [null, null];
-      if ('empty' in agg) return [0, 1];
+      if ('empty' in agg) return quantizeRange(0, 1, divisions);
       const h = headroomFrac();
+      let lo;
+      let hi;
       if (symmetric) {
         const span = agg.max - agg.min;
         const padding = span > 0 ? span * h : 1;
-        return [agg.min - padding, agg.max + padding];
+        lo = agg.min - padding;
+        hi = agg.max + padding;
+      } else {
+        [lo, hi] = paddedZeroBased(agg.min, agg.max, h);
       }
-      return paddedZeroBased(agg.min, agg.max, h);
+      return quantizeRange(lo, hi, divisions);
     }
   );
 }
@@ -392,57 +470,19 @@ function smartTick(value) {
 }
 
 /**
- * 生成 1/2/2.5/5×10^k 步长的均匀刻度（温度轴在电压轴不可用时的回退方案）。
- * @param {number} min @param {number} max @param {number} count
+ * 生成与其余 Y 轴共线的等分刻度（配合 quantizeRange 量化后的整齐量程使用）。
+ * 用 min + (max-min)·i/N 而非逐格累加步长：与 drawMinorGrid 的几何算式同源，
+ * 浮点结果逐位一致，刻度线与网格线不会差半个像素。
+ * @param {any} u @param {string} scaleKey
  * @returns {number[]}
  */
-function niceSplits(min, max, count) {
-  const span = max - min;
-  if (!(span > 0)) return [min];
-  const rawIncr = span / count;
-  const mag = 10 ** Math.floor(Math.log10(rawIncr));
-  let incr = mag * 10;
-  for (const m of [1, 2, 2.5, 5]) {
-    if (mag * m >= rawIncr) {
-      incr = mag * m;
-      break;
-    }
-  }
-  const splits = [];
-  for (let v = Math.ceil(min / incr) * incr; v <= max + incr * 1e-9; v += incr) splits.push(v);
-  return splits;
-}
-
-/**
- * 温度轴刻度：将电压轴的刻度位置按比例映射到温度量程并取整，
- * 使温度刻度与主网格线（电压轴）在同一水平线上（与旧版 afterBuildTicks 行为一致）。
- * @param {any} u
- * @returns {number[]}
- */
-function tempSplits(u) {
-  const tScale = u.scales.temp;
-  if (tScale?.min == null || tScale?.max == null) return [];
-  const tMin = Number(tScale.min);
-  const tMax = Number(tScale.max);
-  const tSpan = tMax - tMin;
-
-  const vScale = u.scales.voltage;
-  const vSplits = u.axes?.[1]?._splits;
-  /** @type {number[]} */
-  let mapped;
-
-  if (vScale?.min != null && vScale?.max != null && Array.isArray(vSplits) && vSplits.length >= 2) {
-    const vMin = Number(vScale.min);
-    const vSpan = Number(vScale.max) - vMin;
-    mapped = vSplits.map((/** @type {number} */ s) => {
-      const ratio = vSpan === 0 ? 0 : (s - vMin) / vSpan;
-      return Math.round(tMin + ratio * tSpan);
-    });
-  } else {
-    mapped = niceSplits(tMin, tMax, 5).map((v) => Math.round(v));
-  }
-
-  return mapped.filter((v, i, arr) => i === 0 || v !== arr[i - 1]);
+function uniformSplits(u, scaleKey) {
+  const scale = u.scales?.[scaleKey];
+  if (scale?.min == null || scale?.max == null) return [];
+  const min = Number(scale.min);
+  const span = Number(scale.max) - min;
+  const n = appliedYDivisions || yDivisions(u);
+  return Array.from({ length: n + 1 }, (_, i) => min + (span * i) / n);
 }
 
 /**
@@ -470,10 +510,9 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
  * @param {string} label
  * @param {() => string} color
  * @param {number} side - 3=左 1=右
- * @param {{show: boolean, stroke?: () => string}} grid
  * @returns {any}
  */
-function mkYAxis(scaleKey, label, color, side, grid) {
+function mkYAxis(scaleKey, label, color, side) {
   return {
     scale: scaleKey,
     side,
@@ -484,72 +523,81 @@ function mkYAxis(scaleKey, label, color, side, grid) {
     labelGap: 2,
     font: `12px ${MONO_FONT}`,
     gap: 4,
-    space: 30,
     size: axisAutoSize,
+    // 等分刻度由 uniformSplits 决定，uPlot 基于 space / incrs 的自动选点被完全覆盖
+    splits: (/** @type {any} */ u) => uniformSplits(u, scaleKey),
     values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(smartTick),
-    grid: grid.show ? { show: true, stroke: grid.stroke, width: 1 } : { show: false },
-    // 刻度线与网格解耦：无网格的轴（电流/功率/温度）也画通道色刻度线，轴的可读性由此而来
-    ticks: { show: true, stroke: grid.show && grid.stroke ? grid.stroke : color, width: 1, size: 6 },
+    // 四条 Y 轴画同一套主网格：量程已量化到相同的高度比例，像素级重合；
+    // 令牌是不透明色，重复描边不会叠亮（见 tokens.css 的说明）
+    grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
+    // 刻度线与网格解耦：刻度线用通道色，一眼看出哪条轴对应哪条曲线
+    ticks: { show: true, stroke: color, width: 1, size: 6 },
   };
 }
 
-// ─── Dense minor grid ────────────────────────────────────────────────────────
+// ─── Minor grid ──────────────────────────────────────────────────────────────
+
+/** 是否至少有一条 Y 轴在显示（挂靠曲线全部隐藏时该 scale 的 min 为 null）。 */
+function hasVisibleYScale(/** @type {any} */ u) {
+  return Y_SCALES.some((key) => u.scales?.[key]?.min != null);
+}
 
 /**
- * 在主刻度之间绘制细分网格线（5 等分），使网格更密集。
- * 纵向细分基于 X 轴刻度，横向细分基于电压轴刻度（作为唯一参考，与旧版插件一致）。
+ * 在主刻度之间各画一条中线，形成主 / 次两级网格。
+ *
+ * 纵向中线取自 X 轴实际刻度（时间步长非等距，只能读 _splits）；
+ * 横向中线按几何等分推出——全部 Y 轴共用 yDivisions 等分，中线与任一条轴的刻度
+ * 都对齐，因此不依赖某条具体的轴，隐藏电压曲线后横向次网格依然在位。
  * @param {any} u
  */
 function drawMinorGrid(u) {
   const { ctx, bbox } = u;
-  if (!bbox || bbox.width <= 0) return;
+  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
 
-  const subdivisions = 5;
   const left = bbox.left;
   const right = bbox.left + bbox.width;
   const top = bbox.top;
   const bottom = bbox.top + bbox.height;
   const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
+  // 主刻度间距低于此值时不再插中线，避免窄图上重新糊成一片（设备像素）
+  const minGapPx = 36 * pxRatio;
 
   ctx.save();
-  ctx.lineWidth = 0.5 * pxRatio;
+  ctx.lineWidth = pxRatio;
+  ctx.strokeStyle = chartTheme.gridMinor;
+  // 与 uPlot 画网格线同款的清晰化手法：奇数线宽整体平移半像素
+  const offset = (ctx.lineWidth % 2) / 2;
+  ctx.translate(offset, offset);
+  ctx.beginPath();
 
-  // ── Minor vertical grid lines (x-axis) ──
+  // ── 纵向中线（X 轴主刻度之间） ──
   const xSplits = u.axes?.[0]?._splits;
   if (Array.isArray(xSplits) && xSplits.length >= 2) {
-    ctx.strokeStyle = chartTheme.gridMinorX;
-    ctx.beginPath();
     for (let i = 0; i < xSplits.length - 1; i++) {
-      const step = (xSplits[i + 1] - xSplits[i]) / subdivisions;
-      for (let j = 1; j < subdivisions; j++) {
-        const x = u.valToPos(xSplits[i] + step * j, 'x', true);
-        if (x >= left && x <= right) {
-          ctx.moveTo(x, top);
-          ctx.lineTo(x, bottom);
-        }
+      const a = u.valToPos(xSplits[i], 'x', true);
+      const b = u.valToPos(xSplits[i + 1], 'x', true);
+      if (Math.abs(b - a) < minGapPx) continue;
+      const x = Math.round((a + b) / 2);
+      if (x >= left && x <= right) {
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
       }
     }
-    ctx.stroke();
   }
 
-  // ── Minor horizontal grid lines (voltage axis only, as the single reference) ──
-  const vSplits = u.axes?.[1]?._splits;
-  if (u.scales.voltage?.min != null && Array.isArray(vSplits) && vSplits.length >= 2) {
-    ctx.strokeStyle = chartTheme.gridMinorY;
-    ctx.beginPath();
-    for (let i = 0; i < vSplits.length - 1; i++) {
-      const step = (vSplits[i + 1] - vSplits[i]) / subdivisions;
-      for (let j = 1; j < subdivisions; j++) {
-        const y = u.valToPos(vSplits[i] + step * j, 'voltage', true);
-        if (y >= top && y <= bottom) {
-          ctx.moveTo(left, y);
-          ctx.lineTo(right, y);
-        }
+  // ── 横向中线（Y 轴等分格之间） ──
+  const divisions = appliedYDivisions || yDivisions(u);
+  if (bbox.height / divisions >= minGapPx && hasVisibleYScale(u)) {
+    for (let i = 0; i < divisions; i++) {
+      const y = Math.round(top + (bbox.height * (i + 0.5)) / divisions);
+      if (y >= top && y <= bottom) {
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
       }
     }
-    ctx.stroke();
   }
 
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -752,17 +800,14 @@ export function initChart() {
         grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
         ticks: { show: true, stroke: () => chartTheme.grid, width: 1, size: 8 },
       },
-      mkYAxis('voltage', '电压 (V)', () => chartTheme.voltage, 3, { show: true, stroke: () => chartTheme.gridVoltage }),
-      mkYAxis('current', '电流 (A)', () => chartTheme.current, 3, { show: false }),
-      mkYAxis('power', '功率 (W)', () => chartTheme.power, 1, { show: false }),
-      {
-        ...mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1, { show: false }),
-        splits: /** @type {any} */ ((/** @type {any} */ u) => tempSplits(u)),
-        values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map((v) => String(Math.round(v))),
-      },
+      mkYAxis('voltage', '电压 (V)', () => chartTheme.voltage, 3),
+      mkYAxis('current', '电流 (A)', () => chartTheme.current, 3),
+      mkYAxis('power', '功率 (W)', () => chartTheme.power, 1),
+      mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1),
     ],
     hooks: {
       drawAxes: [drawMinorGrid],
+      setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
   };

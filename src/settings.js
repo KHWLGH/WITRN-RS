@@ -126,7 +126,7 @@ export async function loadSettings() {
       setChecked('pd-follow-recording', state.settings.pdFollowRecording);
       echoHeadroomUI();
       // 跟随记录设置可能与默认不同，PD 暂停按钮状态需要重新镜像
-      document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
+      document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 
       // Temperature service settings
       const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
@@ -253,7 +253,7 @@ export async function resetSettings() {
     if (dirEl) dirEl.hidden = true;
 
     // 跟随记录设置已回落默认值，PD 暂停按钮状态需要重新镜像
-    document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
+    document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 
     const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
     if (tempIp) tempIp.value = state.settings.tempIp;

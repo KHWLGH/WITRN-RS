@@ -7,7 +7,18 @@ import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } f
 import { calculateEnergyInRange } from './measurement.js';
 import { state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { syncRecordUI } from './ui/controlbar.js';
 import { formatRelativeHMS } from './utils.js';
+
+/** 按当前状态刷新命令栏的记录按钮（开始 / 继续 / 暂停）。 */
+export function refreshRecordButton() {
+  syncRecordUI({
+    connected: state.isConnected,
+    recording: state.isRecording,
+    hasData: state.chartData.timestamps.length > 0,
+    followPd: state.settings.pdFollowRecording,
+  });
+}
 
 // ─── Data ingestion ──────────────────────────────────────────────────────────
 
@@ -431,6 +442,9 @@ export function clearChart() {
   syncChartSeries();
   updateCharts();
 
+  // 数据清空后按钮从「继续记录」退回「开始记录」
+  refreshRecordButton();
+
   const el = document.getElementById('data-count');
   if (el) el.textContent = '0';
 }
@@ -464,20 +478,16 @@ export function startRecording() {
   const el = document.getElementById('record-status');
   if (el) el.textContent = '记录中...';
 
-  const btnStart = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-start-record'));
-  const btnStop = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-stop-record'));
+  refreshRecordButton();
   const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
-  if (btnStart) btnStart.disabled = true;
-  if (btnStop) btnStop.disabled = false;
   if (btnClear) btnClear.disabled = true;
 
   state.__setRangeControlsEnabled?.(false);
-
   // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
-  document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
+  document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
 
-/** 停止录制。 */
+/** 停止（暂停）录制。 */
 export function stopRecording() {
   if (!state.isRecording) return;
 
@@ -489,17 +499,14 @@ export function stopRecording() {
   const el = document.getElementById('record-status');
   if (el) el.textContent = '停止';
 
-  const btnStart = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-start-record'));
-  const btnStop = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-stop-record'));
+  refreshRecordButton();
   const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
-  if (btnStart) btnStart.disabled = !state.isConnected;
-  if (btnStop) btnStop.disabled = true;
   if (btnClear) btnClear.disabled = false;
 
   state.__setRangeControlsEnabled?.(true);
 
   // 单一咽喉点：手动停止 / 自动暂停 / 拔设备 / CSV 导入引发的停止都会走到这里
-  document.dispatchEvent?.(new CustomEvent('witrn:recording-changed'));
+  document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
 
 /** 清空图表并重置统计和能量。 */

@@ -123,6 +123,17 @@
     --timeline-height: 64px;
     --chart-min-height: 240px;
     --monitor-gutter: 8px;
+    --rt-numeral: 700 20px / 22px var(--font-mono);
+  }
+
+  /* 读数栏最后一档收紧：600 窗高 + 温度卡时六张卡片仍需塞进 ≈483px */
+  .realtime-card {
+    padding: 3px 10px;
+  }
+
+  .realtime-stats {
+    margin-top: 2px;
+    padding-top: 2px;
   }
 
   .commandbar {

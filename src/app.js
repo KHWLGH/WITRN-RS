@@ -16,6 +16,7 @@ import { exportCSV, importCSV } from './csv.js';
 import {
   addDataPoint,
   clearAndResetStats,
+  refreshRecordButton,
   scheduleStatsUpdate,
   startRecording,
   stopRecording,
@@ -30,7 +31,7 @@ import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from
 import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
-import { syncAutoPauseUI, syncTempUI } from './ui/controlbar.js';
+import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
 import { createMenu } from './ui/menu.js';
@@ -38,7 +39,7 @@ import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
-import { ingestPdData, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
+import { clearPdEntries, ingestPdData, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -322,8 +323,19 @@ function setupControls() {
   const deviceSelect = document.getElementById('device-select');
   if (deviceSelect) deviceSelect.addEventListener('change', onDeviceSelect);
 
-  btn('btn-start-record', () => startRecording());
-  btn('btn-stop-record', () => stopRecording());
+  btn('btn-record-toggle', () => (state.isRecording ? stopRecording() : startRecording()));
+
+  // PD 视图在「跟随记录」开启时需要触发这几个监控侧动作。用注入而非让 pd.js
+  // 直接 import data.js：那条边会把 chart.js / temperature.js 拖进 PD 的单元测试环境。
+  state.__toggleRecording = () => (state.isRecording ? stopRecording() : startRecording());
+  state.__clearMonitorData = () => clearAndResetStats();
+
+  // 记录 / 连接 / 跟随设置任一变化都要重刷记录按钮：文案与提示语都取决于它们
+  // （data.js 与 csv.js 在自己的流程里也直接调，覆盖不派发事件的场景，如清空图表）
+  document.addEventListener('witrn:monitor-changed', () => {
+    refreshRecordButton();
+    syncFollowLinkageUI(state.settings.pdFollowRecording);
+  });
 
   // Stats range toggle
   const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
@@ -395,8 +407,18 @@ function setupControls() {
   });
 
   btn('btn-clear-chart', async () => {
-    const yes = await ask('确定要清空图表并重置所有统计数据吗？', { title: '确认重置', kind: 'error' });
-    if (yes) clearAndResetStats();
+    // 跟随记录开启时两侧同生共死：这里连带清掉 PD 缓冲，PD 侧的清空同样连带重置这里。
+    // 两边各自只调用对方的无级联版本，不会互相递归。
+    const follow = state.settings.pdFollowRecording;
+    const yes = await ask(
+      follow
+        ? '确定要清空图表并重置所有统计数据吗？\n跟随记录已开启，PD 分析已捕获的报文也会一并清空。'
+        : '确定要清空图表并重置所有统计数据吗？',
+      { title: '确认重置', kind: 'error' },
+    );
+    if (!yes) return;
+    clearAndResetStats();
+    if (follow) clearPdEntries();
   });
 
   // Temperature service toggle (connection settings remain in the Flyout)
@@ -493,6 +515,8 @@ function setupControls() {
   if (apDuration) state.autoPauseSettings.duration = parseFloat(apDuration.value) || 0;
   syncAutoPauseUI(state.autoPauseSettings.enabled);
   syncTempUI(state.isTempConnected);
+  refreshRecordButton();
+  syncFollowLinkageUI(state.settings.pdFollowRecording);
 }
 
 // ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────

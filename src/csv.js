@@ -6,6 +6,7 @@
 import { syncChartSeries, updateCharts } from './chart.js';
 import {
   clearAndResetStats,
+  refreshRecordButton,
   stopRecording,
   updateChartRange,
   updateEnergyDisplay,
@@ -320,6 +321,8 @@ export async function importCSV() {
     updateCharts();
 
     updateTempUIVisibility();
+    // 导入后已有数据，记录按钮从「开始记录」变为「继续记录」
+    refreshRecordButton();
 
     toast.success(`成功导入 ${newTimestamps.length} 条数据`);
   } catch (e) {

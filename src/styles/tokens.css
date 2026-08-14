@@ -95,12 +95,13 @@
   --ch-cc1: #4adade;
   --ch-cc2: #f28ab8;
 
-  /* 图表基建色（src/theme.js 读取） */
+  /* 图表基建色（src/theme.js 读取）
+     两级网格：主网格（X + 全部 Y 轴共用一套等分刻度）与次网格（主格中线）。
+     必须用不透明色：四条 Y 轴会把主网格重复画在同一像素上，半透明会叠色，
+     导致「同时显示两条曲线时网格更亮」。 */
   --chart-axis-text: #9a9ab8;
-  --chart-grid: rgba(90, 90, 140, 0.75);
-  --chart-grid-voltage: rgba(74, 158, 255, 0.22); /* 电压轴主横网格 */
-  --chart-grid-minor-x: rgba(80, 80, 130, 0.5);
-  --chart-grid-minor-y: rgba(120, 130, 160, 0.25);
+  --chart-grid: #4b4b61; /* 主网格 + X 轴刻度线 */
+  --chart-grid-minor: #37374a; /* 次网格 */
 
   /* 几何 */
   --radius-control: 4px; /* 按钮 / 输入框 / 下拉 / 菜单项 */
@@ -142,7 +143,8 @@
   --type-body-strong: 600 13px / 18px var(--font-ui);
   --type-subtitle: 600 16px / 22px var(--font-ui);
   --type-title: 600 20px / 28px var(--font-ui);
-  --type-numeral: 700 28px / 32px var(--font-mono);
+  /* 大字读数没有放进字阶：唯一的消费者是读数栏，尺寸要随窗高分档，
+     属于组件旋钮（见下方 --rt-numeral） */
 
   /* ── 3. 组件旋钮 ───────────────────────────────────────────── */
   --dialog-width: 400px;
@@ -152,6 +154,7 @@
 
   /* 监控视图布局旋钮 — styles/compact.css 的紧凑档按视口重赋这些值 */
   --panel-realtime-width: 230px; /* 实时读数侧栏宽 */
+  --rt-numeral: 700 24px / 26px var(--font-mono); /* 读数栏大字读数 */
   --timeline-height: 80px; /* 时间线导航器高 */
   --monitor-gutter: 12px; /* 监控主体 padding / gap */
   --chart-min-height: 300px;
