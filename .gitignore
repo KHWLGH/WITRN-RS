@@ -41,6 +41,10 @@ __pycache__/
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+
+# Playwright CLI snapshots and screenshots
+**/.playwright-cli/
+
 example/
 *.suo
 *.ntvs*
