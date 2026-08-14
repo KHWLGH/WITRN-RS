@@ -36,6 +36,14 @@
 
 /* ── PD 报文列表 ─────────────────────────────────────────────── */
 
+/* 过滤条件是自然语言占位提示，不能沿用数值输入框的 80px 默认宽度。 */
+.ribbon-input.pd-filter {
+  width: 150px;
+  min-width: 150px;
+  flex: 0 0 150px;
+  font-family: var(--font-ui);
+}
+
 .pd-row {
   display: flex;
   align-items: center;
