@@ -5,6 +5,7 @@
 
 import { setSeriesVisible } from './chart.js';
 import { state } from './state.js';
+import { syncTempUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -48,22 +49,15 @@ export async function disconnectTempService() {
 export function setTempConnected(connected) {
   state.isTempConnected = connected;
 
-  const statusEl = document.getElementById('temp-connection-status');
-  if (statusEl) statusEl.classList.toggle('connected', connected);
-
-  const textEl = document.getElementById('temp-connection-text');
-  if (textEl) textEl.textContent = connected ? '已连接' : '未连接';
-
   /** @param {string} id @param {boolean} disabled */
   const setDisabled = (id, disabled) => {
     const el = /** @type {HTMLButtonElement|HTMLInputElement|null} */ (document.getElementById(id));
     if (el) el.disabled = disabled;
   };
 
-  setDisabled('btn-temp-connect', connected);
-  setDisabled('btn-temp-disconnect', !connected);
   setDisabled('temp-ip', connected);
   setDisabled('temp-port', connected);
+  syncTempUI(connected);
 
   if (connected) {
     state.hasTempData = true;

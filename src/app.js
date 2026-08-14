@@ -29,6 +29,7 @@ import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from
 import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
+import { syncAutoPauseUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
 import { createMenu } from './ui/menu.js';
@@ -341,9 +342,16 @@ function setupControls() {
     if (yes) clearAndResetStats();
   });
 
-  // Temperature service controls
-  btn('btn-temp-connect', () => connectTempService());
-  btn('btn-temp-disconnect', () => disconnectTempService());
+  // Temperature service toggle (connection settings remain in the Flyout)
+  btn('btn-temp-toggle', async () => {
+    syncTempUI(state.isTempConnected, true);
+    try {
+      if (state.isTempConnected) await disconnectTempService();
+      else await connectTempService();
+    } finally {
+      syncTempUI(state.isTempConnected);
+    }
+  });
 
   const tempIpEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   if (tempIpEl) {
@@ -371,7 +379,6 @@ function setupControls() {
   }
 
   // Auto Pause Controls
-  const apToggle = /** @type {HTMLInputElement} */ (document.getElementById('btn-auto-pause-toggle'));
   const apBasis = /** @type {HTMLSelectElement} */ (document.getElementById('ap-basis'));
   const apCondition = /** @type {HTMLInputElement} */ (document.getElementById('ap-condition'));
   const apDuration = /** @type {HTMLInputElement} */ (document.getElementById('ap-duration'));
@@ -387,13 +394,12 @@ function setupControls() {
     }
   }
 
-  if (apToggle) {
-    apToggle.addEventListener('change', () => {
-      state.autoPauseSettings.enabled = apToggle.checked;
-      state.autoPauseSettings.triggerStartTime = null;
-      debouncedSaveSettings();
-    });
-  }
+  btn('btn-auto-pause-command', () => {
+    state.autoPauseSettings.enabled = !state.autoPauseSettings.enabled;
+    state.autoPauseSettings.triggerStartTime = null;
+    syncAutoPauseUI(state.autoPauseSettings.enabled);
+    debouncedSaveSettings();
+  });
 
   if (apBasis) {
     apBasis.addEventListener('change', (e) => {
@@ -428,6 +434,8 @@ function setupControls() {
   if (apBasis) state.autoPauseSettings.basis = /** @type {'none'|'voltage'|'current'|'power'} */ (apBasis.value);
   if (apCondition) state.autoPauseSettings.condition = parseFloat(apCondition.value) || 0;
   if (apDuration) state.autoPauseSettings.duration = parseFloat(apDuration.value) || 0;
+  syncAutoPauseUI(state.autoPauseSettings.enabled);
+  syncTempUI(state.isTempConnected);
 }
 
 // ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────

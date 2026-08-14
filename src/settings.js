@@ -7,6 +7,7 @@ import { setSeriesFill, setSeriesVisible } from './chart.js';
 import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
+import { syncAutoPauseUI } from './ui/controlbar.js';
 import { setSampleRateOption } from './utils.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
@@ -124,10 +125,7 @@ export async function loadSettings() {
       // Auto Pause
       if (savedSettings.autoPause) {
         state.autoPauseSettings = normalizeAutoPause(savedSettings.autoPause);
-        const apToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('btn-auto-pause-toggle'));
-        if (apToggle) {
-          apToggle.checked = state.autoPauseSettings.enabled;
-        }
+        syncAutoPauseUI(state.autoPauseSettings.enabled);
 
         const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
         if (apBasis) {
@@ -238,8 +236,7 @@ export async function resetSettings() {
     const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
     if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
 
-    const apToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('btn-auto-pause-toggle'));
-    if (apToggle) apToggle.checked = state.autoPauseSettings.enabled;
+    syncAutoPauseUI(state.autoPauseSettings.enabled);
 
     const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
     if (apBasis) apBasis.value = state.autoPauseSettings.basis;

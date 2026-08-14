@@ -344,6 +344,37 @@
   justify-content: center;
 }
 
+.cmd-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.cmd-state-btn {
+  min-width: 0;
+}
+
+.cmd-state-btn.is-active {
+  color: var(--accent-text);
+  background: var(--accent-fill-faint);
+  border-color: rgba(76, 194, 255, 0.32);
+}
+
+.cmd-state-btn.is-active:hover:not(:disabled) {
+  background: rgba(76, 194, 255, 0.18);
+}
+
+.cmd-settings-btn {
+  width: 24px;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+
+.cmd-settings-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
 /* 录制按钮的红点 */
 #btn-start-record:not(:disabled) .codicon-record {
   color: var(--status-danger);

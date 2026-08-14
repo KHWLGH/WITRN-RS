@@ -74,10 +74,36 @@
             </button>
             <span class="cmd-spacer"></span>
             <button type="button" class="cmd-btn" id="btn-flyout-display"><i class="codicon codicon-eye"></i>显示</button>
-            <button type="button" class="cmd-btn" id="btn-flyout-autopause">
-              <i class="codicon codicon-debug-pause"></i>自动暂停
-            </button>
-            <button type="button" class="cmd-btn" id="btn-flyout-temp"><i class="codicon codicon-flame"></i>温度服务</button>
+            <div class="cmd-action-group" id="auto-pause-actions">
+              <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
+                <i class="codicon codicon-debug-pause" id="auto-pause-command-icon"></i>
+                <span>自动暂停</span>
+              </button>
+              <button
+                type="button"
+                class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                id="btn-flyout-autopause"
+                aria-label="自动暂停设置"
+                title="自动暂停设置"
+              >
+                <i class="codicon codicon-settings-gear"></i>
+              </button>
+            </div>
+            <div class="cmd-action-group" id="temperature-actions">
+              <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
+                <i class="codicon codicon-plug" id="temp-toggle-icon"></i>
+                <span id="temp-toggle-label">温度服务</span>
+              </button>
+              <button
+                type="button"
+                class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                id="btn-flyout-temp"
+                aria-label="温度服务设置"
+                title="温度服务设置"
+              >
+                <i class="codicon codicon-settings-gear"></i>
+              </button>
+            </div>
           </div>
 
           <div class="monitor-body">
@@ -335,12 +361,6 @@
           <span class="status-label">设备:</span>
           <span id="device-name-text" class="device-name-status">--</span>
         </span>
-        <span class="cmd-spacer"></span>
-        <span class="status-item">
-          <span class="status-label">温度服务:</span>
-          <span class="status-indicator" id="temp-connection-status"></span>
-          <span id="temp-connection-text">未连接</span>
-        </span>
       </footer>
     </div>
 
@@ -402,14 +422,6 @@
 
     <div id="flyout-autopause" hidden>
       <div class="flyout-row">
-        <label class="ribbon-checkbox">
-          <input type="checkbox" id="btn-auto-pause-toggle" />
-          <span class="checkmark"></span>
-          启用自动暂停
-        </label>
-      </div>
-      <div class="flyout-divider"></div>
-      <div class="flyout-row">
         <span class="flyout-row-label">条件</span>
         <select id="ap-basis" class="ribbon-select">
           <option value="none">无</option>
@@ -443,14 +455,7 @@
         <label for="temp-port" class="flyout-row-label">端口</label>
         <input type="number" id="temp-port" value="1573" class="ribbon-input" />
       </div>
-      <div class="flyout-divider"></div>
-      <div class="flyout-row">
-        <button type="button" class="cmd-btn" id="btn-temp-connect"><i class="codicon codicon-plug"></i>连接</button>
-        <button type="button" class="cmd-btn" id="btn-temp-disconnect" disabled>
-          <i class="codicon codicon-debug-disconnect"></i>断开
-        </button>
-      </div>
-      <div class="card-hint">外部 TCP 温度服务，每行一个数值。连接状态见底部状态栏。</div>
+      <div class="card-hint">外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。</div>
     </div>
 
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
