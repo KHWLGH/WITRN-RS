@@ -245,7 +245,8 @@ input[type="number"]::-webkit-outer-spin-button {
 /* ── 时间线导航器 ─────────────────────────────────────────────── */
 
 .timeline-container {
-  height: 80px;
+  height: var(--timeline-height);
+  flex-shrink: 0; /* 纵向紧张时不再被静默压扁；预算由 H1 纵向紧凑档保证 */
   background: var(--surface-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
@@ -382,7 +383,7 @@ input[type="number"]::-webkit-outer-spin-button {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--monitor-gutter);
   overflow: hidden;
   min-width: 0; /* Prevent flex item from overflowing */
 }
@@ -417,7 +418,7 @@ input[type="number"]::-webkit-outer-spin-button {
   display: flex;
   flex-direction: column;
   gap: 0;
-  width: 230px;
+  width: var(--panel-realtime-width);
   flex-shrink: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -437,6 +438,9 @@ input[type="number"]::-webkit-outer-spin-button {
   transition: background var(--dur-fast) var(--ease-standard);
   position: relative;
   overflow: hidden;
+  /* overflow:hidden 会把 flex 自动最小尺寸归零——若不禁止收缩，面板高度不足时
+     （温度卡显示后总高超出）flexbox 会先压扁卡片裁掉数值，轮不到面板滚动 */
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -591,10 +595,9 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .realtime-stats span {
-  display: inline-block;
-  width: auto;
-  overflow: visible;
-  text-overflow: clip;
+  min-width: 0; /* 允许作为 flex 子项收缩，配合省略号替代旧的无声硬裁 */
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -655,10 +658,10 @@ input[type="number"]::-webkit-outer-spin-button {
   flex: 1;
   background: var(--surface-card);
   border-radius: var(--radius-surface);
-  padding: 15px;
+  padding: var(--chart-pad);
   border: 1px solid var(--stroke-card);
   position: relative;
-  min-height: 300px;
+  min-height: var(--chart-min-height);
   display: flex;
   flex-direction: column;
   gap: 6px;

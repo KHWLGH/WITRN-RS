@@ -728,7 +728,8 @@ export function initChart() {
         font: `12px ${MONO_FONT}`,
         size: 34,
         gap: 4,
-        space: 64,
+        // 80：HH:MM:SS.d 标签约 10 字符（等宽 12px ≈ 72px），64 会在任意宽度下互相碰撞
+        space: 80,
         incrs: TIME_INCRS,
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
           splits.map((v) => formatRelativeHMS(Number(v))),

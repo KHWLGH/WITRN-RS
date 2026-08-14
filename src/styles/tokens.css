@@ -149,6 +149,13 @@
   --toast-width: 360px;
   --titlebar-height: 40px;
   --statusbar-height: 24px;
+
+  /* 监控视图布局旋钮 — styles/compact.css 的紧凑档按视口重赋这些值 */
+  --panel-realtime-width: 230px; /* 实时读数侧栏宽 */
+  --timeline-height: 80px; /* 时间线导航器高 */
+  --monitor-gutter: 12px; /* 监控主体 padding / gap */
+  --chart-min-height: 300px;
+  --chart-pad: 15px; /* 图表容器内边距 */
 }
 
 /* 亮色主题占位：仅重赋语义层（本版本不交付亮色，结构先就位） */

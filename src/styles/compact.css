@@ -1,0 +1,135 @@
+/*
+ * 窄窗口 / 矮窗口紧凑档 — 本应用唯一的自适应层（纯响应式，无 webview 缩放）。
+ *
+ * 布局为固定 px（设计基准 1280×800），文字始终 13px 原生尺寸、永不缩放；
+ * 窗口低于基准时按各区域 min-content 实测分档收紧，保证任何允许的窗口尺寸
+ * 下功能全部可见、互不遮挡：
+ *   W1 <1080：收紧间距类旋钮（tokens.css 定义），把空间还给图表；
+ *             1080–1280 一切都装得下（最大 min-content 是命令栏 ≈943px），
+ *             刻意不动，接近默认尺寸的窗口保持设计原貌
+ *   W2 <980 ：监控命令栏 min-content ≈ 943px → 图标化（title 保留语义）。
+ *             Tauri minWidth=900，900–979 是实机最窄区间，必进此档
+ *   W3 <900 ：安全网——极端 DPI 下 OS 给出的窗口可能小于 minWidth
+ *             （如 150% 缩放的 1280 宽屏幕仅 ≈853 逻辑 px），以及浏览器调试
+ *   W4 <700 ：PD 分栏 640px 硬底以下 → 纵向堆叠（同为安全网）
+ *   H1 <620 ：纵向紧凑——最小窗高 600 与低分屏最大化（1366×768 @125% ≈ 577）
+ *             都会进入；时间轴 64px + 图表下限 240px 后纵向 min-content ≈ 433px
+ * 边界取 .98px 小数，避免整数视口边界双触发；不用 range 语法，兼容旧 WebKitGTK。
+ */
+
+/* ── W1：视口 < 1080，收紧间距 ───────────────────────────────── */
+
+@media (max-width: 1079.98px) {
+  :root {
+    --monitor-gutter: 8px;
+    --panel-realtime-width: 200px;
+    --chart-pad: 10px;
+  }
+
+  .chart-legend {
+    gap: 4px 10px;
+  }
+
+  .titlebar-connect .ribbon-select {
+    max-width: 200px;
+  }
+}
+
+/* ── W2：视口 < 980，命令栏图标化 ────────────────────────────── */
+
+@media (max-width: 979.98px) {
+  /* 图标 + title 提示保留全部功能可见，替代旧的横向滚出视野。
+     状态承载按钮（自动暂停 / 温度服务 / PD 暂停-继续-等待记录）保留文字——
+     文字即状态。用 font-size:0 而非包裹 span：按钮文字是裸文本节点，且
+     controlbar.js 会整体改写 #btn-pd-pause 的 innerHTML，包裹方案会被冲掉。 */
+  .commandbar .cmd-btn:not(.cmd-state-btn) {
+    font-size: 0;
+    gap: 0;
+  }
+
+  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-btn-icon) {
+    padding: 0 8px;
+  }
+
+  .commandbar .cmd-btn:not(.cmd-state-btn) .codicon {
+    font-size: 14px;
+  }
+
+  .titlebar-connect .ribbon-select {
+    min-width: 140px;
+  }
+
+  /* 状态点 + title 仍在，仅隐藏"未连接/已连接"文字 */
+  #connection-text {
+    display: none;
+  }
+}
+
+/* ── W3：视口 < 900（极端 DPI / 浏览器安全网） ───────────────── */
+
+@media (max-width: 899.98px) {
+  .tab > span {
+    display: none;
+  }
+
+  .titlebar-connect .cmd-btn {
+    font-size: 0;
+    gap: 0;
+  }
+
+  .titlebar-connect .cmd-btn .codicon {
+    font-size: 14px;
+  }
+}
+
+/* ── W4：视口 < 700，PD 分栏纵向堆叠（安全网） ───────────────── */
+
+@media (max-width: 699.98px) {
+  .pd-split {
+    flex-direction: column;
+  }
+
+  .pd-master {
+    flex: 1 1 55%;
+    min-width: 0;
+    min-height: 160px;
+    border-right: none;
+    border-bottom: 1px solid var(--stroke-divider);
+  }
+
+  .pd-detail-pane {
+    flex: 1 1 45%;
+    min-width: 0;
+  }
+
+  /* 复选框收为纯勾选框（三个均已带 title 说明） */
+  .commandbar .ribbon-checkbox {
+    font-size: 0;
+  }
+
+  .statusbar {
+    gap: 8px;
+  }
+
+  .device-name-status {
+    max-width: 120px;
+  }
+}
+
+/* ── H1：视口高 < 620，纵向紧凑 ──────────────────────────────── */
+
+@media (max-height: 619.98px) {
+  :root {
+    --timeline-height: 64px;
+    --chart-min-height: 240px;
+    --monitor-gutter: 8px;
+  }
+
+  .commandbar {
+    padding: 4px 10px;
+  }
+
+  .page {
+    padding: var(--space-3);
+  }
+}

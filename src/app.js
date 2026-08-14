@@ -3,7 +3,6 @@
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
 
-import { initAutoFit } from './autofit.js';
 import {
   handleMonitorShown,
   initChart,
@@ -604,7 +603,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupChartToggles();
   setupControls();
   setupShell();
-  initAutoFit();
 
   // Clean recording state on load
   state.isRecording = false;

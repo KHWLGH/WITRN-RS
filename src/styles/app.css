@@ -403,8 +403,8 @@
 .monitor-body {
   flex: 1;
   display: flex;
-  gap: 12px;
-  padding: 12px;
+  gap: var(--monitor-gutter);
+  padding: var(--monitor-gutter);
   min-height: 0;
   overflow: hidden;
 }
@@ -443,6 +443,9 @@
   position: fixed;
   z-index: 1500;
   min-width: 260px;
+  /* 锚点都在命令栏（距顶约 90px）：封顶保证面板要么放得下、要么内部滚动，不再伸出视口 */
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
   padding: 12px;
   background: var(--surface-flyout);
   border: 1px solid var(--stroke-card);
@@ -527,6 +530,7 @@
 .field-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* 窄卡片（min-width 300px）里长行折行而不是溢出卡片边框 */
   gap: 10px;
   margin-bottom: 8px;
 }

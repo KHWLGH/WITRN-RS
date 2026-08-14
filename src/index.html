@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="styles/app.css" />
     <link rel="stylesheet" href="styles/views.css" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles/compact.css" />
     <link rel="stylesheet" href="assets/codicon.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WITRN-RS</title>
@@ -29,11 +30,13 @@
           <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="刷新设备列表">
             <i class="codicon codicon-refresh"></i>
           </button>
-          <button type="button" class="cmd-btn" id="btn-connect"><i class="codicon codicon-plug"></i>连接</button>
-          <button type="button" class="cmd-btn" id="btn-disconnect" disabled>
+          <button type="button" class="cmd-btn" id="btn-connect" title="连接设备">
+            <i class="codicon codicon-plug"></i>连接
+          </button>
+          <button type="button" class="cmd-btn" id="btn-disconnect" title="断开连接" disabled>
             <i class="codicon codicon-debug-disconnect"></i>断开
           </button>
-          <span class="status-item">
+          <span class="status-item" title="连接状态">
             <span class="status-indicator" id="connection-status"></span>
             <span id="connection-text">未连接</span>
           </span>
@@ -48,10 +51,10 @@
         <!-- ── 监控工作区 ── -->
         <section class="view" id="view-monitor" role="tabpanel" aria-labelledby="tab-monitor">
           <div class="commandbar">
-            <button type="button" class="cmd-btn" id="btn-start-record" disabled>
+            <button type="button" class="cmd-btn" id="btn-start-record" title="开始记录" disabled>
               <i class="codicon codicon-record"></i>开始记录
             </button>
-            <button type="button" class="cmd-btn" id="btn-stop-record" disabled>
+            <button type="button" class="cmd-btn" id="btn-stop-record" title="停止记录" disabled>
               <i class="codicon codicon-primitive-square"></i>停止
             </button>
             <span class="cmd-sep"></span>
@@ -65,15 +68,15 @@
               <option value="10000">0.1 次/秒 (10秒1次)</option>
             </select>
             <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn" id="btn-export"><i class="codicon codicon-export"></i>导出CSV</button>
-            <button type="button" class="cmd-btn" id="btn-import">
+            <button type="button" class="cmd-btn" id="btn-export" title="导出CSV"><i class="codicon codicon-export"></i>导出CSV</button>
+            <button type="button" class="cmd-btn" id="btn-import" title="导入CSV">
               <i class="codicon codicon-desktop-download"></i>导入CSV
             </button>
             <button type="button" class="cmd-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
               <i class="codicon codicon-clear-all"></i>一键重置
             </button>
             <span class="cmd-spacer"></span>
-            <button type="button" class="cmd-btn" id="btn-flyout-display"><i class="codicon codicon-eye"></i>显示</button>
+            <button type="button" class="cmd-btn" id="btn-flyout-display" title="显示通道设置"><i class="codicon codicon-eye"></i>显示</button>
             <div class="cmd-action-group" id="auto-pause-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
                 <i class="codicon codicon-debug-pause" id="auto-pause-command-icon"></i>
@@ -258,14 +261,14 @@
             <button type="button" class="cmd-btn cmd-state-btn" id="btn-pd-pause" disabled>
               <i class="codicon codicon-debug-pause"></i>暂停
             </button>
-            <button type="button" class="cmd-btn" id="btn-pd-clear" disabled>
+            <button type="button" class="cmd-btn" id="btn-pd-clear" title="清空报文列表" disabled>
               <i class="codicon codicon-clear-all"></i>清空
             </button>
             <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn" id="btn-pd-export" disabled>
+            <button type="button" class="cmd-btn" id="btn-pd-export" title="导出 PD 捕获" disabled>
               <i class="codicon codicon-export"></i>导出
             </button>
-            <button type="button" class="cmd-btn" id="btn-pd-import" disabled>
+            <button type="button" class="cmd-btn" id="btn-pd-import" title="导入 PD 捕获" disabled>
               <i class="codicon codicon-desktop-download"></i>导入
             </button>
             <span class="cmd-sep"></span>

@@ -30,16 +30,12 @@ declare namespace TauriAPI {
   interface WindowAPI {
     getCurrentWindow(): any;
   }
-  interface WebviewAPI {
-    getCurrentWebview(): any;
-  }
   interface Tauri {
     core: Core;
     event: Event;
     dialog: Dialog;
     fs: Fs;
     window: WindowAPI;
-    webview: WebviewAPI;
   }
 }
 
