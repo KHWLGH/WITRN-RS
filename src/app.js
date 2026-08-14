@@ -354,7 +354,7 @@ function setupControls() {
     if (yes) await resetSettings();
   });
 
-  // Chart headroom（设置页 外观 卡）
+  // Chart headroom（设置页 配置 卡）
   const headroomAuto = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-auto'));
   const headroomCustom = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-mode-custom'));
   const headroomPercent = /** @type {HTMLInputElement|null} */ (document.getElementById('headroom-percent'));
@@ -382,7 +382,7 @@ function setupControls() {
     debouncedSaveSettings();
   });
 
-  // 记录电流方向（设置页 外观 卡）
+  // 记录电流方向（设置页 配置 卡）
   const signedCurrentEl = /** @type {HTMLInputElement|null} */ (document.getElementById('signed-current'));
   signedCurrentEl?.addEventListener('change', () => {
     state.settings.signedCurrent = signedCurrentEl.checked;

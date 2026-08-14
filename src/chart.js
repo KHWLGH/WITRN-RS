@@ -33,9 +33,24 @@ const UNITS = [' V', ' A', ' W', ' °C', ' V', ' V', ' V', ' V'];
 /** 各 series 挂靠的 scale：D+/D-/CC1/CC2 复用电压 scale（不新增轴）。 */
 const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
-const CHART_FONT =
-  "'Microsoft YaHei UI', 'Microsoft YaHei', 'SimHei', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif";
-const MONO_FONT = "'Noto Sans Mono', 'JetBrains Mono', 'Consolas', 'Monaco', monospace";
+const CHART_FONT_FALLBACK =
+  "'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
+const MONO_FONT_FALLBACK = "'Maple Mono NF CN', 'Cascadia Mono', 'Consolas', monospace";
+let CHART_FONT = CHART_FONT_FALLBACK;
+let MONO_FONT = MONO_FONT_FALLBACK;
+
+/**
+ * Canvas 字体不会自动解析 CSS 的 var()，因此从同一组 CSS 令牌读取字体栈，
+ * 让 uPlot 的坐标轴与应用界面保持一致。
+ */
+function syncChartFonts() {
+  if (typeof document === 'undefined') return;
+  const styles = getComputedStyle(document.documentElement);
+  const uiFont = styles.getPropertyValue('--font-ui').trim();
+  const monoFont = styles.getPropertyValue('--font-mono').trim();
+  if (uiFont) CHART_FONT = uiFont;
+  if (monoFont) MONO_FONT = monoFont;
+}
 
 /** X 轴刻度步长候选（秒）— 时间友好的取值（覆盖 0.1 秒到月级跨度）。 */
 const TIME_INCRS = [
@@ -658,6 +673,7 @@ export function initChart() {
   const host = document.getElementById('main-chart');
   if (!host) return;
 
+  syncChartFonts();
   syncChartSeries();
 
   splineBuilder = uPlot.paths?.spline ? uPlot.paths.spline() : null;
@@ -757,6 +773,16 @@ export function initChart() {
   onThemeChange(applyChartTheme);
 
   initNavigatorChart();
+
+  // 本地字体较大，首次 canvas 绘制可能发生在字体下载完成前；完成后重绘一次。
+  if (document.fonts?.load) {
+    Promise.all([document.fonts.load(`12px ${CHART_FONT}`), document.fonts.load(`12px ${MONO_FONT}`)])
+      .then(() => {
+        state.mainChart?.redraw();
+        state.navigatorChart?.redraw();
+      })
+      .catch(() => {});
+  }
 }
 
 /** 初始化导航器图表（功率全量缩略图，无轴无交互）。 */
