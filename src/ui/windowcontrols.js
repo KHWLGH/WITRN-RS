@@ -26,14 +26,31 @@ const RESIZE_DIRECTIONS = /** @type {const} */ ({
   SouthWest: 'sw-resize',
 });
 
-/** 初始化窗口控制。仅 Linux 需要自绘；其余平台直接返回。 */
+/** 初始化标题栏拖拽与窗口控制。窗口按钮仅 Linux 需要自绘。 */
 export function initWindowControls() {
+  const appWindow = window.__TAURI__.window.getCurrentWindow();
+
+  // decorum/无边框窗口下，显式调用 startDragging 比依赖 HTML 属性更稳定。
+  // 交互控件不参与拖拽，避免点击按钮或下拉框时同时移动窗口。
+  const titlebar = document.getElementById('titlebar');
+  if (titlebar) {
+    titlebar.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('button, select, input, textarea, a, .titlebar-connect, .titlebar-tabs, .titlebar-controls'))
+        return;
+      event.preventDefault();
+      void appWindow.startDragging().catch(() => {
+        /* 窗口销毁或平台不支持时忽略 */
+      });
+    });
+  }
+
   if (document.documentElement.getAttribute('data-os') !== 'linux') return;
 
   const container = document.getElementById('titlebar-controls');
   if (!container) return;
-
-  const appWindow = window.__TAURI__.window.getCurrentWindow();
 
   /**
    * @param {string} icon @param {string} label @param {() => void} onClick

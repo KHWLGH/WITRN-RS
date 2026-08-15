@@ -58,11 +58,6 @@
   .titlebar-connect .ribbon-select {
     min-width: 140px;
   }
-
-  /* 状态点 + title 仍在，仅隐藏"未连接/已连接"文字 */
-  #connection-text {
-    display: none;
-  }
 }
 
 /* ── W3：视口 < 900（极端 DPI / 浏览器安全网） ───────────────── */
@@ -128,7 +123,24 @@
 
   /* 读数栏最后一档收紧：600 窗高 + 温度卡时六张卡片仍需塞进 ≈483px */
   .realtime-card {
-    padding: 3px 10px;
+    padding: 4px 10px;
+  }
+
+  .realtime-label {
+    font-size: 13px;
+  }
+
+  .realtime-average,
+  .realtime-stats {
+    font-size: 12px;
+  }
+
+  .realtime-sub {
+    font-size: 13px;
+  }
+
+  .signal-cell {
+    font-size: 12px;
   }
 
   .realtime-stats {

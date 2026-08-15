@@ -22,7 +22,7 @@
       <!-- 标题栏 = Tab 条 + 拖拽区 + 全局快速连接 + 设置 + 窗口控制 -->
       <header class="titlebar" id="titlebar">
         <div class="titlebar-tabs" id="titlebar-tabs"><!-- ui/tabbar.js 渲染 --></div>
-        <div class="titlebar-drag" data-tauri-drag-region></div>
+        <div class="titlebar-drag" id="titlebar-drag"></div>
         <div class="titlebar-connect">
           <select id="device-select" class="ribbon-select device-dropdown" title="选择要连接的设备">
             <option value="">-- 点击刷新扫描设备 --</option>
@@ -36,10 +36,6 @@
           <button type="button" class="cmd-btn" id="btn-disconnect" title="断开连接" disabled>
             <i class="codicon codicon-debug-disconnect"></i>断开
           </button>
-          <span class="status-item" title="连接状态">
-            <span class="status-indicator" id="connection-status"></span>
-            <span id="connection-text">未连接</span>
-          </span>
         </div>
         <button type="button" class="tab tab-icon-only" id="btn-settings-tab" title="设置" aria-label="设置">
           <i class="codicon codicon-settings-gear"></i>
@@ -437,6 +433,10 @@
         <span class="status-item">
           <span class="status-label">设备:</span>
           <span id="device-name-text" class="device-name-status">--</span>
+        </span>
+        <span class="status-item status-connection" title="连接状态">
+          <span class="status-indicator" id="connection-status"></span>
+          <span id="connection-text">未连接</span>
         </span>
       </footer>
     </div>
