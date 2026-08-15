@@ -99,6 +99,7 @@
  * @property {number} vid
  * @property {number} pid
  * @property {string} serial_number
+ * @property {string|null} usb_port
  * @property {string} model_name
  * @property {number} interface_number
  * @property {number} usage_page

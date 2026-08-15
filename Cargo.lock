@@ -4931,6 +4931,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-store",
+ "windows-sys 0.61.2",
  "witrn-hid",
 ]
 

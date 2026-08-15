@@ -45,3 +45,25 @@ jobs:
 
       - name: Test Rust backend
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  backend-other-platforms:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            run_tests: true
+          - os: macos-latest
+            run_tests: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test Rust backend
+        if: matrix.run_tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Check Rust backend
+        if: ${{ !matrix.run_tests }}
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets

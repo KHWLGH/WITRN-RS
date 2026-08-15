@@ -1,4 +1,6 @@
-use hidapi::HidApi;
+mod usb_port;
+
+use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -54,6 +56,7 @@ pub struct DeviceInfo {
     pub vid: u16,
     pub pid: u16,
     pub serial_number: Option<String>,
+    pub usb_port: Option<String>,
     pub manufacturer: Option<String>,
     pub product: Option<String>,
     pub model_name: String,
@@ -76,11 +79,21 @@ pub struct DeviceIdentity {
 type PhysicalDeviceKey = (u16, u16, String);
 
 fn physical_device_key(device: &DeviceInfo) -> PhysicalDeviceKey {
-    (
-        device.vid,
-        device.pid,
-        device.serial_number.clone().unwrap_or_default(),
-    )
+    let discriminator = device
+        .serial_number
+        .as_deref()
+        .filter(|serial| !serial.is_empty())
+        .map(|serial| format!("serial:{serial}"))
+        .or_else(|| {
+            device
+                .usb_port
+                .as_deref()
+                .filter(|port| !port.is_empty())
+                .map(|port| format!("usb:{port}"))
+        })
+        .unwrap_or_default();
+
+    (device.vid, device.pid, discriminator)
 }
 
 fn prefer_vendor_defined_interfaces(mut devices: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
@@ -94,6 +107,89 @@ fn prefer_vendor_defined_interfaces(mut devices: Vec<DeviceInfo>) -> Vec<DeviceI
         !vendor_defined_groups.contains(&physical_device_key(device)) || device.usage_page >= 0xFF00
     });
     devices
+}
+
+fn model_name_for(vid: u16, pid: u16) -> String {
+    KNOWN_DEVICES
+        .iter()
+        .find(|device| device.vid == vid && device.pid == pid)
+        .map(|device| device.name.to_string())
+        .unwrap_or_else(|| format!("未知 WITRN 设备 ({vid:04X}:{pid:04X})"))
+}
+
+fn device_info_from_hid(api: &HidApi, device_info: &HidDeviceInfo) -> DeviceInfo {
+    let vid = device_info.vendor_id();
+    let pid = device_info.product_id();
+    let model_name = model_name_for(vid, pid);
+    let usb_port = usb_port::usb_port_for_device(api, device_info);
+    let display_name = usb_port::format_device_display_name(&model_name, usb_port.as_deref(), None);
+
+    DeviceInfo {
+        path: device_info.path().to_string_lossy().to_string(),
+        vid,
+        pid,
+        serial_number: device_info.serial_number().map(str::to_string),
+        usb_port,
+        manufacturer: device_info.manufacturer_string().map(str::to_string),
+        product: device_info.product_string().map(str::to_string),
+        model_name,
+        display_name,
+        interface_number: device_info.interface_number(),
+        usage_page: device_info.usage_page(),
+    }
+}
+
+fn finalize_device_infos(devices: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
+    let mut devices = prefer_vendor_defined_interfaces(devices);
+    let mut physical_counts = HashMap::new();
+    for device in &devices {
+        *physical_counts
+            .entry(physical_device_key(device))
+            .or_insert(0usize) += 1;
+    }
+
+    let mut physical_indices = HashMap::new();
+    for device in &mut devices {
+        let key = physical_device_key(device);
+        let interface_label = if physical_counts.get(&key).copied().unwrap_or(0) > 1 {
+            let index = physical_indices.entry(key).or_insert(0usize);
+            *index += 1;
+            Some(if device.interface_number >= 0 {
+                format!(
+                    "接口 {} / Usage 0x{:04X}",
+                    device.interface_number, device.usage_page
+                )
+            } else {
+                format!("接口 {} / Usage 0x{:04X}", index, device.usage_page)
+            })
+        } else {
+            None
+        };
+
+        device.display_name = usb_port::format_device_display_name(
+            &device.model_name,
+            device.usb_port.as_deref(),
+            interface_label.as_deref(),
+        );
+    }
+
+    devices
+}
+
+fn collect_supported_device_infos(api: &HidApi) -> Vec<DeviceInfo> {
+    finalize_device_infos(
+        api.device_list()
+            .filter(|device_info| {
+                let vid = device_info.vendor_id();
+                let pid = device_info.product_id();
+                vid == WITRN_VID
+                    || KNOWN_DEVICES
+                        .iter()
+                        .any(|device| device.vid == vid && device.pid == pid)
+            })
+            .map(|device_info| device_info_from_hid(api, device_info))
+            .collect(),
+    )
 }
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
@@ -152,86 +248,7 @@ impl Default for AppState {
 #[tauri::command(async)]
 fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
     let api = HidApi::new().map_err(|e| format!("无法初始化HID API: {}", e))?;
-    let mut devices = Vec::new();
-
-    for device_info in api.device_list() {
-        let vid = device_info.vendor_id();
-        let pid = device_info.product_id();
-
-        // 检查是否是已知的维简设备
-        let known = KNOWN_DEVICES.iter().find(|d| d.vid == vid && d.pid == pid);
-
-        // 固件变体会换 PID（C5 已实测到 0x5053 / 0x5064 两个），所以按厂商 VID 收全，
-        // 而不是只认硬编码型号表：界面上的 VID/PID 输入框是只读的，
-        // 没进枚举列表的设备就再没有别的连接入口。
-        if known.is_none() && vid != WITRN_VID {
-            continue;
-        }
-
-        let model_name = known
-            .map(|d| d.name.to_string())
-            .unwrap_or_else(|| format!("未知 WITRN 设备 ({:04X}:{:04X})", vid, pid));
-
-        let serial = device_info.serial_number().map(|s| s.to_string());
-        let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
-        let product = device_info.product_string().map(|s| s.to_string());
-
-        let path = device_info.path().to_string_lossy().to_string();
-
-        // 生成显示名称
-        let display_name = if let Some(ref sn) = serial {
-            if !sn.is_empty() {
-                format!("{} (SN: {})", model_name, sn)
-            } else {
-                model_name.clone()
-            }
-        } else {
-            model_name.clone()
-        };
-
-        devices.push(DeviceInfo {
-            path,
-            vid,
-            pid,
-            serial_number: serial,
-            manufacturer,
-            product,
-            model_name,
-            display_name,
-            interface_number: device_info.interface_number(),
-            usage_page: device_info.usage_page(),
-        });
-    }
-
-    // 同一物理设备可能同时暴露键盘接口和厂商自定义数据接口。
-    // 只在确实找到厂商自定义 Usage Page 时过滤通用接口；无法判断时保留全部供用户选择。
-    let mut devices = prefer_vendor_defined_interfaces(devices);
-
-    let mut physical_counts = HashMap::new();
-    for device in &devices {
-        *physical_counts
-            .entry(physical_device_key(device))
-            .or_insert(0usize) += 1;
-    }
-    let mut physical_indices = HashMap::new();
-    for device in &mut devices {
-        let key = physical_device_key(device);
-        if physical_counts.get(&key).copied().unwrap_or(0) > 1 {
-            let index = physical_indices.entry(key).or_insert(0usize);
-            *index += 1;
-            let suffix = if device.interface_number >= 0 {
-                format!(
-                    "接口 {} / Usage 0x{:04X}",
-                    device.interface_number, device.usage_page
-                )
-            } else {
-                format!("接口 {} / Usage 0x{:04X}", index, device.usage_page)
-            };
-            device.display_name = format!("{} [{}]", device.display_name, suffix);
-        }
-    }
-
-    Ok(devices)
+    Ok(collect_supported_device_infos(&api))
 }
 
 /// 获取当前连接的设备信息
@@ -304,45 +321,16 @@ fn connect_device_by_path(
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
 
-    // 查找设备信息
-    let device_info = api
-        .device_list()
-        .find(|d| d.path().to_string_lossy() == path)
+    let current_info = collect_supported_device_infos(&api)
+        .into_iter()
+        .find(|device| device.path == path)
+        .or_else(|| {
+            api.device_list()
+                .find(|device| device.path().to_string_lossy() == path)
+                .map(|device| device_info_from_hid(&api, device))
+        })
         .ok_or("找不到指定设备")?;
-
-    let vid = device_info.vendor_id();
-    let pid = device_info.product_id();
-    let serial = device_info.serial_number().map(|s| s.to_string());
-    let manufacturer = device_info.manufacturer_string().map(|s| s.to_string());
-    let product = device_info.product_string().map(|s| s.to_string());
-
-    let known = KNOWN_DEVICES.iter().find(|d| d.vid == vid && d.pid == pid);
-    let model_name = known
-        .map(|d| d.name.to_string())
-        .unwrap_or_else(|| format!("未知设备 ({:04X}:{:04X})", vid, pid));
-
-    let display_name = if let Some(ref sn) = serial {
-        if !sn.is_empty() {
-            format!("{} (SN: {})", model_name, sn)
-        } else {
-            model_name.clone()
-        }
-    } else {
-        model_name.clone()
-    };
-
-    let current_info = DeviceInfo {
-        path: path.clone(),
-        vid,
-        pid,
-        serial_number: serial,
-        manufacturer,
-        product,
-        model_name,
-        display_name: display_name.clone(),
-        interface_number: device_info.interface_number(),
-        usage_page: device_info.usage_page(),
-    };
+    let display_name = current_info.display_name.clone();
 
     // 先停止并等待上一代读取线程，避免旧线程看到新连接重新置 true 后复活。
     let mut task_slot = state
@@ -698,10 +686,11 @@ mod tests {
             vid: 0x0716,
             pid: 0x5060,
             serial_number: Some("test-device".to_string()),
+            usb_port: Some("4-4".to_string()),
             manufacturer: Some("WITRN".to_string()),
             product: Some("K2".to_string()),
             model_name: "WITRN K2".to_string(),
-            display_name: "WITRN K2 (SN: test-device)".to_string(),
+            display_name: "WITRN K2 (USB 4-4)".to_string(),
             interface_number,
             usage_page,
         }
@@ -760,5 +749,36 @@ mod tests {
         let filtered = prefer_vendor_defined_interfaces(devices);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].path, "data");
+    }
+
+    #[test]
+    fn uses_usb_port_to_group_devices_without_serial_numbers() {
+        let mut keyboard = device_info("keyboard", 0, 0x0001);
+        keyboard.serial_number = None;
+        keyboard.usb_port = Some("4-4".to_string());
+
+        let mut data = device_info("data", 1, 0xFF00);
+        data.serial_number = None;
+        data.usb_port = Some("4-5".to_string());
+
+        let filtered = prefer_vendor_defined_interfaces(vec![keyboard, data]);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn keeps_usb_name_when_adding_multiple_interface_suffixes() {
+        let devices = finalize_device_infos(vec![
+            device_info("data-0", 0, 0xFF00),
+            device_info("data-1", 1, 0xFF01),
+        ]);
+
+        assert_eq!(
+            devices[0].display_name,
+            "WITRN K2 (USB 4-4) [接口 0 / Usage 0xFF00]"
+        );
+        assert_eq!(
+            devices[1].display_name,
+            "WITRN K2 (USB 4-4) [接口 1 / Usage 0xFF01]"
+        );
     }
 }
