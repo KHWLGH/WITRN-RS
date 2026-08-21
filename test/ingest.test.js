@@ -17,7 +17,7 @@ globalThis.requestAnimationFrame = (cb) => {
   return 0;
 };
 
-const { state } = await import('../src/state.js');
+const { emptyChartColumns, setChartColumns, state } = await import('../src/state.js');
 const { addDataPoint } = await import('../src/data.js');
 
 function resetIngestState() {
@@ -26,18 +26,7 @@ function resetIngestState() {
   state.recordingStartTime = Date.now();
   state.recordingBaseSeconds = 0;
   state.lastRecordingStartTime = Date.now();
-  state.chartData = {
-    timestamps: [],
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-    dp: [],
-    dn: [],
-    cc1: [],
-    cc2: [],
-  };
-  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [], dp: [], dn: [], cc1: [], cc2: [] };
+  setChartColumns(emptyChartColumns());
   state.stats = {
     voltage: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
     current: { min: Infinity, max: -Infinity, sum: 0, count: 0 },

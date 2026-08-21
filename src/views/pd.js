@@ -1,22 +1,26 @@
 // @ts-check
 /**
- * @file PD 协议分析视图 — pd-data 事件的接收、环形缓冲与批量渲染。
+ * @file PD 协议分析视图 — pd-data 接收、可增长日志、虚拟列表。
  *
  * pd-data 在后端不节流（每个 0xFE 报文即时发射），因此：
  * - 监听在 app.js 启动时就注册（插拔瞬间的握手报文最有价值，不等用户打开 Tab）；
- * - 环形缓冲封顶 2000 条，溢出覆盖最旧并计数；
- * - DOM 追加走 rAF 批处理 + DocumentFragment；视图隐藏时完全跳过 DOM 工作，
- *   重新显示时整体重建（syncPdView）。
- * - 布局为左列表 + 右详情：点击行选中，字段树只在右栏渲染一份（选中时构建）。
+ * - 日志可增长，不丢最旧；渲染只挂视口附近的行；
+ * - 视图隐藏时完全跳过 DOM 工作，重新显示时重建过滤索引并同步窗口。
+ * - 布局为左列表 + 右详情：点击行选中，字段树只在右栏渲染一份。
  */
 
 import {
   buildPdCaptureFile,
   childrenOf,
-  createRing,
+  filterIndices,
+  isDivider,
   matchesFilter,
+  nextMessageIndex,
+  normalizePdPayload,
+  PD_ROW_HEIGHT,
+  PD_SOFT_CAP,
   parsePdCaptureFile,
-  summarize,
+  visibleRange,
 } from '../pd-model.js';
 import { debouncedSaveSettings } from '../settings.js';
 import { state } from '../state.js';
@@ -28,22 +32,30 @@ import { toast } from '../ui/toast.js';
 /** @typedef {import('../pd-model.js').PdEntry} PdEntry */
 /** @typedef {import('../pd-model.js').PdDivider} PdDivider */
 
-const RING_CAP = 2000;
-
-/** @type {ReturnType<typeof createRing<PdEntry|PdDivider>>} */
-const ring = createRing(RING_CAP);
+/** @type {(PdEntry|PdDivider)[]} */
+const log = [];
+/** 过滤后的日志下标。 */
+/** @type {number[]} */
+let filtered = [];
 
 let paused = false;
 let bufferedWhilePaused = 0;
-/** @type {(PdEntry|PdDivider)[]} */
-let pendingEntries = [];
 let renderScheduled = false;
+let followTailPending = false;
 let initialized = false;
-/** 右栏详情当前展示的条目（按对象引用与环形缓冲比对，重建后据此恢复选中行）。 */
-/** @type {PdEntry|null} */
-let selectedEntry = null;
+let softCapWarned = false;
+
+/** 当前选中的日志下标。 */
+/** @type {number|null} */
+let selectedIndex = null;
+
+/** @type {Map<number, PdMeta>} */
+const metaCache = new Map();
+
 /** @type {HTMLElement|null} */
-let selectedRow = null;
+let listSpacer = null;
+/** @type {HTMLElement|null} */
+let listWindow = null;
 
 // ─── 摘取 DOM ────────────────────────────────────────────────────────────────
 
@@ -85,30 +97,51 @@ function viewHidden() {
   return els.view()?.hidden ?? true;
 }
 
+/** @param {string} cmd @param {Record<string, unknown>} [args] */
+function invokeCmd(cmd, args) {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (typeof invoke !== 'function') return Promise.resolve(null);
+  return invoke(cmd, args);
+}
+
+function pdCaptureEnabled() {
+  return !followRecordingEnabled() || state.isRecording;
+}
+
+function syncBackendCaptureFlag() {
+  void invokeCmd('set_pd_capture_enabled', { enabled: pdCaptureEnabled() });
+}
+
 // ─── 摄入 ────────────────────────────────────────────────────────────────────
 
 /**
  * app.js 的 pd-data 监听器入口。
- * @param {PdMeta} meta
+ * @param {unknown} payload
  */
-export function ingestPdData(meta) {
+export function ingestPdData(payload) {
   if (followRecordingEnabled() && !state.isRecording) return;
-  /** @type {PdEntry} */
-  const entry = { t: Date.now(), ...summarize(meta), meta };
-  ring.push(entry);
+  const entry = normalizePdPayload(payload);
+  if (!entry) return;
+  log.push(entry);
+  if (log.length === PD_SOFT_CAP && !softCapWarned) {
+    softCapWarned = true;
+    toast.warning(`PD 报文已达 ${PD_SOFT_CAP} 条，继续存储可能占用较多内存`);
+  }
   if (paused) {
     bufferedWhilePaused++;
     updateCounter();
     return;
   }
-  if (viewHidden()) return; // 重新显示时 syncPdView 整体重建
-  pendingEntries.push(entry);
-  scheduleRender();
+  if (viewHidden()) return;
+  if (matchesFilter(entry, currentFilterText(), currentHideGoodCrc())) {
+    filtered.push(log.length - 1);
+  }
+  scheduleWindowSync(true);
 }
 
-/** 当前 PD 环形缓冲中的条目数（用于诊断与测试）。 */
+/** 当前 PD 日志中的条目数（用于诊断与测试）。 */
 export function getPdBufferLength() {
-  return ring.length;
+  return log.length;
 }
 
 /**
@@ -124,8 +157,6 @@ export function getPdCaptureState() {
 
 /**
  * 把当前状态同步到 PD 命令栏：采集按钮外观 + 计数器。
- * 跟随记录开启时采集按钮就是主记录开关，未连接设备则禁用（懒初始化前不接管 disabled）。
- * 两侧清空按钮的联动提示由 app.js 统一刷新（那是跨视图的事）。
  */
 function syncPdUi() {
   const follow = followRecordingEnabled();
@@ -137,152 +168,219 @@ function syncPdUi() {
   const button = els.pauseBtn();
   if (button && initialized) button.disabled = follow && !state.isConnected;
   updateCounter();
+  syncBackendCaptureFlag();
 }
 
-// 记录 / 连接 / 跟随设置任一变化时同步采集按钮、联动提示与计数器。
-// data.js、device.js、settings.js 通过 document 自定义事件广播，避免向既有的
-// pd.js → settings.js → data.js import 链再添加反向边。
 document.addEventListener?.('witrn:monitor-changed', () => {
   syncPdUi();
 });
 
 /** 设备断开时插入分隔行，区分两次会话。 */
 export function markPdDisconnect() {
-  if (ring.length === 0) return;
+  if (log.length === 0) return;
+  const last = log[log.length - 1];
+  if (last && isDivider(last)) return;
   /** @type {PdDivider} */
   const divider = { t: Date.now(), divider: true };
-  ring.push(divider);
+  log.push(divider);
   if (!paused && !viewHidden()) {
-    pendingEntries.push(divider);
-    scheduleRender();
+    if (matchesFilter(divider, currentFilterText(), currentHideGoodCrc())) {
+      filtered.push(log.length - 1);
+    }
+    scheduleWindowSync(true);
   }
 }
 
-// ─── 渲染 ────────────────────────────────────────────────────────────────────
+// ─── 虚拟列表 ────────────────────────────────────────────────────────────────
 
-function scheduleRender() {
+function ensureListStructure() {
+  const list = els.list();
+  if (!list) return null;
+  if (!listSpacer || !listWindow || listSpacer.parentElement !== list) {
+    list.replaceChildren();
+    const spacer = document.createElement('div');
+    spacer.className = 'pd-list-spacer';
+    const win = document.createElement('div');
+    win.className = 'pd-list-window';
+    spacer.appendChild(win);
+    list.appendChild(spacer);
+    listSpacer = spacer;
+    listWindow = win;
+  }
+  return list;
+}
+
+/** @param {boolean} [followTail=false] */
+function scheduleWindowSync(followTail = false) {
+  if (followTail) followTailPending = true;
   if (renderScheduled) return;
   renderScheduled = true;
   requestAnimationFrame(() => {
     renderScheduled = false;
-    flushPending();
+    const follow = followTailPending;
+    followTailPending = false;
+    syncWindow(follow);
   });
 }
 
-function flushPending() {
-  const list = els.list();
-  if (!list) return;
-  const entries = pendingEntries;
-  pendingEntries = [];
-  if (entries.length === 0) {
+/**
+ * @param {boolean} [followTail]
+ */
+function syncWindow(followTail = false) {
+  const list = ensureListStructure();
+  if (!list || !listSpacer || !listWindow) {
     updateCounter();
     return;
   }
 
-  const filterText = currentFilterText();
-  const hideGoodCrc = currentHideGoodCrc();
-  const fragment = document.createDocumentFragment();
-  for (const entry of entries) {
-    if (matchesFilter(entry, filterText, hideGoodCrc)) fragment.appendChild(buildRow(entry));
+  if (followTail && autoscrollEnabled()) {
+    list.scrollTop = filtered.length * PD_ROW_HEIGHT;
   }
 
-  const follow = autoscrollEnabled();
-  // appendChild 会把节点从 fragment 搬空，计数必须在追加前取
-  const added = fragment.childNodes.length;
-  if (added > 0) {
-    list.appendChild(fragment);
-    while (list.children.length > RING_CAP) {
-      const first = list.children[0];
-      if (first === selectedRow) clearSelection();
-      first.remove();
-    }
+  const { start, end } = visibleRange(filtered.length, list.scrollTop, list.clientHeight);
+  listSpacer.style.height = `${filtered.length * PD_ROW_HEIGHT}px`;
+  listWindow.style.transform = `translateY(${start * PD_ROW_HEIGHT}px)`;
+
+  const fragment = document.createDocumentFragment();
+  for (let i = start; i < end; i++) {
+    const logIndex = filtered[i];
+    const entry = log[logIndex];
+    if (!entry) continue;
+    fragment.appendChild(buildRow(entry, logIndex));
   }
-  // 先解除 hidden 再滚动：列表 display:none 时 scrollHeight 恒为 0，赋值会被吞掉
+  listWindow.replaceChildren(fragment);
+
   updateEmptyState();
-  if (follow && added > 0) list.scrollTop = list.scrollHeight;
   updateCounter();
 }
 
-/** 从环形缓冲整体重建列表（过滤变化 / 视图重新显示 / 恢复暂停）。 */
-function rebuildAll() {
-  const list = els.list();
-  if (!list) return;
-  pendingEntries = [];
-  const filterText = currentFilterText();
-  const hideGoodCrc = currentHideGoodCrc();
-  const fragment = document.createDocumentFragment();
-  /** @type {HTMLElement|null} */
-  let nextSelectedRow = null;
-  for (const entry of ring.toArray()) {
-    if (!matchesFilter(entry, filterText, hideGoodCrc)) continue;
-    const row = buildRow(entry);
-    if (selectedEntry !== null && entry === selectedEntry) nextSelectedRow = row;
-    fragment.appendChild(row);
+function rebuildFilterAndWindow() {
+  filtered = filterIndices(log, currentFilterText(), currentHideGoodCrc());
+  if (selectedIndex !== null) {
+    const still = filtered.includes(selectedIndex);
+    if (!still) clearSelection();
   }
-  list.replaceChildren(fragment);
-  // 选中条目仍在列表中则恢复高亮（右栏详情内容不变，无需重渲染）；
-  // 已被裁剪或过滤掉则连同右栏一起清空。
-  if (nextSelectedRow) {
-    selectedRow = nextSelectedRow;
-    nextSelectedRow.classList.add('selected');
-  } else if (selectedEntry !== null) {
-    clearSelection();
-  }
-  // 同 flushPending：先解除 hidden 再滚动
-  updateEmptyState();
-  if (autoscrollEnabled()) list.scrollTop = list.scrollHeight;
-  updateCounter();
+  syncWindow(autoscrollEnabled());
 }
 
 /**
  * @param {PdEntry|PdDivider} entry
+ * @param {number} logIndex
  * @returns {HTMLElement}
  */
-function buildRow(entry) {
-  if ('divider' in entry) {
+function buildRow(entry, logIndex) {
+  if (isDivider(entry)) {
     const div = document.createElement('div');
     div.className = 'pd-divider-row';
     div.textContent = `── ${formatTime(entry.t)} 设备断开 ──`;
     return div;
   }
 
+  const msg = /** @type {PdEntry} */ (entry);
   const row = document.createElement('div');
   row.className = 'pd-row';
   row.tabIndex = 0;
+  row.dataset.index = String(logIndex);
+  if (selectedIndex === logIndex) row.classList.add('selected');
 
-  const roleClass = entry.role === 'SRC' ? 'pd-role-src' : entry.role === 'SNK' ? 'pd-role-snk' : 'pd-role-cbl';
+  const roleClass = msg.role === 'SRC' ? 'pd-role-src' : msg.role === 'SNK' ? 'pd-role-snk' : 'pd-role-cbl';
   row.innerHTML = [
-    `<span class="pd-time">${formatTime(entry.t)}</span>`,
-    `<span class="pd-badge pd-sop">${escapeHtml(entry.sop)}</span>`,
-    entry.role ? `<span class="pd-badge ${roleClass}">${entry.role}</span>` : '<span class="pd-badge-gap"></span>',
-    `<span class="pd-type">${escapeHtml(entry.type)}</span>`,
-    `<span class="pd-summary">${escapeHtml(entry.summary)}</span>`,
+    `<span class="pd-time">${formatTime(msg.t)}</span>`,
+    `<span class="pd-badge pd-sop">${escapeHtml(msg.sop)}</span>`,
+    msg.role ? `<span class="pd-badge ${roleClass}">${msg.role}</span>` : '<span class="pd-badge-gap"></span>',
+    `<span class="pd-type">${escapeHtml(msg.type)}</span>`,
+    `<span class="pd-summary">${escapeHtml(msg.summary)}</span>`,
   ].join('');
 
-  row.addEventListener('click', () => selectRow(row, entry));
+  row.addEventListener('click', () => void selectIndex(logIndex, row));
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      selectRow(row, entry);
+      void selectIndex(logIndex, row);
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      const forward = e.key === 'ArrowDown';
-      let target = forward ? row.nextElementSibling : row.previousElementSibling;
-      // 跳过设备断开分隔行
-      while (target && !target.classList.contains('pd-row')) {
-        target = forward ? target.nextElementSibling : target.previousElementSibling;
-      }
-      if (target instanceof HTMLElement) {
-        target.focus();
-        target.click();
-      }
+      moveSelection(e.key === 'ArrowDown' ? 1 : -1);
     }
   });
   return row;
 }
 
+/** @param {1|-1} dir */
+function moveSelection(dir) {
+  const from = selectedIndex === null ? (dir > 0 ? -1 : filtered.length) : filtered.indexOf(selectedIndex);
+  const next = nextMessageIndex(log, filtered, from, dir);
+  if (next < 0) return;
+  const pos = filtered.indexOf(next);
+  const list = els.list();
+  if (list && pos >= 0) {
+    const rowTop = pos * PD_ROW_HEIGHT;
+    const rowBot = rowTop + PD_ROW_HEIGHT;
+    if (rowTop < list.scrollTop) list.scrollTop = rowTop;
+    else if (rowBot > list.scrollTop + list.clientHeight) list.scrollTop = rowBot - list.clientHeight;
+  }
+  syncWindow();
+  const row = listWindow?.querySelector(`[data-index="${next}"]`);
+  void selectIndex(next, row instanceof HTMLElement ? row : null);
+  if (row instanceof HTMLElement) row.focus();
+}
+
 /**
- * 递归构建字段树（首次展开时才调用）。
+ * @param {number} logIndex
+ * @param {HTMLElement|null} [row]
+ */
+async function selectIndex(logIndex, row = null) {
+  const entry = log[logIndex];
+  if (!entry || isDivider(entry)) return;
+  if (selectedIndex === logIndex && row?.classList.contains('selected')) return;
+  selectedIndex = logIndex;
+  if (listWindow) {
+    for (const el of listWindow.querySelectorAll('.pd-row.selected')) el.classList.remove('selected');
+  }
+  row?.classList.add('selected');
+  await renderDetail(/** @type {PdEntry} */ (entry), logIndex);
+}
+
+/**
+ * @param {PdEntry} entry
+ * @param {number} logIndex
+ */
+async function renderDetail(entry, logIndex) {
+  let meta = entry.meta ?? metaCache.get(logIndex) ?? null;
+  if (!meta && Number.isFinite(entry.seq)) {
+    try {
+      const decoded = await invokeCmd('decode_pd_at', { index: entry.seq });
+      if (decoded && typeof decoded === 'object') meta = /** @type {PdMeta} */ (decoded);
+    } catch (e) {
+      console.error(e);
+      toast.error(`解码失败: ${e}`);
+      return;
+    }
+  }
+  if (selectedIndex !== logIndex) return;
+  if (!meta) {
+    toast.warning('这条报文没有可显示的解码树');
+    return;
+  }
+  cacheMeta(logIndex, meta);
+  const body = els.detailBody();
+  if (!body) return;
+  body.replaceChildren(buildTree(meta));
+  body.hidden = false;
+  const empty = els.detailEmpty();
+  if (empty) empty.hidden = true;
+}
+
+/** @param {number} index @param {PdMeta} meta */
+function cacheMeta(index, meta) {
+  metaCache.set(index, meta);
+  if (metaCache.size > 8) {
+    const first = metaCache.keys().next().value;
+    if (first !== undefined) metaCache.delete(first);
+  }
+}
+
+/**
+ * 递归构建字段树（选中时才调用）。
  * @param {PdMeta} meta
  * @returns {HTMLElement}
  */
@@ -311,36 +409,11 @@ function buildTree(meta) {
   return node;
 }
 
-// ─── 选中与右栏详情 ──────────────────────────────────────────────────────────
-
-/**
- * 选中一行并在右栏渲染其字段树。
- * @param {HTMLElement} row @param {PdEntry} entry
- */
-function selectRow(row, entry) {
-  if (selectedRow === row) return;
-  selectedRow?.classList.remove('selected');
-  selectedRow = row;
-  selectedEntry = entry;
-  row.classList.add('selected');
-  renderDetail(entry);
-}
-
-/** @param {PdEntry} entry */
-function renderDetail(entry) {
-  const body = els.detailBody();
-  if (!body) return;
-  body.replaceChildren(buildTree(entry.meta));
-  body.hidden = false;
-  const empty = els.detailEmpty();
-  if (empty) empty.hidden = true;
-}
-
-/** 清除选中（选中行被裁剪 / 清空 / 被过滤掉时），右栏回到空态。 */
 function clearSelection() {
-  selectedRow?.classList.remove('selected');
-  selectedRow = null;
-  selectedEntry = null;
+  selectedIndex = null;
+  if (listWindow) {
+    for (const el of listWindow.querySelectorAll('.pd-row.selected')) el.classList.remove('selected');
+  }
   const body = els.detailBody();
   if (body) {
     body.hidden = true;
@@ -357,23 +430,24 @@ function clearSelection() {
  * 两侧各自只调用对方的无级联版本，因此不会互相递归。
  */
 export function clearPdEntries() {
-  ring.clear();
+  log.length = 0;
+  filtered = [];
   bufferedWhilePaused = 0;
+  softCapWarned = false;
+  metaCache.clear();
   clearSelection();
-  rebuildAll();
+  void invokeCmd('pd_log_clear');
+  rebuildFilterAndWindow();
 }
 
 /**
  * 「清空」动作：确认 → 清空 → 跟随记录开启时级联清空监控数据。
- * 与监控侧的「一键重置」同规格（都走 ui/dialog.js 的 ask）。
  */
 export async function requestPdClear() {
   const follow = followRecordingEnabled();
-  // 两侧都没东西可清时不打扰用户
-  if (ring.length === 0 && !follow) return;
+  if (log.length === 0 && !follow) return;
 
-  // 缓冲为空但开着跟随时，真正的动作在监控那一侧，文案要如实说清楚
-  const head = ring.length > 0 ? `确定要清空已捕获的 ${ring.length} 条报文吗？` : 'PD 报文列表已是空的，确定要继续吗？';
+  const head = log.length > 0 ? `确定要清空已捕获的 ${log.length} 条报文吗？` : 'PD 报文列表已是空的，确定要继续吗？';
   const linked = follow ? '\n跟随记录已开启，监控图表、统计与累计能量也会一并重置。' : '';
 
   const confirmed = await ask(head + linked, { title: '确认清空', kind: follow ? 'error' : 'warning' });
@@ -385,13 +459,8 @@ export async function requestPdClear() {
 
 // ─── 导入 / 导出 ─────────────────────────────────────────────────────────────
 
-// Tauri 对话框在运行时授予所选路径的 fs scope（见 csv.js 顶部说明）。
-// dialog/fs 必须在处理器内懒解构：本模块被 node --test 导入，
-// 测试 stub 的 __TAURI__ 只有 core.invoke，顶层解构会让整个测试套件崩溃。
-
-/** 导出当前缓冲的全部报文为 JSON 捕获文件。 */
 async function exportPdCapture() {
-  if (ring.length === 0) {
+  if (log.length === 0) {
     toast.warning('没有可导出的报文');
     return;
   }
@@ -403,22 +472,20 @@ async function exportPdCapture() {
       defaultPath: `witrn_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
     });
     if (!path) return;
-    // 紧凑序列化：2000 条完整解码树可达数 MB，缩进会再翻倍
-    await writeTextFile(path, JSON.stringify(buildPdCaptureFile(ring.toArray())));
-    toast.success(`已导出 ${ring.length} 条报文`);
+    await writeTextFile(path, JSON.stringify(buildPdCaptureFile(log)));
+    toast.success(`已导出 ${log.length} 条报文`);
   } catch (e) {
     console.error(e);
     toast.error(`导出失败: ${e}`);
   }
 }
 
-/** 从 JSON 捕获文件导入报文（替换当前缓冲）。 */
 async function importPdCapture() {
   const { open } = window.__TAURI__.dialog;
   const { readTextFile } = window.__TAURI__.fs;
   try {
-    if (ring.length > 0) {
-      const confirmed = await ask(`导入将替换当前已捕获的 ${ring.length} 条报文，确定继续吗？`, {
+    if (log.length > 0) {
+      const confirmed = await ask(`导入将替换当前已捕获的 ${log.length} 条报文，确定继续吗？`, {
         title: '确认导入',
         kind: 'warning',
       });
@@ -434,13 +501,40 @@ async function importPdCapture() {
       return;
     }
 
-    ring.clear();
-    for (const entry of result.entries) ring.push(entry);
+    log.length = 0;
+    filtered = [];
     bufferedWhilePaused = 0;
+    softCapWarned = false;
+    metaCache.clear();
     clearSelection();
-    rebuildAll();
-    const droppedNote = ring.dropped > 0 ? `（超出缓冲上限，丢弃最早 ${ring.dropped} 条）` : '';
-    toast.success(`成功导入 ${ring.length} 条报文${droppedNote}`);
+
+    const needBackend = result.entries.some((e) => {
+      if (isDivider(e)) return false;
+      return (e.bytes?.length ?? 0) > 0;
+    });
+    if (needBackend) {
+      const loaded = await invokeCmd('pd_log_replace', {
+        entries: result.entries.map((e) => {
+          if (isDivider(e)) return { t: e.t, divider: true, bytes: [] };
+          return { t: e.t, divider: false, bytes: e.bytes ?? [] };
+        }),
+      });
+      if (Array.isArray(loaded) && loaded.length === result.entries.length) {
+        for (const ev of loaded) {
+          const entry = normalizePdPayload(ev);
+          if (entry) log.push(entry);
+        }
+      } else {
+        void invokeCmd('pd_log_clear');
+        for (const entry of result.entries) log.push(entry);
+      }
+    } else {
+      void invokeCmd('pd_log_clear');
+      for (const entry of result.entries) log.push(entry);
+    }
+
+    rebuildFilterAndWindow();
+    toast.success(`成功导入 ${log.length} 条报文`);
   } catch (e) {
     console.error(e);
     toast.error(`导入失败: ${/** @type {Error} */ (e).message}`);
@@ -452,7 +546,7 @@ async function importPdCapture() {
 function updateEmptyState() {
   const list = els.list();
   const empty = els.empty();
-  const hasRows = (list?.children.length ?? 0) > 0;
+  const hasRows = filtered.length > 0;
   if (list) list.hidden = !hasRows;
   if (empty) empty.hidden = hasRows;
 }
@@ -460,8 +554,7 @@ function updateEmptyState() {
 function updateCounter() {
   const counter = els.counter();
   if (!counter) return;
-  const parts = [`${ring.length} 条`];
-  if (ring.dropped > 0) parts.push(`丢弃 ${ring.dropped}`);
+  const parts = [`${log.length} 条`];
   if (paused && bufferedWhilePaused > 0) parts.push(`已缓冲 ${bufferedWhilePaused}`);
   const capture = getPdCaptureState();
   if (!capture.paused && capture.followSuspended) parts.push('跟随记录等待中');
@@ -487,13 +580,20 @@ export function initPdView() {
   if (initialized) return;
   initialized = true;
 
+  const list = els.list();
+  if (list) {
+    ensureListStructure();
+    list.addEventListener('scroll', () => scheduleWindowSync(false), { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => scheduleWindowSync(false)).observe(list);
+    }
+  }
+
   const pauseBtn = els.pauseBtn();
   const clearBtn = els.clearBtn();
   if (pauseBtn) {
     pauseBtn.disabled = false;
     pauseBtn.addEventListener('click', () => {
-      // 跟随记录开启时这颗按钮就是主记录开关：采集被记录状态唯一决定，
-      // 不再叠加本地 paused，避免出现两个语义相同却互相覆盖的暂停位。
       if (followRecordingEnabled()) {
         if (!state.isRecording && !state.isConnected) {
           toast.warning('请先连接设备');
@@ -506,7 +606,7 @@ export function initPdView() {
       paused = !paused;
       if (!paused) {
         bufferedWhilePaused = 0;
-        rebuildAll();
+        rebuildFilterAndWindow();
       }
       syncPdUi();
     });
@@ -533,39 +633,36 @@ export function initPdView() {
     if (filterTimer) clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
       filterTimer = null;
-      rebuildAll();
+      rebuildFilterAndWindow();
     }, 150);
   });
-  els.hideGoodCrc()?.addEventListener('change', () => rebuildAll());
+  els.hideGoodCrc()?.addEventListener('change', () => rebuildFilterAndWindow());
   const followRecording = els.followRecording();
   if (followRecording) {
     followRecording.checked = state.settings.pdFollowRecording;
     followRecording.addEventListener('change', () => {
       state.settings.pdFollowRecording = followRecording.checked;
-      // 开启跟随后采集只由记录状态决定，清掉可能残留的本地暂停，
-      // 免得留下一个界面上看不出来的隐藏状态
       if (followRecording.checked && paused) {
         paused = false;
         bufferedWhilePaused = 0;
-        rebuildAll();
+        rebuildFilterAndWindow();
       }
       debouncedSaveSettings();
-      // 广播而非直接同步：PD 自己的命令栏与监控侧记录按钮的提示语都跟着这个开关变，
-      // 由各自的监听器去刷新（见本文件的 witrn:monitor-changed 监听与 app.js）
       document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
     });
   }
-  // 打开自动滚动时立即跳到底部
   els.autoscroll()?.addEventListener('change', (e) => {
-    const list = els.list();
-    if (/** @type {HTMLInputElement} */ (e.target).checked && list) list.scrollTop = list.scrollHeight;
+    const listEl = els.list();
+    if (/** @type {HTMLInputElement} */ (e.target).checked && listEl) {
+      listEl.scrollTop = filtered.length * PD_ROW_HEIGHT;
+      scheduleWindowSync(false);
+    }
   });
 
-  // 懒初始化前按钮不可交互，此处补齐当前状态（跟随挂起 / 手动暂停可能早于首次打开发生）
   syncPdUi();
 }
 
 /** 每次切到 PD 视图：补齐隐藏期间收到的报文。 */
 export function syncPdView() {
-  rebuildAll();
+  rebuildFilterAndWindow();
 }

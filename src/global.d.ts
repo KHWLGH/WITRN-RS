@@ -30,12 +30,19 @@ declare namespace TauriAPI {
   interface WindowAPI {
     getCurrentWindow(): any;
   }
+  interface WebviewHandle {
+    setZoom(scaleFactor: number): Promise<void>;
+  }
+  interface WebviewAPI {
+    getCurrentWebview(): WebviewHandle;
+  }
   interface Tauri {
     core: Core;
     event: Event;
     dialog: Dialog;
     fs: Fs;
     window: WindowAPI;
+    webview: WebviewAPI;
   }
 }
 

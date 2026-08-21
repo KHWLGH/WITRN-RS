@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRing, findChild, matchesFilter, summarize } from '../src/pd-model.js';
+import { filterIndices, findChild, matchesFilter, nextMessageIndex, summarize, visibleRange } from '../src/pd-model.js';
 
 /** 构造一个叶子节点。 */
 function leaf(field, value, raw = '0', bitLoc = [0, 0]) {
@@ -81,15 +81,33 @@ test('matchesFilter hides GoodCRC and filters by type substring', () => {
   assert.equal(matchesFilter({ t: 0, divider: true }, 'request', true), true);
 });
 
-test('ring buffer wraps around and counts drops', () => {
-  const ring = createRing(3);
-  for (let i = 1; i <= 5; i++) ring.push(i);
-  assert.equal(ring.length, 3);
-  assert.equal(ring.dropped, 2);
-  assert.deepEqual(ring.toArray(), [3, 4, 5]);
-  ring.clear();
-  assert.equal(ring.length, 0);
-  assert.equal(ring.dropped, 0);
-  ring.push(9);
-  assert.deepEqual(ring.toArray(), [9]);
+test('filterIndices keeps dividers and hides GoodCRC', () => {
+  const cap = { t: 0, ...summarize(sourceCapabilities()), meta: sourceCapabilities() };
+  const crc = { t: 0, ...summarize(goodCrc()), meta: goodCrc() };
+  const div = { t: 1, divider: true };
+  const entries = [cap, crc, div];
+  assert.deepEqual(filterIndices(entries, '', true), [0, 2]);
+  assert.deepEqual(filterIndices(entries, 'request', true), [2]);
+  assert.deepEqual(filterIndices(entries, '', false), [0, 1, 2]);
+});
+
+test('visibleRange only covers the viewport plus overscan', () => {
+  const { start, end } = visibleRange(10_000, 240, 120, 24, 2);
+  assert.equal(start, 8);
+  assert.equal(end, 17);
+  assert.deepEqual(visibleRange(0, 0, 100), { start: 0, end: 0 });
+});
+
+test('nextMessageIndex skips dividers', () => {
+  const entries = [
+    { t: 0, divider: true },
+    { t: 1, sop: 'SOP', type: 'A', role: '', summary: '' },
+    { t: 2, divider: true },
+    { t: 3, sop: 'SOP', type: 'B', role: '', summary: '' },
+  ];
+  const indices = [0, 1, 2, 3];
+  assert.equal(nextMessageIndex(entries, indices, 0, 1), 1);
+  assert.equal(nextMessageIndex(entries, indices, 1, 1), 3);
+  assert.equal(nextMessageIndex(entries, indices, 3, 1), -1);
+  assert.equal(nextMessageIndex(entries, indices, 3, -1), 1);
 });

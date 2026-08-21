@@ -1,3 +1,4 @@
+mod pd_capture;
 mod usb_port;
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
@@ -12,6 +13,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use witrn_hid::{decode_general_sample, decode_pd_report, Parser, ReportKind, WitrnDev};
+
+use pd_capture::{now_ms, PdEvent, PdLoadEntry, PdLog};
 
 /// 已知的维简设备型号
 #[derive(Clone)]
@@ -231,6 +234,8 @@ struct AppState {
     sample_rate: Arc<Mutex<u64>>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     temp_task: Mutex<Option<BackgroundTask>>,
+    pd_log: Arc<Mutex<PdLog>>,
+    pd_capture_enabled: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -240,6 +245,9 @@ impl Default for AppState {
             sample_rate: Arc::new(Mutex::new(250)),
             current_device_info: Arc::new(Mutex::new(None)),
             temp_task: Mutex::new(None),
+            pd_log: Arc::new(Mutex::new(PdLog::default())),
+            // 默认跟随记录且未开始记录：与前端 ingest 门控一致，不入库。
+            pd_capture_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -355,6 +363,8 @@ fn connect_device_by_path(
     let running_arc = Arc::new(AtomicBool::new(true));
     let running_for_thread = Arc::clone(&running_arc);
     let sample_rate_arc = Arc::clone(&state.sample_rate);
+    let pd_log_arc = Arc::clone(&state.pd_log);
+    let pd_capture_arc = Arc::clone(&state.pd_capture_enabled);
 
     // Start reading thread
     let join = thread::spawn(move || {
@@ -386,12 +396,18 @@ fn connect_device_by_path(
                     match ReportKind::of(report) {
                         Some(ReportKind::General) => parse_device_data(report),
                         Some(ReportKind::Pd) => {
-                            match decode_pd_report(&mut pd_parser, report) {
-                                Ok(metadata) => {
-                                    let _ = app.emit("pd-data", metadata);
-                                }
-                                Err(error) => {
-                                    eprintln!("PD 报告解析错误: {}", error);
+                            if pd_capture_arc.load(Ordering::Relaxed) {
+                                match decode_pd_report(&mut pd_parser, report) {
+                                    Ok(metadata) => {
+                                        let event = {
+                                            let mut log = pd_log_arc.lock().unwrap();
+                                            log.push_message(now_ms(), report.to_vec(), metadata)
+                                        };
+                                        let _ = app.emit("pd-data", event);
+                                    }
+                                    Err(error) => {
+                                        eprintln!("PD 报告解析错误: {}", error);
+                                    }
                                 }
                             }
                             None
@@ -471,6 +487,44 @@ fn disconnect_device(state: State<'_, AppState>) -> Result<String, String> {
     }
 
     Ok("设备已断开".to_string())
+}
+
+#[tauri::command]
+fn set_pd_capture_enabled(enabled: bool, state: State<'_, AppState>) {
+    state.pd_capture_enabled.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn pd_log_clear(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .pd_log
+        .lock()
+        .map_err(|_| "PD 日志状态已损坏".to_string())?
+        .clear();
+    Ok(())
+}
+
+#[tauri::command]
+fn decode_pd_at(index: u64, state: State<'_, AppState>) -> Result<witrn_hid::Metadata, String> {
+    let log = state
+        .pd_log
+        .lock()
+        .map_err(|_| "PD 日志状态已损坏".to_string())?;
+    log.meta_at(index as usize)
+        .cloned()
+        .ok_or_else(|| "没有这条报文的解码树".to_string())
+}
+
+#[tauri::command(async)]
+fn pd_log_replace(
+    entries: Vec<PdLoadEntry>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PdEvent>, String> {
+    state
+        .pd_log
+        .lock()
+        .map_err(|_| "PD 日志状态已损坏".to_string())?
+        .replace(entries)
 }
 
 #[tauri::command]
@@ -655,7 +709,11 @@ pub fn run() {
             get_current_device_info,
             identify_current_device,
             connect_temp_service,
-            disconnect_temp_service
+            disconnect_temp_service,
+            set_pd_capture_enabled,
+            pd_log_clear,
+            decode_pd_at,
+            pd_log_replace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

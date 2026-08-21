@@ -4,8 +4,7 @@
  */
 
 import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
-import { calculateEnergyInRange } from './measurement.js';
-import { state } from './state.js';
+import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncRecordUI } from './ui/controlbar.js';
 import { formatRelativeHMS } from './utils.js';
@@ -53,29 +52,17 @@ export function addDataPoint(data) {
   const cc1Value = Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN;
   const cc2Value = Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN;
 
-  // 全精度原始数据
-  state.chartData.timestamps.push(nowMs);
-  state.chartData.voltage.push(data.voltage);
-  state.chartData.current.push(currentValue);
-  state.chartData.power.push(powerAbs);
-  state.chartData.temp.push(tempValue);
-  state.chartData.dp.push(dpValue);
-  state.chartData.dn.push(dnValue);
-  state.chartData.cc1.push(cc1Value);
-  state.chartData.cc2.push(cc2Value);
-
-  // x/y 序列（uPlot 列式格式，与 chartData 同步追加）
-  state.chartSeries.x.push(relSeconds);
-  state.chartSeries.voltage.push(data.voltage);
-  state.chartSeries.current.push(currentValue);
-  state.chartSeries.power.push(powerAbs);
-  state.chartSeries.temp.push(tempValue);
-  state.chartSeries.dp.push(dpValue);
-  state.chartSeries.dn.push(dnValue);
-  state.chartSeries.cc1.push(cc1Value);
-  state.chartSeries.cc2.push(cc2Value);
-
-  updateChartRange();
+  const cols = state.chartSeries;
+  cols.timestamps.push(nowMs);
+  cols.voltage.push(data.voltage);
+  cols.current.push(currentValue);
+  cols.power.push(powerAbs);
+  cols.temp.push(tempValue);
+  cols.dp.push(dpValue);
+  cols.dn.push(dnValue);
+  cols.cc1.push(cc1Value);
+  cols.cc2.push(cc2Value);
+  cols.x.push(relSeconds);
 
   updateStats('voltage', data.voltage);
   updateStats('current', currentValue);
@@ -99,8 +86,7 @@ export function addDataPoint(data) {
   // 全量模式的能量读数是 O(1)，逐点刷新更跟手；范围模式要重扫可见区间，交给上面的节流路径。
   if (!state.settings.statsRange) updateEnergyDisplay();
 
-  const dataCountEl = document.getElementById('data-count');
-  if (dataCountEl) dataCountEl.textContent = String(state.chartData.timestamps.length);
+  scheduleRangeUi();
 
   // Auto Pause 逻辑（电流/功率阈值恒按幅值比较，与方向设置无关）
   if (state.isRecording && state.autoPauseSettings.enabled && state.autoPauseSettings.basis !== 'none') {
@@ -272,6 +258,110 @@ export function getVisibleDataRange() {
   return { startIndex, endIndex };
 }
 
+/**
+ * @typedef {{
+ *   rangeStart: number, rangeEnd: number,
+ *   startIndex: number, endIndex: number, len: number,
+ *   minV: number, maxV: number, minC: number, maxC: number,
+ *   minP: number, maxP: number, minT: number, maxT: number,
+ *   sumP: number, countP: number, sumT: number, countT: number,
+ *   wh: number, mah: number,
+ * }} RangeStatsCache
+ */
+/** @type {RangeStatsCache|null} */
+let rangeStatsCache = null;
+
+/** @param {RangeStatsCache} cache @param {number} i */
+function foldRangePoint(cache, i) {
+  const cols = state.chartSeries;
+  const v = cols.voltage[i];
+  const c = cols.current[i];
+  const p = cols.power[i];
+  const t = cols.temp[i];
+  if (v < cache.minV) cache.minV = v;
+  if (v > cache.maxV) cache.maxV = v;
+  if (c < cache.minC) cache.minC = c;
+  if (c > cache.maxC) cache.maxC = c;
+  if (p < cache.minP) cache.minP = p;
+  if (p > cache.maxP) cache.maxP = p;
+  cache.sumP += p;
+  cache.countP += 1;
+  if (Number.isFinite(t)) {
+    if (t < cache.minT) cache.minT = t;
+    if (t > cache.maxT) cache.maxT = t;
+    cache.sumT += t;
+    cache.countT += 1;
+  }
+  if (i <= cache.startIndex) return;
+  const dt = (cols.x[i] - cols.x[i - 1]) / 3600;
+  const currentAbs = Math.abs(c);
+  const powerAbs = Math.abs(p);
+  if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentAbs) || !Number.isFinite(powerAbs)) return;
+  cache.wh += powerAbs * dt;
+  cache.mah += currentAbs * 1000 * dt;
+}
+
+/** 范围统计：窗口未变则复用；全历史窗口增长时只折入新尾段。 */
+function getRangeStats() {
+  const cols = state.chartSeries;
+  const len = cols.x.length;
+  if (len === 0) return null;
+  const { startIndex, endIndex } = getVisibleDataRange();
+  const rs = state.settings.rangeStart;
+  const re = state.settings.rangeEnd;
+  const cache = rangeStatsCache;
+  if (
+    cache &&
+    cache.rangeStart === rs &&
+    cache.rangeEnd === re &&
+    cache.startIndex === startIndex &&
+    cache.endIndex === endIndex &&
+    cache.len === len
+  ) {
+    return cache;
+  }
+  if (
+    cache &&
+    cache.rangeStart === rs &&
+    cache.rangeEnd === re &&
+    cache.startIndex === 0 &&
+    startIndex === 0 &&
+    cache.endIndex === cache.len - 1 &&
+    endIndex === len - 1 &&
+    len > cache.len
+  ) {
+    for (let i = cache.len; i < len; i++) foldRangePoint(cache, i);
+    cache.endIndex = endIndex;
+    cache.len = len;
+    return cache;
+  }
+  /** @type {RangeStatsCache} */
+  const next = {
+    rangeStart: rs,
+    rangeEnd: re,
+    startIndex,
+    endIndex,
+    len,
+    minV: Infinity,
+    maxV: -Infinity,
+    minC: Infinity,
+    maxC: -Infinity,
+    minP: Infinity,
+    maxP: -Infinity,
+    minT: Infinity,
+    maxT: -Infinity,
+    sumP: 0,
+    countP: 0,
+    sumT: 0,
+    countT: 0,
+    wh: 0,
+    mah: 0,
+  };
+  for (let i = startIndex; i <= endIndex; i++) foldRangePoint(next, i);
+  rangeStatsCache = next;
+  return next;
+}
+
 /** 更新统计显示面板（支持范围模式）。 */
 export function updateStatsDisplay() {
   let displayStats = state.stats;
@@ -280,55 +370,20 @@ export function updateStatsDisplay() {
   let displayPowerAvg = powerAvg;
   let displayTempAvg = tempAvg;
 
-  if (state.settings.statsRange && state.chartData.timestamps.length > 0) {
-    const { startIndex, endIndex } = getVisibleDataRange();
-
-    let minV = Infinity,
-      maxV = -Infinity;
-    let minC = Infinity,
-      maxC = -Infinity;
-    let minP = Infinity,
-      maxP = -Infinity;
-    let minT = Infinity,
-      maxT = -Infinity;
-    let sumP = 0,
-      countP = 0;
-    let sumT = 0,
-      countT = 0;
-
-    for (let i = startIndex; i <= endIndex; i++) {
-      const v = state.chartData.voltage[i];
-      const c = state.chartData.current[i];
-      const p = state.chartData.power[i];
-      const t = state.chartData.temp[i];
-
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
-      if (c < minC) minC = c;
-      if (c > maxC) maxC = c;
-      if (p < minP) minP = p;
-      if (p > maxP) maxP = p;
-      sumP += p;
-      countP += 1;
-      if (Number.isFinite(t) && t < minT) minT = t;
-      if (Number.isFinite(t) && t > maxT) maxT = t;
-      if (Number.isFinite(t)) {
-        sumT += t;
-        countT += 1;
-      }
+  if (state.settings.statsRange && state.chartSeries.x.length > 0) {
+    const range = getRangeStats();
+    if (range) {
+      displayStats = {
+        voltage: { min: range.minV, max: range.maxV, sum: 0, count: 0 },
+        current: { min: range.minC, max: range.maxC, sum: 0, count: 0 },
+        power: { min: range.minP, max: range.maxP, sum: 0, count: 0 },
+        temp: { min: range.minT, max: range.maxT, sum: 0, count: 0 },
+      };
+      powerAvg = range.countP > 0 ? range.sumP / range.countP : null;
+      tempAvg = range.countT > 0 ? range.sumT / range.countT : null;
+      displayPowerAvg = powerAvg;
+      displayTempAvg = tempAvg;
     }
-
-    displayStats = {
-      voltage: { min: minV, max: maxV, sum: 0, count: 0 },
-      current: { min: minC, max: maxC, sum: 0, count: 0 },
-      power: { min: minP, max: maxP, sum: 0, count: 0 },
-      temp: { min: minT, max: maxT, sum: 0, count: 0 },
-    };
-
-    powerAvg = countP > 0 ? sumP / countP : null;
-    tempAvg = countT > 0 ? sumT / countT : null;
-    displayPowerAvg = powerAvg;
-    displayTempAvg = tempAvg;
   }
 
   /** @param {string} id @param {number} val @param {number} [decimals=3] */
@@ -360,15 +415,12 @@ export function updateEnergyDisplay() {
   let { wh, mah } = state.energy;
 
   // 范围模式下累计量也只统计选中区间，与最值/均值口径一致。
-  if (state.settings.statsRange && state.chartData.timestamps.length > 0) {
-    const { startIndex, endIndex } = getVisibleDataRange();
-    ({ wh, mah } = calculateEnergyInRange(
-      state.chartSeries.x,
-      state.chartData.current,
-      state.chartData.power,
-      startIndex,
-      endIndex,
-    ));
+  if (state.settings.statsRange && state.chartSeries.x.length > 0) {
+    const range = getRangeStats();
+    if (range) {
+      wh = range.wh;
+      mah = range.mah;
+    }
   }
 
   const whEl = document.getElementById('rt-energy');
@@ -381,6 +433,22 @@ export function updateEnergyDisplay() {
 
 /** @type {ReturnType<typeof setTimeout>|null} */
 let __statsUpdateTimer = null;
+/** @type {boolean} */
+let __rangeUiPending = false;
+
+/**
+ * 范围标签与点数：跟 rAF 走，不跟每个采样点走。
+ */
+export function scheduleRangeUi() {
+  if (__rangeUiPending) return;
+  __rangeUiPending = true;
+  requestAnimationFrame(() => {
+    __rangeUiPending = false;
+    updateChartRange();
+    const el = document.getElementById('data-count');
+    if (el) el.textContent = String(state.chartSeries.x.length);
+  });
+}
 
 /**
  * 节流版 updateStatsDisplay（含能量显示）。
@@ -418,18 +486,8 @@ export function resetEnergy() {
 /** 清空图表数据和相关状态。 */
 export function clearChart() {
   if (state.isRecording) stopRecording();
-  state.chartData = {
-    timestamps: [],
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-    dp: [],
-    dn: [],
-    cc1: [],
-    cc2: [],
-  };
-  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [], dp: [], dn: [], cc1: [], cc2: [] };
+  setChartColumns(emptyChartColumns());
+  rangeStatsCache = null;
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
 

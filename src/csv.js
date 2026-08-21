@@ -13,8 +13,8 @@ import {
   updateStats,
   updateStatsDisplay,
 } from './data.js';
-import { buildExportRows, calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
-import { state } from './state.js';
+import { calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
+import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
 import { toast } from './ui/toast.js';
@@ -32,9 +32,9 @@ const { writeTextFile, readTextFile } = window.__TAURI__.fs;
  * @param {boolean} [withTemp=false] - 是否包含温度列
  */
 export async function exportCSV(withTemp = false) {
-  const data = buildExportRows(state.chartData, state.chartSeries);
-
-  if (data.length === 0) {
+  const cols = state.chartSeries;
+  const n = cols.x.length;
+  if (n === 0) {
     toast.warning('没有数据可导出');
     return;
   }
@@ -52,46 +52,41 @@ export async function exportCSV(withTemp = false) {
     return `="${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}"`;
   };
 
-  // Metadata
-  const sum = data.length;
   const sampTime = state.settings.sampleRate;
-  const startTime = state.lastRecordingStartTime || state.chartData.timestamps[0] || Date.now();
+  const startTime = state.lastRecordingStartTime || cols.timestamps[0] || Date.now();
 
   const d = new Date(startTime);
   /** @param {number} n @returns {string} */
   const pad = (n) => String(n).padStart(2, '0');
   const dateTimeStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-
-  const lastSec = data[data.length - 1].relSeconds || 0;
-  const totalTimeStr = formatExcelTime(lastSec);
-
-  let csv = `SUM,${sum}\n`;
-  csv += `TotalTime,${totalTimeStr}\n`;
-  csv += `SampTime(ms),${sampTime}\n`;
-  csv += `DateTime,${dateTimeStr}\n\n`;
-
-  if (withTemp) {
-    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),\n';
-  } else {
-    csv += 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),\n';
-  }
+  const totalTimeStr = formatExcelTime(cols.x[n - 1] || 0);
 
   /** 信号线电压列：设备分辨率 0.01 V，缺失（旧数据导入）时留空。 @param {number} v */
   const sig = (v) => (Number.isFinite(v) ? v.toFixed(2) : '');
 
-  data.forEach((row) => {
-    const timeStr = formatExcelTime(row.relSeconds || 0);
-    const v = Number(row.voltage).toFixed(4);
-    const c = Number(row.current).toFixed(4);
-    const p = Number(row.power).toFixed(4);
-    const signals = `${sig(row.dp)},${sig(row.dn)},${sig(row.cc1)},${sig(row.cc2)}`;
-    if (withTemp) {
-      const t = Number.isFinite(row.temp) ? row.temp.toFixed(1) : '';
-      csv += `${timeStr},${v},${c},${p},${t},${signals},\n`;
-    } else {
-      csv += `${timeStr},${v},${c},${p},${signals},\n`;
-    }
-  });
+  /** @type {string[]} */
+  const lines = [
+    `SUM,${n}`,
+    `TotalTime,${totalTimeStr}`,
+    `SampTime(ms),${sampTime}`,
+    `DateTime,${dateTimeStr}`,
+    '',
+    withTemp
+      ? 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),'
+      : 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),',
+  ];
+  lines.length = 6 + n;
+  for (let i = 0; i < n; i++) {
+    const timeStr = formatExcelTime(cols.x[i] || 0);
+    const v = Number(cols.voltage[i]).toFixed(4);
+    const c = Number(cols.current[i]).toFixed(4);
+    const p = Number(cols.power[i]).toFixed(4);
+    const signals = `${sig(cols.dp[i])},${sig(cols.dn[i])},${sig(cols.cc1[i])},${sig(cols.cc2[i])}`;
+    lines[6 + i] = withTemp
+      ? `${timeStr},${v},${c},${p},${Number.isFinite(cols.temp[i]) ? cols.temp[i].toFixed(1) : ''},${signals},`
+      : `${timeStr},${v},${c},${p},${signals},`;
+  }
+  const csv = lines.join('\n');
 
   try {
     const path = await save({
@@ -264,29 +259,18 @@ export async function importCSV() {
     if (rateEl) setSampleRateOption(rateEl, newSampleRate);
     state.lastRecordingStartTime = newStartTime;
 
-    state.chartData.timestamps = newTimestamps;
-    state.chartData.voltage = newVoltage;
-    state.chartData.current = newCurrent;
-    state.chartData.power = newPower;
-    state.chartData.temp = newTemp;
-    state.chartData.dp = newDp;
-    state.chartData.dn = newDn;
-    state.chartData.cc1 = newCc1;
-    state.chartData.cc2 = newCc2;
-    // 导出始终从 chartData/chartSeries 这一份数据源按需派生。
-
-    // uPlot 列式序列 — 数值数组需复制，避免与 chartData 共享引用导致后续双重追加
-    state.chartSeries = {
-      x: newSeconds,
-      voltage: newVoltage.slice(),
-      current: newCurrent.slice(),
-      power: newPower.slice(),
-      temp: newTemp.slice(),
-      dp: newDp.slice(),
-      dn: newDn.slice(),
-      cc1: newCc1.slice(),
-      cc2: newCc2.slice(),
-    };
+    const cols = emptyChartColumns();
+    cols.x = newSeconds;
+    cols.timestamps = newTimestamps;
+    cols.voltage = newVoltage;
+    cols.current = newCurrent;
+    cols.power = newPower;
+    cols.temp = newTemp;
+    cols.dp = newDp;
+    cols.dn = newDn;
+    cols.cc1 = newCc1;
+    cols.cc2 = newCc2;
+    setChartColumns(cols);
 
     // Re-calculate stats
     for (let i = 0; i < newVoltage.length; i++) {

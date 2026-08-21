@@ -38,6 +38,7 @@ import { createMenu } from './ui/menu.js';
 import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
+import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
 import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
 import { clearPdEntries, ingestPdData, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
@@ -364,6 +365,21 @@ function setupControls() {
   btn('btn-reset-settings', async () => {
     const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
     if (yes) await resetSettings();
+  });
+
+  // 界面缩放（设置页 外观 卡）
+  // 拖动只改读数：整页缩放会改滑条几何，原生 range 再跟指针就会抽搐。
+  // 松手 / 键盘步进走 change，再 setZoom。
+  const uiScale = /** @type {HTMLInputElement|null} */ (document.getElementById('ui-scale'));
+  uiScale?.addEventListener('input', () => {
+    previewUiScalePercent(Number.parseInt(uiScale.value, 10));
+  });
+  uiScale?.addEventListener('change', () => {
+    const percent = clampUiScalePercent(Number.parseInt(uiScale.value, 10));
+    uiScale.value = String(percent);
+    state.settings.uiScalePercent = percent;
+    void applyUiScale(percent);
+    debouncedSaveSettings();
   });
 
   // Chart headroom（设置页 配置 卡）

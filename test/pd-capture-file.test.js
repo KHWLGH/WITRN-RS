@@ -33,7 +33,7 @@ const divider = { t: 1_000_001, divider: true };
 test('capture file round-trips entries and dividers', () => {
   const file = buildPdCaptureFile([entry, divider]);
   assert.equal(file.kind, 'pd-capture');
-  assert.equal(file.version, 1);
+  assert.equal(file.version, 2);
 
   const parsed = parsePdCaptureFile(JSON.parse(JSON.stringify(file)));
   assert.equal(parsed.ok, true);
@@ -57,7 +57,8 @@ test('rejects wrong kind, version, and shapes', () => {
   assert.equal(parsePdCaptureFile(null).ok, false);
   assert.equal(parsePdCaptureFile([]).ok, false);
   assert.equal(parsePdCaptureFile({ kind: 'other', version: 1, entries: [] }).ok, false);
-  assert.equal(parsePdCaptureFile({ kind: 'pd-capture', version: 2, entries: [] }).ok, false);
+  assert.equal(parsePdCaptureFile({ kind: 'pd-capture', version: 3, entries: [] }).ok, false);
+  assert.equal(parsePdCaptureFile({ kind: 'pd-capture', version: 2, entries: [] }).ok, true);
   assert.equal(parsePdCaptureFile({ kind: 'pd-capture', version: 1, entries: {} }).ok, false);
 });
 
@@ -98,4 +99,47 @@ test('accepts an empty capture', () => {
   const parsed = parsePdCaptureFile(buildPdCaptureFile([]));
   assert.equal(parsed.ok, true);
   assert.deepEqual(parsed.entries, []);
+});
+
+test('v2 compact entries round-trip without a decode tree', () => {
+  const compact = {
+    t: 42,
+    sop: 'SOP',
+    type: 'GoodCRC',
+    role: 'SNK',
+    summary: '',
+    bytes: [0xfe, 0x03, 224, 0x41, 0x00],
+  };
+  const file = {
+    app: 'WITRN-RS',
+    kind: 'pd-capture',
+    version: 2,
+    exportedAt: '2026-01-01T00:00:00.000Z',
+    entries: [compact],
+  };
+  const parsed = parsePdCaptureFile(file);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.entries[0], compact);
+});
+
+test('v1 files still import and recompute summaries from meta', () => {
+  const v1 = {
+    app: 'WITRN-RS',
+    kind: 'pd-capture',
+    version: 1,
+    exportedAt: '2026-01-01T00:00:00.000Z',
+    entries: [{ t: 1, type: '被手改的类型', summary: 'x', meta }],
+  };
+  const parsed = parsePdCaptureFile(v1);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.entries[0].type, 'Request');
+  assert.equal(parsed.entries[0].summary, '9V 2A');
+});
+
+test('v2 does not truncate large captures', () => {
+  const entries = [];
+  for (let i = 0; i < 3000; i++) entries.push({ t: i, sop: 'SOP', type: 'GoodCRC', role: 'SNK', summary: '' });
+  const parsed = parsePdCaptureFile({ kind: 'pd-capture', version: 2, entries });
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.entries.length, 3000);
 });

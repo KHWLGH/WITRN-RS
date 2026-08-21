@@ -26,7 +26,7 @@ globalThis.document = {
   },
 };
 
-const { state } = await import('../src/state.js');
+const { emptyChartColumns, setChartColumns, state } = await import('../src/state.js');
 const { startRecording, stopRecording } = await import('../src/data.js');
 
 function resetRecordingState() {
@@ -35,8 +35,7 @@ function resetRecordingState() {
   state.recordingStartTime = null;
   state.recordingBaseSeconds = 0;
   state.lastRecordingStartTime = null;
-  state.chartData = { timestamps: [], voltage: [], current: [], power: [], temp: [] };
-  state.chartSeries = { x: [], voltage: [], current: [], power: [], temp: [] };
+  setChartColumns(emptyChartColumns());
   state.energy = { wh: 12, mah: 34, lastTimestamp: 1234 };
   state.autoPauseSettings.triggerStartTime = 5678;
 }
@@ -59,7 +58,7 @@ test('recording session boundaries reset integration and auto-pause baselines', 
 
 test('recording after an import continues from the last relative x value', () => {
   resetRecordingState();
-  state.chartData.timestamps = [1_000_000, 2_000_000];
+  state.chartSeries.timestamps = [1_000_000, 2_000_000];
   state.chartSeries.x = [3723.5, 3724.5];
   state.settings.sampleRate = 250;
 

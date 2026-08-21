@@ -48,7 +48,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 3px 12px;
+  height: var(--pd-row-height, 24px);
+  box-sizing: border-box;
+  padding: 0 12px;
   font-size: 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--stroke-divider);
@@ -117,10 +119,14 @@
 }
 
 .pd-divider-row {
+  height: var(--pd-row-height, 24px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: var(--text-disabled);
   font-size: 11px;
-  padding: 4px 0;
   user-select: none;
 }
 

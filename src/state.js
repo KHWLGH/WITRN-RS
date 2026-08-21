@@ -48,6 +48,7 @@
  * @property {boolean} showDpDn - 图表叠加 D+/D- 曲线
  * @property {boolean} showCc   - 图表叠加 CC1/CC2 曲线
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
+ * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  */
 
 /**
@@ -78,9 +79,12 @@
  */
 
 /**
- * 图表序列（uPlot 列式格式）— x 为相对秒数，各序列与 x 等长对齐。
+ * 图表列式存储（唯一数据源）。
+ * x 为相对秒，timestamps 为墙钟毫秒，其余通道与 x 等长对齐。
+ * `state.chartData` 与 `state.chartSeries` 指向同一对象。
  * @typedef {Object} ChartSeriesColumns
  * @property {number[]} x
+ * @property {number[]} timestamps
  * @property {number[]} voltage
  * @property {number[]} current
  * @property {number[]} power
@@ -90,6 +94,28 @@
  * @property {number[]} cc1
  * @property {number[]} cc2
  */
+
+/** @returns {ChartSeriesColumns} */
+export function emptyChartColumns() {
+  return {
+    x: [],
+    timestamps: [],
+    voltage: [],
+    current: [],
+    power: [],
+    temp: [],
+    dp: [],
+    dn: [],
+    cc1: [],
+    cc2: [],
+  };
+}
+
+/** 让 chartData / chartSeries 指向同一份列。清空、导入后必须调用。 */
+export function setChartColumns(cols) {
+  state.chartData = cols;
+  state.chartSeries = cols;
+}
 
 /**
  * HID 枚举到的设备信息。
@@ -130,6 +156,7 @@ export const defaultSettings = {
   showDpDn: false,
   showCc: false,
   signedCurrent: false,
+  uiScalePercent: 100,
 };
 
 /** @type {AutoPauseSettings} */
@@ -142,6 +169,8 @@ export const defaultAutoPauseSettings = {
 };
 
 // ─── Shared mutable state ────────────────────────────────────────────────────
+
+const chartColumns = emptyChartColumns();
 
 /**
  * 全局共享可变状态。所有模块通过 `state.xxx` 读写。
@@ -167,32 +196,11 @@ export const state = {
   /** @type {(() => void)|null} 清空图表并重置统计与能量 */
   __clearMonitorData: null,
 
-  // ── Raw data storage ──
-  /** @type {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[], dp: number[], dn: number[], cc1: number[], cc2: number[] }} */
-  chartData: {
-    timestamps: [],
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-    dp: [],
-    dn: [],
-    cc1: [],
-    cc2: [],
-  },
-
+  // ── Raw data storage（chartData / chartSeries 同一份列）──
   /** @type {ChartSeriesColumns} */
-  chartSeries: {
-    x: [],
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-    dp: [],
-    dn: [],
-    cc1: [],
-    cc2: [],
-  },
+  chartData: chartColumns,
+  /** @type {ChartSeriesColumns} */
+  chartSeries: chartColumns,
 
   // ── Statistics ──
   /** @type {{ voltage: StatEntry, current: StatEntry, power: StatEntry, temp: StatEntry }} */

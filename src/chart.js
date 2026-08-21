@@ -93,6 +93,100 @@ let appliedNavGen = -1;
 let appliedNavLen = -1;
 
 /**
+ * 导航图 minmax 桶。点数不超过 2×宽度时直接引用全量列；超过后按桶聚合，
+ * 新点只更新最后一桶，桶数超上限则两两合并。
+ * @typedef {{ x0: number, x1: number, min: number, max: number, n: number }} NavBucket
+ */
+/** @type {NavBucket[]} */
+let navBucketList = [];
+let navPpb = 1;
+let navSrcLen = 0;
+/** @type {number[]} */
+let navX = [];
+/** @type {number[]} */
+let navY = [];
+
+function navMaxBuckets() {
+  const host = document.getElementById('navigator-chart');
+  const w = host?.clientWidth || 600;
+  return Math.max(64, Math.floor(w * 2));
+}
+
+function resetNavBuckets() {
+  navBucketList = [];
+  navPpb = 1;
+  navSrcLen = 0;
+  navX = [];
+  navY = [];
+}
+
+/** @param {number} x @param {number} p */
+function pushNavSample(x, p) {
+  const v = Number.isFinite(p) ? p : 0;
+  const last = navBucketList[navBucketList.length - 1];
+  if (last && last.n < navPpb) {
+    last.x1 = x;
+    if (v < last.min) last.min = v;
+    if (v > last.max) last.max = v;
+    last.n++;
+  } else {
+    navBucketList.push({ x0: x, x1: x, min: v, max: v, n: 1 });
+    const cap = navMaxBuckets();
+    if (navBucketList.length > cap) {
+      /** @type {NavBucket[]} */
+      const merged = [];
+      for (let i = 0; i < navBucketList.length; i += 2) {
+        const a = navBucketList[i];
+        const b = navBucketList[i + 1];
+        if (!b) {
+          merged.push(a);
+          break;
+        }
+        merged.push({
+          x0: a.x0,
+          x1: b.x1,
+          min: Math.min(a.min, b.min),
+          max: Math.max(a.max, b.max),
+          n: a.n + b.n,
+        });
+      }
+      navBucketList = merged;
+      navPpb *= 2;
+    }
+  }
+  navSrcLen++;
+}
+
+function flattenNavBuckets() {
+  navX = [];
+  navY = [];
+  for (const b of navBucketList) {
+    navX.push(b.x0, b.x1);
+    navY.push(b.min, b.max);
+  }
+}
+
+/** 把导航图数据指到全量功率列，或宽度级 minmax 桶。 */
+function bindNavData() {
+  const cs = state.chartSeries;
+  const n = cs.x.length;
+  const cap = navMaxBuckets();
+  if (n <= cap) {
+    navData = [cs.x, cs.power];
+    if (navSrcLen > n) resetNavBuckets();
+    return;
+  }
+  if (navSrcLen > n || navSrcLen === 0) {
+    resetNavBuckets();
+    for (let i = 0; i < n; i++) pushNavSample(cs.x[i], cs.power[i]);
+  } else if (navSrcLen < n) {
+    for (let i = navSrcLen; i < n; i++) pushNavSample(cs.x[i], cs.power[i]);
+  }
+  flattenNavBuckets();
+  navData = [navX, navY];
+}
+
+/**
  * spline 平滑仅在可见点数不超过该阈值时启用。
  * 密集视图下改用 uPlot 的 linear 构建器：它按像素列聚合（每列只画 min/max 竖线），
  * 视觉上与逐点绘制无差别（非数据降采样），可流畅支撑百万级点数。
@@ -122,7 +216,8 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
 export function syncChartSeries() {
   const cs = state.chartSeries;
   mainData = [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
-  navData = [cs.x, cs.power];
+  resetNavBuckets();
+  bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
   seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
   scannedLen = 0;
@@ -159,13 +254,13 @@ function applyData() {
   trackNewPoints();
   if (state.mainChart) state.mainChart.setData(/** @type {any} */ (mainData));
 
-  // 导航图始终显示全量数据，仅在数据本身变化（追加 / 替换）时重建；
-  // 纯 X 窗口变化（拖动范围滑块）跳过，避免大数据量下的无谓全量路径重建。
+  bindNavData();
   const nav = state.navigatorChart;
-  if (nav && (appliedNavGen !== dataGen || appliedNavLen !== navData[0].length)) {
+  const srcLen = state.chartSeries.x.length;
+  if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
     nav.setData(/** @type {any} */ (navData));
     appliedNavGen = dataGen;
-    appliedNavLen = navData[0].length;
+    appliedNavLen = srcLen;
   }
 }
 
@@ -705,11 +800,19 @@ function tooltipPlugin() {
  * @param {HTMLElement} host
  * @param {any} chart
  */
-function observeResize(host, chart) {
+/**
+ * @param {HTMLElement} host
+ * @param {any} chart
+ * @param {(() => void)|null} [onSize]
+ */
+function observeResize(host, chart, onSize = null) {
   const ro = new ResizeObserver(() => {
     const width = host.clientWidth;
     const height = host.clientHeight;
-    if (width > 0 && height > 0) chart.setSize({ width, height });
+    if (width > 0 && height > 0) {
+      chart.setSize({ width, height });
+      onSize?.();
+    }
   });
   ro.observe(host);
 }
@@ -883,5 +986,12 @@ export function initNavigatorChart() {
   };
 
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);
-  observeResize(host, state.navigatorChart);
+  observeResize(host, state.navigatorChart, () => {
+    resetNavBuckets();
+    bindNavData();
+    appliedNavGen = -1;
+    if (state.navigatorChart) state.navigatorChart.setData(/** @type {any} */ (navData));
+    appliedNavGen = dataGen;
+    appliedNavLen = state.chartSeries.x.length;
+  });
 }

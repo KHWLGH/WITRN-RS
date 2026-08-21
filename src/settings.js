@@ -8,6 +8,7 @@ import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
+import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
@@ -45,6 +46,8 @@ function normalizeSettings(saved) {
   merged.chartHeadroomPercent = Math.round(
     clamp(merged.chartHeadroomPercent, 0, 100, defaultSettings.chartHeadroomPercent),
   );
+  // 缩放比例直接改布局视口；越界或非数会让界面缩到不可用 / 撑出窗口
+  merged.uiScalePercent = clampUiScalePercent(merged.uiScalePercent);
   // activeView 会被 shell 用来切换视图，白名单校验防止坏值卡死在不存在的视图
   // （'device' 视图已并入 settings，旧存值一并回落到 monitor）
   if (!['monitor', 'pd', 'settings'].includes(merged.activeView)) {
@@ -65,6 +68,14 @@ function echoHeadroomUI() {
     percent.value = String(state.settings.chartHeadroomPercent);
     percent.disabled = !isCustom;
   }
+}
+
+/** 回显界面缩放滑条（loadSettings / resetSettings 共用）。 */
+function echoUiScaleUI() {
+  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('ui-scale'));
+  if (slider) slider.value = String(state.settings.uiScalePercent);
+  const label = document.getElementById('ui-scale-value');
+  if (label) label.textContent = `${state.settings.uiScalePercent}%`;
 }
 
 /** @param {unknown} saved @returns {import('./state.js').AutoPauseSettings} */
@@ -173,6 +184,13 @@ export async function loadSettings() {
   } catch (e) {
     console.error('Failed to load settings:', e);
   } finally {
+    echoUiScaleUI();
+    fillUiScaleHint();
+    try {
+      await applyUiScale(state.settings.uiScalePercent);
+    } catch {
+      /* apply 内部已有 CSS 回退；这里只保证 isLoadingSettings 一定复位 */
+    }
     isLoadingSettings = false;
   }
 }
@@ -247,6 +265,8 @@ export async function resetSettings() {
     setChecked('signed-current', state.settings.signedCurrent);
     setChecked('pd-follow-recording', state.settings.pdFollowRecording);
     echoHeadroomUI();
+    echoUiScaleUI();
+    await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位
     const dirEl = document.getElementById('rt-current-dir');

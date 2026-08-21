@@ -317,6 +317,23 @@
                     <label class="radio-label"><input type="radio" name="theme-choice" checked disabled /> 深色</label>
                     <label class="radio-label"><input type="radio" name="theme-choice" disabled /> 浅色（即将推出）</label>
                   </div>
+                  <div class="field-row">
+                    <label for="ui-scale">界面缩放</label>
+                    <input
+                      type="range"
+                      id="ui-scale"
+                      min="50"
+                      max="200"
+                      step="5"
+                      value="100"
+                      class="scale-slider"
+                      title="界面缩放比例"
+                    />
+                    <span id="ui-scale-value" class="scale-value">100%</span>
+                  </div>
+                  <div class="card-hint" id="ui-scale-hint">
+                    等比缩放整个界面（含图表与标题栏）。系统缩放偏大导致窗口拥挤时可调低；默认 100% 跟随系统。
+                  </div>
                 </div>
                 <div class="card">
                   <div class="card-title">配置</div>
@@ -356,7 +373,7 @@
                   <div class="field-row">
                     <button type="button" class="btn" id="btn-reset-settings">重置所有配置</button>
                   </div>
-                  <div class="card-hint">恢复采样率、显示通道、自动暂停、温度服务等全部设置的默认值。</div>
+                  <div class="card-hint">恢复采样率、显示通道、界面缩放、自动暂停、温度服务等全部设置的默认值。</div>
                 </div>
                 <div class="card">
                   <div class="card-title">关于</div>

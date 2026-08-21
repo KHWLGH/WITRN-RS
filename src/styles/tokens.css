@@ -151,6 +151,9 @@
   --toast-width: 360px;
   --titlebar-height: 40px;
   --statusbar-height: 24px;
+  --ui-scale: 1; /* 界面等比缩放因子，src/ui-scale.js 写入；Linux 热区按它反比加厚 */
+  --resize-edge: calc(5px / var(--ui-scale));
+  --resize-corner: calc(10px / var(--ui-scale));
 
   /* 监控视图布局旋钮 — styles/compact.css 的紧凑档按视口重赋这些值 */
   --panel-realtime-width: 230px; /* 实时读数侧栏宽 */
@@ -159,6 +162,7 @@
   --monitor-gutter: 12px; /* 监控主体 padding / gap */
   --chart-min-height: 300px;
   --chart-pad: 15px; /* 图表容器内边距 */
+  --pd-row-height: 24px; /* PD 虚拟列表行高，须与 src/pd-model.js 的 PD_ROW_HEIGHT 一致 */
 }
 
 /* 亮色主题占位：仅重赋语义层（本版本不交付亮色，结构先就位） */

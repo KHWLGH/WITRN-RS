@@ -50,20 +50,19 @@ test('integrates only the selected index range in seconds', () => {
 });
 
 test('builds export rows from the chart data source', () => {
-  const rows = buildExportRows(
-    {
-      timestamps: [1000, 2000],
-      voltage: [5, 6],
-      current: [1, 2],
-      power: [5, 12],
-      temp: [Number.NaN, 0],
-      dp: [2.7, 0.6],
-      dn: [2.7, Number.NaN],
-      cc1: [1.7, 0],
-      cc2: [0, 1.7],
-    },
-    { x: [0, 1] },
-  );
+  const cols = {
+    timestamps: [1000, 2000],
+    voltage: [5, 6],
+    current: [1, 2],
+    power: [5, 12],
+    temp: [Number.NaN, 0],
+    dp: [2.7, 0.6],
+    dn: [2.7, Number.NaN],
+    cc1: [1.7, 0],
+    cc2: [0, 1.7],
+    x: [0, 1],
+  };
+  const rows = buildExportRows(cols, cols);
   assert.deepEqual(rows, [
     { relSeconds: 0, voltage: 5, current: 1, power: 5, temp: Number.NaN, dp: 2.7, dn: 2.7, cc1: 1.7, cc2: 0 },
     { relSeconds: 1, voltage: 6, current: 2, power: 12, temp: 0, dp: 0.6, dn: Number.NaN, cc1: 0, cc2: 1.7 },
