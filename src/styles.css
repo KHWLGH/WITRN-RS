@@ -82,14 +82,6 @@ select {
   max-width: 280px;
 }
 
-/* 状态栏里的设备名（超长省略） */
-.device-name-status {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .device-sn-input {
   width: 160px !important;
 }

@@ -62,6 +62,10 @@ export function showView(id) {
   document.getElementById(`view-${activeId}`)?.setAttribute('hidden', '');
   prev?.onHide?.();
 
+  // 先写下活动视图，onShow（监控尺寸补偿 / 图表补绘）才能读到新 id。
+  activeId = id;
+  state.settings.activeView = id;
+
   document.getElementById(`view-${id}`)?.removeAttribute('hidden');
   if (!inited.has(id)) {
     next.init?.();
@@ -69,10 +73,7 @@ export function showView(id) {
   }
   next.onShow?.();
 
-  activeId = id;
   selectionCallback?.(id);
-
-  state.settings.activeView = id;
   debouncedSaveSettings();
 }
 

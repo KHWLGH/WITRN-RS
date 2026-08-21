@@ -4,7 +4,7 @@
  *
  * uPlot 由 vendor/uPlot.iife.min.js 以全局变量方式载入（本地文件，无网络依赖）。
  * 数据为列式（columnar）格式：state.chartSeries = { x, voltage, current, power, temp, dp, dn, cc1, cc2 }，
- * 主图直接引用这些数组（[x, v, c, p, t, dp, dn, cc1, cc2]），追加数据后调用 setData 即可刷新。
+ * 主图绑定 F64Col.view()（[x, v, c, p, t, dp, dn, cc1, cc2]），追加后在 applyData 里换新视图再 setData。
  *
  * 对外 API：
  * - initChart()           初始化主图 + 导航图
@@ -59,11 +59,12 @@ const TIME_INCRS = [
 
 // ─── Module state ────────────────────────────────────────────────────────────
 
-/** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]，元素直接引用 state.chartSeries 的数组。 */
-/** @type {number[][]} */
+/** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]，元素为 F64Col.view()。 */
+/** @typedef {number[]|Float64Array} ChartColView */
+/** @type {ChartColView[]} */
 let mainData = [[], [], [], [], [], [], [], [], []];
-/** 导航图数据：[x, power]。 */
-/** @type {number[][]} */
+/** 导航图数据：[x, power]（全量视图或桶数组）。 */
+/** @type {ChartColView[]} */
 let navData = [[], []];
 
 /** 范围滑块设定的主图 X 轴窗口；null 表示尚无数据（使用默认范围）。 */
@@ -91,6 +92,17 @@ let dataGen = 0;
 /** 导航图最近一次 setData 时的代数与长度；仅数据变化时才重建导航图（X 窗口拖动不触碰它）。 */
 let appliedNavGen = -1;
 let appliedNavLen = -1;
+
+/** 上一帧绘制超过该预算则暂缓下一张图，数据照收。点数少时绘制远低于此值，行为与逐点刷新相同。 */
+const PAINT_BUDGET_MS = 10;
+let skipUntil = 0;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let skipWakeTimer = null;
+let chartDirty = false;
+
+function monitorVisible() {
+  return state.settings.activeView === 'monitor';
+}
 
 /**
  * 导航图 minmax 桶。点数不超过 2×宽度时直接引用全量列；超过后按桶聚合，
@@ -171,16 +183,18 @@ function bindNavData() {
   const cs = state.chartSeries;
   const n = cs.x.length;
   const cap = navMaxBuckets();
+  const xs = cs.x.buf;
+  const ps = cs.power.buf;
   if (n <= cap) {
-    navData = [cs.x, cs.power];
+    navData = [cs.x.view(), cs.power.view()];
     if (navSrcLen > n) resetNavBuckets();
     return;
   }
   if (navSrcLen > n || navSrcLen === 0) {
     resetNavBuckets();
-    for (let i = 0; i < n; i++) pushNavSample(cs.x[i], cs.power[i]);
+    for (let i = 0; i < n; i++) pushNavSample(xs[i], ps[i]);
   } else if (navSrcLen < n) {
-    for (let i = navSrcLen; i < n; i++) pushNavSample(cs.x[i], cs.power[i]);
+    for (let i = navSrcLen; i < n; i++) pushNavSample(xs[i], ps[i]);
   }
   flattenNavBuckets();
   navData = [navX, navY];
@@ -213,9 +227,23 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
  * 仅在序列数组被整体替换（清空、导入 CSV）后需要调用；
  * 追加数据点时数组引用不变，无需重新绑定。
  */
-export function syncChartSeries() {
+function bindMainViews() {
   const cs = state.chartSeries;
-  mainData = [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
+  mainData = [
+    cs.x.view(),
+    cs.voltage.view(),
+    cs.current.view(),
+    cs.power.view(),
+    cs.temp.view(),
+    cs.dp.view(),
+    cs.dn.view(),
+    cs.cc1.view(),
+    cs.cc2.view(),
+  ];
+}
+
+export function syncChartSeries() {
+  bindMainViews();
   resetNavBuckets();
   bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
@@ -225,13 +253,17 @@ export function syncChartSeries() {
   trackNewPoints();
 }
 
-/** 增量扫描新追加的数据点，维护每条曲线的全量最大值。 */
+/**
+ * 增量扫描新追加的数据点，维护每条曲线的全量 min/max。
+ * @returns {boolean} 是否有任一通道极值变化（决定 setData 要不要重算 Y 轴）
+ */
 function trackNewPoints() {
   const len = mainData[0].length;
   if (len <= scannedLen) {
     scannedLen = len;
-    return;
+    return false;
   }
+  let changed = false;
   for (let si = 1; si < mainData.length; si++) {
     const arr = mainData[si];
     let max = seriesMax[si];
@@ -239,20 +271,52 @@ function trackNewPoints() {
     for (let i = scannedLen; i < len; i++) {
       const v = arr[i];
       if (Number.isFinite(v)) {
-        if (v > max) max = v;
-        if (v < min) min = v;
+        if (v > max) {
+          max = v;
+          changed = true;
+        }
+        if (v < min) {
+          min = v;
+          changed = true;
+        }
       }
     }
     seriesMax[si] = max;
     seriesMin[si] = min;
   }
   scannedLen = len;
+  return changed;
+}
+
+function clearPaintSkip() {
+  skipUntil = 0;
+  if (skipWakeTimer != null) {
+    clearTimeout(skipWakeTimer);
+    skipWakeTimer = null;
+  }
 }
 
 /** 将当前数据应用到两个图表（范围由各 scale 的 range 函数自动计算）。 */
 function applyData() {
-  trackNewPoints();
-  if (state.mainChart) state.mainChart.setData(/** @type {any} */ (mainData));
+  if (!monitorVisible()) {
+    chartDirty = true;
+    return;
+  }
+
+  const t0 = performance.now();
+  bindMainViews();
+  const appended = mainData[0].length > scannedLen;
+  const yChanged = trackNewPoints();
+  if (state.mainChart) {
+    // 仅流式追加且 Y 极值未破时跳过四轴量化；导入 / 改窗口 / 改余量仍走完整 setData。
+    if (appended && !yChanged && xWindow.min != null && xWindow.max != null) {
+      state.mainChart.setData(/** @type {any} */ (mainData), false);
+      const [min, max] = xRange();
+      state.mainChart.setScale('x', { min, max });
+    } else {
+      state.mainChart.setData(/** @type {any} */ (mainData));
+    }
+  }
 
   bindNavData();
   const nav = state.navigatorChart;
@@ -262,10 +326,15 @@ function applyData() {
     appliedNavGen = dataGen;
     appliedNavLen = srcLen;
   }
+
+  const dt = performance.now() - t0;
+  skipUntil = dt > PAINT_BUDGET_MS ? performance.now() + dt : 0;
+  chartDirty = false;
 }
 
-/** 立即刷新两个图表。 */
+/** 立即刷新两个图表（忽略绘制预算，隐藏时只打脏标记）。 */
 export function updateCharts() {
+  clearPaintSkip();
   applyData();
 }
 
@@ -281,8 +350,8 @@ export function refreshChartScales() {
 
 /**
  * 监控视图重新显示时的尺寸补偿。
- * 视图隐藏期间 ResizeObserver 只会收到 0×0（已被守卫忽略），重新显示后
- * 大多数环境会补发一次正确尺寸，但不保证；这里显式对齐宿主尺寸并刷新。
+ * 监控 hidden 时仍保几何，通常不必 setSize；宽高真变了才对齐。
+ * 隐藏期间跳过的绘制用 chartDirty 补一帧，不再无条件 updateCharts。
  */
 export function handleMonitorShown() {
   /** @param {string} hostId @param {any} chart */
@@ -291,11 +360,38 @@ export function handleMonitorShown() {
     if (!host || !chart) return;
     const width = host.clientWidth;
     const height = host.clientHeight;
-    if (width > 0 && height > 0) chart.setSize({ width, height });
+    if (width <= 0 || height <= 0) return;
+    if (chart.width === width && chart.height === height) return;
+    chart.setSize({ width, height });
   };
   fit('main-chart', state.mainChart);
   fit('navigator-chart', state.navigatorChart);
-  updateCharts();
+  if (chartDirty) {
+    clearPaintSkip();
+    applyData();
+  }
+}
+
+function flushChart() {
+  if (!monitorVisible()) {
+    chartDirty = true;
+    return;
+  }
+  const now = performance.now();
+  if (now < skipUntil) {
+    chartDirty = true;
+    if (skipWakeTimer == null) {
+      skipWakeTimer = setTimeout(
+        () => {
+          skipWakeTimer = null;
+          scheduleChartUpdate();
+        },
+        Math.max(0, Math.ceil(skipUntil - performance.now())),
+      );
+    }
+    return;
+  }
+  applyData();
 }
 
 /** 使用 requestAnimationFrame 调度图表更新，避免每个数据点都触发重绘。 */
@@ -304,7 +400,7 @@ export function scheduleChartUpdate() {
   state.__chartUpdatePending = true;
   requestAnimationFrame(() => {
     state.__chartUpdatePending = false;
-    applyData();
+    flushChart();
   });
 }
 
@@ -807,11 +903,17 @@ function tooltipPlugin() {
  */
 function observeResize(host, chart, onSize = null) {
   const ro = new ResizeObserver(() => {
+    if (!monitorVisible()) {
+      chartDirty = true;
+      return;
+    }
     const width = host.clientWidth;
     const height = host.clientHeight;
     if (width > 0 && height > 0) {
-      chart.setSize({ width, height });
-      onSize?.();
+      if (chart.width !== width || chart.height !== height) {
+        chart.setSize({ width, height });
+        onSize?.();
+      }
     }
   });
   ro.observe(host);

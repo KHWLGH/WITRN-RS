@@ -159,7 +159,7 @@ export function updateChartRange() {
   // 直接取序列的 x 坐标（与图表同一坐标系）。
   // 不能用时间戳差值换算——差值恒从 0 起，而导入的 CSV 序列可能从非零时刻开始，
   // 错位会让窗口大于数据范围，在图表前部凭空出现空白。
-  const xs = state.chartSeries.x;
+  const xs = state.chartSeries.x.buf;
   const startSeconds = Number.isFinite(xs[startIndex]) ? xs[startIndex] : 0;
   const endSeconds = Number.isFinite(xs[endIndex]) ? xs[endIndex] : 0;
 
@@ -274,10 +274,10 @@ let rangeStatsCache = null;
 /** @param {RangeStatsCache} cache @param {number} i */
 function foldRangePoint(cache, i) {
   const cols = state.chartSeries;
-  const v = cols.voltage[i];
-  const c = cols.current[i];
-  const p = cols.power[i];
-  const t = cols.temp[i];
+  const v = cols.voltage.buf[i];
+  const c = cols.current.buf[i];
+  const p = cols.power.buf[i];
+  const t = cols.temp.buf[i];
   if (v < cache.minV) cache.minV = v;
   if (v > cache.maxV) cache.maxV = v;
   if (c < cache.minC) cache.minC = c;
@@ -293,7 +293,7 @@ function foldRangePoint(cache, i) {
     cache.countT += 1;
   }
   if (i <= cache.startIndex) return;
-  const dt = (cols.x[i] - cols.x[i - 1]) / 3600;
+  const dt = (cols.x.buf[i] - cols.x.buf[i - 1]) / 3600;
   const currentAbs = Math.abs(c);
   const powerAbs = Math.abs(p);
   if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentAbs) || !Number.isFinite(powerAbs)) return;
@@ -524,10 +524,10 @@ export function startRecording() {
     state.lastRecordingStartTime = now;
     state.recordingBaseSeconds = 0;
   } else {
-    const lastX = state.chartSeries.x[state.chartSeries.x.length - 1];
+    const lastX = state.chartSeries.x.at(-1);
     state.recordingBaseSeconds =
       (Number.isFinite(lastX) ? lastX : 0) + Math.max(state.settings.sampleRate / 1000, 0.001);
-    if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartData.timestamps[0];
+    if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartData.timestamps.at(0);
   }
   // 暂停期间不属于下一段能量积分区间。
   state.energy.lastTimestamp = null;
@@ -562,6 +562,8 @@ export function stopRecording() {
   if (btnClear) btnClear.disabled = false;
 
   state.__setRangeControlsEnabled?.(true);
+  // 预算跳过的帧在暂停时补一张全质量图
+  updateCharts();
 
   // 单一咽喉点：手动停止 / 自动暂停 / 拔设备 / CSV 导入引发的停止都会走到这里
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));

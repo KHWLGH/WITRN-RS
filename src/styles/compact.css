@@ -105,10 +105,6 @@
   .statusbar {
     gap: 8px;
   }
-
-  .device-name-status {
-    max-width: 120px;
-  }
 }
 
 /* ── H1：视口高 < 620，纵向紧凑 ──────────────────────────────── */

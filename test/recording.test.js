@@ -58,8 +58,8 @@ test('recording session boundaries reset integration and auto-pause baselines', 
 
 test('recording after an import continues from the last relative x value', () => {
   resetRecordingState();
-  state.chartSeries.timestamps = [1_000_000, 2_000_000];
-  state.chartSeries.x = [3723.5, 3724.5];
+  state.chartSeries.timestamps.set([1_000_000, 2_000_000]);
+  state.chartSeries.x.set([3723.5, 3724.5]);
   state.settings.sampleRate = 250;
 
   startRecording();

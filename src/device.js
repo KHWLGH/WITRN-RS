@@ -116,8 +116,6 @@ export async function connectDevice() {
       /** @type {HTMLInputElement} */ (document.getElementById('device-pid')).value =
         `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`;
       /** @type {HTMLInputElement} */ (document.getElementById('device-sn')).value = di.serial_number || '--';
-      const nameEl = document.getElementById('device-name-text');
-      if (nameEl) nameEl.textContent = di.model_name;
     }
 
     setConnected(true);
@@ -137,8 +135,6 @@ export async function disconnectDevice() {
   try {
     await invoke('disconnect_device');
     setConnected(false);
-    const nameEl = document.getElementById('device-name-text');
-    if (nameEl) nameEl.textContent = '--';
   } catch (e) {
     toast.error(`断开失败: ${e}`);
   }

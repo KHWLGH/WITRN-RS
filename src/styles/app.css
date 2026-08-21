@@ -276,6 +276,7 @@ html[data-ui-scale-css] .app-shell {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .view {
@@ -287,6 +288,17 @@ html[data-ui-scale-css] .app-shell {
 
 .view[hidden] {
   display: none;
+}
+
+/* 监控画布保几何：display:none 会把 uPlot 折成 0×0，采着样再切回来要全量 setSize。
+   盖过 base.css 的 [hidden] { display:none !important }，切走后仍占满宿主、不参与命中。 */
+#view-monitor[hidden] {
+  display: flex !important;
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* ── 命令栏 ───────────────────────────────────────────────────── */

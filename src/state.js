@@ -79,35 +79,82 @@
  */
 
 /**
+ * 可扩容 Float64 列。uPlot 吃 `view()`（连续 f64，零拷贝）；应用侧用 length / at / buf[i] / push。
+ * 采集时倍增扩容，避免普通数组周期性整列拷贝与装箱。
+ */
+export class F64Col {
+  /** @param {number} [capacity=4096] */
+  constructor(capacity = 4096) {
+    const cap = Math.max(1, capacity | 0);
+    /** @type {Float64Array} */
+    this.buf = new Float64Array(cap);
+    /** @type {number} */
+    this.length = 0;
+  }
+
+  /** @param {number} v */
+  push(v) {
+    if (this.length >= this.buf.length) {
+      const next = new Float64Array(this.buf.length * 2);
+      next.set(this.buf);
+      this.buf = next;
+    }
+    this.buf[this.length++] = v;
+  }
+
+  /**
+   * @param {number} i
+   * @returns {number}
+   */
+  at(i) {
+    const idx = i < 0 ? this.length + i : i;
+    return this.buf[idx];
+  }
+
+  /** @param {ArrayLike<number>} values */
+  set(values) {
+    const n = values.length;
+    if (n > this.buf.length) this.buf = new Float64Array(n);
+    this.buf.set(values);
+    this.length = n;
+  }
+
+  /** @returns {Float64Array} */
+  view() {
+    return this.buf.subarray(0, this.length);
+  }
+}
+
+/**
  * 图表列式存储（唯一数据源）。
  * x 为相对秒，timestamps 为墙钟毫秒，其余通道与 x 等长对齐。
  * `state.chartData` 与 `state.chartSeries` 指向同一对象。
  * @typedef {Object} ChartSeriesColumns
- * @property {number[]} x
- * @property {number[]} timestamps
- * @property {number[]} voltage
- * @property {number[]} current
- * @property {number[]} power
- * @property {number[]} temp
- * @property {number[]} dp
- * @property {number[]} dn
- * @property {number[]} cc1
- * @property {number[]} cc2
+ * @property {F64Col} x
+ * @property {F64Col} timestamps
+ * @property {F64Col} voltage
+ * @property {F64Col} current
+ * @property {F64Col} power
+ * @property {F64Col} temp
+ * @property {F64Col} dp
+ * @property {F64Col} dn
+ * @property {F64Col} cc1
+ * @property {F64Col} cc2
  */
 
-/** @returns {ChartSeriesColumns} */
-export function emptyChartColumns() {
+/** @param {number} [capacity=4096] @returns {ChartSeriesColumns} */
+export function emptyChartColumns(capacity = 4096) {
   return {
-    x: [],
-    timestamps: [],
-    voltage: [],
-    current: [],
-    power: [],
-    temp: [],
-    dp: [],
-    dn: [],
-    cc1: [],
-    cc2: [],
+    x: new F64Col(capacity),
+    timestamps: new F64Col(capacity),
+    voltage: new F64Col(capacity),
+    current: new F64Col(capacity),
+    power: new F64Col(capacity),
+    temp: new F64Col(capacity),
+    dp: new F64Col(capacity),
+    dn: new F64Col(capacity),
+    cc1: new F64Col(capacity),
+    cc2: new F64Col(capacity),
   };
 }
 

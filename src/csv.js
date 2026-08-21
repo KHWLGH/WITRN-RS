@@ -38,6 +38,15 @@ export async function exportCSV(withTemp = false) {
     toast.warning('没有数据可导出');
     return;
   }
+  const x = cols.x.buf;
+  const voltage = cols.voltage.buf;
+  const current = cols.current.buf;
+  const power = cols.power.buf;
+  const temp = cols.temp.buf;
+  const dp = cols.dp.buf;
+  const dn = cols.dn.buf;
+  const cc1 = cols.cc1.buf;
+  const cc2 = cols.cc2.buf;
 
   /**
    * 格式化时间为 ="HH:mm:ss.ms"（Excel 友好格式）。
@@ -53,13 +62,13 @@ export async function exportCSV(withTemp = false) {
   };
 
   const sampTime = state.settings.sampleRate;
-  const startTime = state.lastRecordingStartTime || cols.timestamps[0] || Date.now();
+  const startTime = state.lastRecordingStartTime || cols.timestamps.at(0) || Date.now();
 
   const d = new Date(startTime);
   /** @param {number} n @returns {string} */
   const pad = (n) => String(n).padStart(2, '0');
   const dateTimeStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  const totalTimeStr = formatExcelTime(cols.x[n - 1] || 0);
+  const totalTimeStr = formatExcelTime(x[n - 1] || 0);
 
   /** 信号线电压列：设备分辨率 0.01 V，缺失（旧数据导入）时留空。 @param {number} v */
   const sig = (v) => (Number.isFinite(v) ? v.toFixed(2) : '');
@@ -77,13 +86,13 @@ export async function exportCSV(withTemp = false) {
   ];
   lines.length = 6 + n;
   for (let i = 0; i < n; i++) {
-    const timeStr = formatExcelTime(cols.x[i] || 0);
-    const v = Number(cols.voltage[i]).toFixed(4);
-    const c = Number(cols.current[i]).toFixed(4);
-    const p = Number(cols.power[i]).toFixed(4);
-    const signals = `${sig(cols.dp[i])},${sig(cols.dn[i])},${sig(cols.cc1[i])},${sig(cols.cc2[i])}`;
+    const timeStr = formatExcelTime(x[i] || 0);
+    const v = Number(voltage[i]).toFixed(4);
+    const c = Number(current[i]).toFixed(4);
+    const p = Number(power[i]).toFixed(4);
+    const signals = `${sig(dp[i])},${sig(dn[i])},${sig(cc1[i])},${sig(cc2[i])}`;
     lines[6 + i] = withTemp
-      ? `${timeStr},${v},${c},${p},${Number.isFinite(cols.temp[i]) ? cols.temp[i].toFixed(1) : ''},${signals},`
+      ? `${timeStr},${v},${c},${p},${Number.isFinite(temp[i]) ? temp[i].toFixed(1) : ''},${signals},`
       : `${timeStr},${v},${c},${p},${signals},`;
   }
   const csv = lines.join('\n');
@@ -259,17 +268,17 @@ export async function importCSV() {
     if (rateEl) setSampleRateOption(rateEl, newSampleRate);
     state.lastRecordingStartTime = newStartTime;
 
-    const cols = emptyChartColumns();
-    cols.x = newSeconds;
-    cols.timestamps = newTimestamps;
-    cols.voltage = newVoltage;
-    cols.current = newCurrent;
-    cols.power = newPower;
-    cols.temp = newTemp;
-    cols.dp = newDp;
-    cols.dn = newDn;
-    cols.cc1 = newCc1;
-    cols.cc2 = newCc2;
+    const cols = emptyChartColumns(newSeconds.length);
+    cols.x.set(newSeconds);
+    cols.timestamps.set(newTimestamps);
+    cols.voltage.set(newVoltage);
+    cols.current.set(newCurrent);
+    cols.power.set(newPower);
+    cols.temp.set(newTemp);
+    cols.dp.set(newDp);
+    cols.dn.set(newDn);
+    cols.cc1.set(newCc1);
+    cols.cc2.set(newCc2);
     setChartColumns(cols);
 
     // Re-calculate stats
