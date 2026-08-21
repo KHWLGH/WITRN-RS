@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::net::ToSocketAddrs;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -82,17 +83,19 @@ pub struct DeviceIdentity {
 type PhysicalDeviceKey = (u16, u16, String);
 
 fn physical_device_key(device: &DeviceInfo) -> PhysicalDeviceKey {
+    // USB serial on WITRN hardware is a production-batch date, not a unit id.
+    // Group by port first so two meters from the same batch stay distinct.
     let discriminator = device
-        .serial_number
+        .usb_port
         .as_deref()
-        .filter(|serial| !serial.is_empty())
-        .map(|serial| format!("serial:{serial}"))
+        .filter(|port| !port.is_empty())
+        .map(|port| format!("usb:{port}"))
         .or_else(|| {
             device
-                .usb_port
+                .serial_number
                 .as_deref()
-                .filter(|port| !port.is_empty())
-                .map(|port| format!("usb:{port}"))
+                .filter(|serial| !serial.is_empty())
+                .map(|serial| format!("serial:{serial}"))
         })
         .unwrap_or_default();
 
@@ -200,11 +203,11 @@ struct DeviceData {
     voltage: f32,
     current: f32,
     power: f32,
-    dp: f32,          // D+
-    dn: f32,          // D-
-    cc1: f32,         // CC1
-    cc2: f32,         // CC2
-    temperature: f32, // 温度
+    dp: Option<f32>,          // D+；越界或缺测为 null，不断整帧
+    dn: Option<f32>,          // D-
+    cc1: f32,                 // CC1
+    cc2: f32,                 // CC2
+    temperature: Option<f32>, // 仪表温度；缺失为 null，避免 JSON NaN 丢掉整帧
     ah: f32,          // 累计容量 Ah
     wh: f32,          // 累计能量 Wh
 }
@@ -236,6 +239,7 @@ struct AppState {
     temp_task: Mutex<Option<BackgroundTask>>,
     pd_log: Arc<Mutex<PdLog>>,
     pd_capture_enabled: Arc<AtomicBool>,
+    connection_epoch: AtomicU64,
 }
 
 impl Default for AppState {
@@ -248,6 +252,7 @@ impl Default for AppState {
             pd_log: Arc::new(Mutex::new(PdLog::default())),
             // 默认跟随记录且未开始记录：与前端 ingest 门控一致，不入库。
             pd_capture_enabled: Arc::new(AtomicBool::new(false)),
+            connection_epoch: AtomicU64::new(0),
         }
     }
 }
@@ -293,6 +298,8 @@ fn identify_current_device(
         stop_task(&mut task);
     }
 
+    let epoch = state.connection_epoch.load(Ordering::Relaxed);
+
     let identity_result = (|| {
         let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
         let mut device = WitrnDev::new();
@@ -313,12 +320,23 @@ fn identify_current_device(
         })
     })();
 
-    let restore_result = connect_device_by_path(path, state, app);
-    if let Err(error) = restore_result {
-        eprintln!("身份读取后恢复设备连接失败: {error}");
+    if state.connection_epoch.load(Ordering::Relaxed) != epoch {
+        return Err("设备已断开".to_string());
     }
 
-    identity_result
+    match connect_device_by_path(path, state.clone(), app.clone()) {
+        Ok(_) => identity_result,
+        Err(error) => {
+            if let Ok(mut info) = state.current_device_info.lock() {
+                *info = None;
+            }
+            let _ = app.emit("device-disconnected", ());
+            match identity_result {
+                Ok(_) => Err(format!("读取身份成功但恢复连接失败: {error}")),
+                Err(identity_error) => Err(identity_error),
+            }
+        }
+    }
 }
 
 #[tauri::command(async)]
@@ -358,6 +376,7 @@ fn connect_device_by_path(
         let mut info = state.current_device_info.lock().unwrap();
         *info = Some(current_info);
     }
+    state.connection_epoch.fetch_add(1, Ordering::Relaxed);
 
     // 每个连接拥有自己的停止标志；旧连接即使延迟醒来也不会看到新连接的状态。
     let running_arc = Arc::new(AtomicBool::new(true));
@@ -365,12 +384,13 @@ fn connect_device_by_path(
     let sample_rate_arc = Arc::clone(&state.sample_rate);
     let pd_log_arc = Arc::clone(&state.pd_log);
     let pd_capture_arc = Arc::clone(&state.pd_capture_enabled);
+    let device_info_arc = Arc::clone(&state.current_device_info);
 
     // Start reading thread
     let join = thread::spawn(move || {
         // device is owned exclusively by this thread; no shared mutex during reads
         let mut buf = [0u8; 64];
-        let mut last_emit = Instant::now();
+        let mut last_emit: Option<Instant> = None;
         let mut pending: Option<DeviceData> = None;
         // PD state belongs to this connection and is discarded with the thread.
         let mut pd_parser = Parser::new();
@@ -396,18 +416,19 @@ fn connect_device_by_path(
                     match ReportKind::of(report) {
                         Some(ReportKind::General) => parse_device_data(report),
                         Some(ReportKind::Pd) => {
-                            if pd_capture_arc.load(Ordering::Relaxed) {
-                                match decode_pd_report(&mut pd_parser, report) {
-                                    Ok(metadata) => {
+                            // Parser 必须吃到每一帧，否则跟随记录打开时握手丢失，后续 Request 对不上 PDO。
+                            match decode_pd_report(&mut pd_parser, report) {
+                                Ok(metadata) => {
+                                    if pd_capture_arc.load(Ordering::Relaxed) {
                                         let event = {
                                             let mut log = pd_log_arc.lock().unwrap();
                                             log.push_message(now_ms(), report.to_vec(), metadata)
                                         };
                                         let _ = app.emit("pd-data", event);
                                     }
-                                    Err(error) => {
-                                        eprintln!("PD 报告解析错误: {}", error);
-                                    }
+                                }
+                                Err(error) => {
+                                    eprintln!("PD 报告解析错误: {}", error);
                                 }
                             }
                             None
@@ -417,6 +438,9 @@ fn connect_device_by_path(
                 }
                 Err(_) => {
                     if running_for_thread.load(Ordering::Relaxed) {
+                        if let Ok(mut info) = device_info_arc.lock() {
+                            *info = None;
+                        }
                         let _ = app.emit("device-disconnected", ());
                     }
                     break;
@@ -432,10 +456,13 @@ fn connect_device_by_path(
             }
 
             let emit_interval = Duration::from_millis(rate_ms);
-            if pending.is_some() && last_emit.elapsed() >= emit_interval {
+            let due = last_emit
+                .map(|t| t.elapsed() >= emit_interval)
+                .unwrap_or(true);
+            if pending.is_some() && due {
                 let sample = pending.take().unwrap();
                 let _ = app.emit("device-data", sample);
-                last_emit = Instant::now();
+                last_emit = Some(Instant::now());
             }
         }
         // device dropped here, HID connection closed cleanly
@@ -459,16 +486,13 @@ fn connect_device(
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
 
-    // 查找匹配的设备
-    let device_info = api
-        .device_list()
-        .find(|d| d.vendor_id() == vid && d.product_id() == pid)
+    let path = collect_supported_device_infos(&api)
+        .into_iter()
+        .find(|device| device.vid == vid && device.pid == pid)
+        .map(|device| device.path)
         .ok_or(format!("找不到设备 VID:{:04X} PID:{:04X}", vid, pid))?;
 
-    let path = device_info.path().to_string_lossy().to_string();
-
-    // 使用path连接
-    drop(api); // 释放api
+    drop(api);
     connect_device_by_path(path, state, app)
 }
 
@@ -479,6 +503,7 @@ fn disconnect_device(state: State<'_, AppState>) -> Result<String, String> {
         .lock()
         .map_err(|_| "设备任务状态已损坏".to_string())?;
     stop_task(&mut task_slot);
+    state.connection_epoch.fetch_add(1, Ordering::Relaxed);
 
     // Clear device info immediately
     {
@@ -578,14 +603,35 @@ fn connect_temp_service(
         .map_err(|_| "温度任务状态已损坏".to_string())?;
     stop_task(&mut task_slot);
 
-    let addr = format!("{}:{}", ip, port);
+    let addr = format!("{ip}:{port}");
+    let mut addrs: Vec<_> = (ip.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|e| format!("无效地址: {e}"))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(format!("无法解析地址 {addr}"));
+    }
+    addrs.sort_by_key(|socket| u8::from(socket.is_ipv6()));
 
-    // 尝试连接
-    let stream = TcpStream::connect_timeout(
-        &addr.parse().map_err(|e| format!("无效地址: {}", e))?,
-        Duration::from_secs(5),
-    )
-    .map_err(|e| format!("连接失败: {}", e))?;
+    let mut last_error = None;
+    let mut stream = None;
+    for socket in addrs {
+        match TcpStream::connect_timeout(&socket, Duration::from_secs(5)) {
+            Ok(connected) => {
+                stream = Some(connected);
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let stream = stream.ok_or_else(|| {
+        format!(
+            "连接失败: {}",
+            last_error
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "无可用地址".to_string())
+        )
+    })?;
 
     stream
         .set_read_timeout(Some(Duration::from_millis(250)))
@@ -612,13 +658,17 @@ fn connect_temp_service(
                     break;
                 }
                 Ok(_) => {
-                    let trimmed = line.trim();
-                    if let Ok(temp) = trimmed.parse::<f32>() {
-                        if temp.is_finite() {
-                            let _ = app.emit("temp-data", temp);
+                    if line.len() > 256 {
+                        line.clear();
+                    } else {
+                        let trimmed = line.trim();
+                        if let Ok(temp) = trimmed.parse::<f32>() {
+                            if temp.is_finite() {
+                                let _ = app.emit("temp-data", temp);
+                            }
                         }
+                        line.clear();
                     }
-                    line.clear();
                 }
                 Err(e)
                     if matches!(
@@ -626,6 +676,9 @@ fn connect_temp_service(
                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
                     ) =>
                 {
+                    if line.len() > 256 {
+                        line.clear();
+                    }
                     continue;
                 }
                 Err(e) => {
@@ -655,18 +708,21 @@ fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String>
     Ok("已断开温度服务连接".to_string())
 }
 
+fn line_voltage(value: f32) -> Option<f32> {
+    (0.0..=60.0).contains(&value).then_some(value)
+}
+
 fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
     let sample = decode_general_sample(buf).ok()?;
     Some(DeviceData {
         voltage: sample.voltage,
         current: sample.current,
         power: sample.power,
-        dp: sample.dp,
-        dn: sample.dn,
+        dp: line_voltage(sample.dp),
+        dn: line_voltage(sample.dn),
         cc1: sample.cc1,
         cc2: sample.cc2,
-        // Preserve the existing JSON shape and frontend NaN handling.
-        temperature: sample.temperature.unwrap_or(f32::NAN),
+        temperature: sample.temperature,
         ah: sample.ah,
         wh: sample.wh,
     })
@@ -760,7 +816,7 @@ mod tests {
         assert_eq!(data.voltage, 5.0);
         assert_eq!(data.current, 2.0);
         assert_eq!(data.power, 10.0);
-        assert_eq!(data.temperature, 23.5);
+        assert_eq!(data.temperature, Some(23.5));
         assert_eq!(data.cc1, 5.0);
         assert_eq!(data.cc2, 9.0);
     }
@@ -794,7 +850,21 @@ mod tests {
 
         let data = parse_device_data(&frame).expect("越界温度不应丢掉整帧");
         assert_eq!(data.voltage, 5.0);
-        assert!(data.temperature.is_nan());
+        assert_eq!(data.temperature, None);
+        let json = serde_json::to_string(&data).expect("缺失温度必须能进 JSON");
+        assert!(
+            json.contains("\"temperature\":null"),
+            "temperature must serialize as null, got {json}"
+        );
+    }
+
+    #[test]
+    fn drops_out_of_range_data_lines_without_rejecting_the_frame() {
+        let mut frame = valid_frame();
+        frame[30..34].copy_from_slice(&1e20f32.to_le_bytes());
+        let data = parse_device_data(&frame).expect("越界 D+ 不应丢掉整帧");
+        assert_eq!(data.voltage, 5.0);
+        assert_eq!(data.dp, None);
     }
 
     #[test]
@@ -807,6 +877,18 @@ mod tests {
         let filtered = prefer_vendor_defined_interfaces(devices);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].path, "data");
+    }
+
+    #[test]
+    fn keeps_same_batch_meters_on_different_ports_separate() {
+        let mut left = device_info("left", 1, 0xFF00);
+        left.usb_port = Some("4-4".to_string());
+        let mut right = device_info("right", 1, 0xFF00);
+        right.path = "right".to_string();
+        right.usb_port = Some("4-5".to_string());
+
+        let filtered = prefer_vendor_defined_interfaces(vec![left, right]);
+        assert_eq!(filtered.len(), 2);
     }
 
     #[test]

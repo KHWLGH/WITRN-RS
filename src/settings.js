@@ -4,9 +4,9 @@
  */
 
 import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js';
-import { updateEnergyDisplay, updateStatsDisplay } from './data.js';
+import { updateEnergyDisplay, updateSliderFill, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
-import { updateTempUIVisibility } from './temperature.js';
+import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
@@ -53,7 +53,36 @@ function normalizeSettings(saved) {
   if (!['monitor', 'pd', 'settings'].includes(merged.activeView)) {
     merged.activeView = defaultSettings.activeView;
   }
+  if (merged.tempSource !== 'device' && merged.tempSource !== 'external') {
+    merged.tempSource = defaultSettings.tempSource;
+  }
   return merged;
+}
+
+/**
+ * 把采样率写入状态、下拉框，已连接时下发后端。
+ * @param {number} rate
+ */
+export async function applySampleRate(rate) {
+  const clamped = Math.round(Math.min(60_000, Math.max(10, Number(rate) || defaultSettings.sampleRate)));
+  state.settings.sampleRate = clamped;
+  const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
+  if (rateSelect) setSampleRateOption(rateSelect, clamped);
+  if (state.isConnected) {
+    try {
+      await window.__TAURI__.core.invoke('set_sample_rate', { rate: clamped });
+    } catch (err) {
+      console.error('Failed to set sample rate:', err);
+    }
+  }
+}
+
+function echoRangeUI() {
+  const start = /** @type {HTMLInputElement|null} */ (document.getElementById('range-start'));
+  const end = /** @type {HTMLInputElement|null} */ (document.getElementById('range-end'));
+  if (start) start.value = String(state.settings.rangeStart);
+  if (end) end.value = String(state.settings.rangeEnd);
+  updateSliderFill();
 }
 
 /** 回显图表纵向余量控件（loadSettings / resetSettings 共用）。 */
@@ -144,6 +173,8 @@ export async function loadSettings() {
       if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';
       const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
       if (tempPort) tempPort.value = String(state.settings.tempPort || 1573);
+      syncTempSourceUI();
+      echoRangeUI();
 
       // Fill settings are derived directly from opacity.
       /** @param {string} id @param {number|undefined} val */
@@ -279,6 +310,9 @@ export async function resetSettings() {
     if (tempIp) tempIp.value = state.settings.tempIp;
     const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
     if (tempPort) tempPort.value = String(state.settings.tempPort);
+    syncTempSourceUI();
+    echoRangeUI();
+    await applySampleRate(state.settings.sampleRate);
 
     // Opacity inputs
     /** @param {string} id @param {number} val */

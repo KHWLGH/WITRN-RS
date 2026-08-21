@@ -27,10 +27,10 @@ import {
 } from './data.js';
 import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
 import { enhanceSelects } from './dropdown.js';
-import { debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
+import { applySampleRate, debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
 import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
-import { connectTempService, disconnectTempService, setTempConnected, updateTempUIVisibility } from './temperature.js';
+import { connectTempService, disconnectTempService, setTempConnected, syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
@@ -291,16 +291,9 @@ function setupControls() {
   const sampleRateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (sampleRateEl) {
     sampleRateEl.addEventListener('change', async (e) => {
-      state.settings.sampleRate = Number.parseInt(/** @type {HTMLSelectElement} */ (e.target).value, 10);
+      await applySampleRate(Number.parseInt(/** @type {HTMLSelectElement} */ (e.target).value, 10));
       updateChartRange();
       updateCharts();
-      if (state.isConnected) {
-        try {
-          await invoke('set_sample_rate', { rate: state.settings.sampleRate });
-        } catch (err) {
-          console.error('Failed to set sample rate:', err);
-        }
-      }
       debouncedSaveSettings();
     });
   }
@@ -472,6 +465,17 @@ function setupControls() {
       debouncedSaveSettings();
     });
   }
+
+  /** @param {'device'|'external'} source */
+  const onTempSource = (source) => {
+    if (state.isTempConnected) return;
+    state.settings.tempSource = source;
+    syncTempSourceUI();
+    debouncedSaveSettings();
+  };
+  document.getElementById('temp-source-device')?.addEventListener('change', () => onTempSource('device'));
+  document.getElementById('temp-source-external')?.addEventListener('change', () => onTempSource('external'));
+  syncTempSourceUI();
 
   // Auto Pause Controls
   const apBasis = /** @type {HTMLSelectElement} */ (document.getElementById('ap-basis'));

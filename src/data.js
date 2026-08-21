@@ -32,8 +32,12 @@ export function addDataPoint(data) {
   // 功率恒取绝对值（电压非负，功率符号与电流一致，不损失信息）。
   const currentValue = state.settings.signedCurrent ? data.current : Math.abs(data.current);
   const powerAbs = Math.abs(data.power);
-  // 后端只推送有限温度值（见 lib.rs 的 temp-data 分支），此处只需区分「有 / 无」。
-  const tempValue = state.currentTemp ?? Number.NaN;
+  const hidTemp = Number.isFinite(data.temperature) ? /** @type {number} */ (data.temperature) : Number.NaN;
+  let tempValue = Number.NaN;
+  if (state.isTempConnected) {
+    tempValue =
+      state.settings.tempSource === 'device' ? hidTemp : (state.currentTemp ?? Number.NaN);
+  }
 
   // 仅录制模式：未录制时只更新实时显示
   if (!state.isRecording) {
@@ -43,16 +47,24 @@ export function addDataPoint(data) {
     return;
   }
 
-  const nowMs = now.getTime();
-  const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
-  const relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
-
-  const dpValue = Number.isFinite(data.dp) ? /** @type {number} */ (data.dp) : Number.NaN;
-  const dnValue = Number.isFinite(data.dn) ? /** @type {number} */ (data.dn) : Number.NaN;
+  /** @param {number|undefined} v */
+  const lineVoltage = (v) =>
+    Number.isFinite(v) && /** @type {number} */ (v) >= 0 && /** @type {number} */ (v) <= 60
+      ? /** @type {number} */ (v)
+      : Number.NaN;
+  const dpValue = lineVoltage(data.dp);
+  const dnValue = lineVoltage(data.dn);
   const cc1Value = Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN;
   const cc2Value = Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN;
 
   const cols = state.chartSeries;
+  const nowMs = now.getTime();
+  const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
+  let relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
+  const prevX = cols.x.length > 0 ? cols.x.at(-1) : Number.NaN;
+  const minStep = Math.max(state.settings.sampleRate / 1000, 0.001);
+  if (Number.isFinite(prevX) && relSeconds <= prevX) relSeconds = prevX + minStep;
+
   cols.timestamps.push(nowMs);
   cols.voltage.push(data.voltage);
   cols.current.push(currentValue);
@@ -71,15 +83,15 @@ export function addDataPoint(data) {
     updateStats('temp', tempValue);
   }
 
-  // 能量累计（方向开启时反向电流同样计入消耗，取绝对值积分）
-  if (state.energy.lastTimestamp !== null) {
-    const dt = (nowMs - state.energy.lastTimestamp) / 3600000;
+  // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
+  if (state.energy.lastX !== null) {
+    const dt = (relSeconds - state.energy.lastX) / 3600;
     if (dt >= 0) {
       state.energy.wh += powerAbs * dt;
       state.energy.mah += Math.abs(currentValue) * 1000 * dt;
     }
   }
-  state.energy.lastTimestamp = now.getTime();
+  state.energy.lastX = relSeconds;
 
   updateRealtimeDisplay({ ...data, current: currentValue, power: powerAbs, temp: tempValue });
   scheduleStatsUpdate();
@@ -479,7 +491,7 @@ export function resetStats() {
 
 /** 重置能量累计。 */
 export function resetEnergy() {
-  state.energy = { wh: 0, mah: 0, lastTimestamp: null };
+  state.energy = { wh: 0, mah: 0, lastX: null };
   updateEnergyDisplay();
 }
 
@@ -530,7 +542,7 @@ export function startRecording() {
     if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartData.timestamps.at(0);
   }
   // 暂停期间不属于下一段能量积分区间。
-  state.energy.lastTimestamp = null;
+  state.energy.lastX = null;
   state.autoPauseSettings.triggerStartTime = null;
 
   const el = document.getElementById('record-status');
@@ -551,7 +563,7 @@ export function stopRecording() {
 
   state.isRecording = false;
   state.recordingStartTime = null;
-  state.energy.lastTimestamp = null;
+  state.energy.lastX = null;
   state.autoPauseSettings.triggerStartTime = null;
 
   const el = document.getElementById('record-status');

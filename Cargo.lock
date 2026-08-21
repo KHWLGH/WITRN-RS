@@ -4925,6 +4925,7 @@ version = "0.1.5"
 dependencies = [
  "hidapi",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-decorum",

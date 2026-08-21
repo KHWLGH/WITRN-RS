@@ -65,9 +65,9 @@ pub fn decode_general_sample(data: &[u8]) -> Result<GeneralSample> {
             field: "voltage/current",
         });
     }
-    if !ah.is_finite() || !wh.is_finite() || !dp.is_finite() || !dn.is_finite() {
+    if !ah.is_finite() || !wh.is_finite() {
         return Err(Error::InvalidMeasurement {
-            field: "accumulated/data-line values",
+            field: "accumulated values",
         });
     }
 

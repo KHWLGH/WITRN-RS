@@ -553,14 +553,27 @@
 
     <div id="flyout-temp" hidden>
       <div class="flyout-row">
-        <label for="temp-ip" class="flyout-row-label">IP</label>
-        <input type="text" id="temp-ip" value="127.0.0.1" class="ribbon-input" />
+        <span class="flyout-row-label">来源</span>
+        <span class="flyout-input-group">
+          <label class="radio-label">
+            <input type="radio" name="temp-source" id="temp-source-device" /> 本机
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="temp-source" id="temp-source-external" checked /> 外部
+          </label>
+        </span>
       </div>
-      <div class="flyout-row">
-        <label for="temp-port" class="flyout-row-label">端口</label>
-        <input type="number" id="temp-port" value="1573" class="ribbon-input" />
+      <div id="temp-external-fields">
+        <div class="flyout-row">
+          <label for="temp-ip" class="flyout-row-label">IP</label>
+          <input type="text" id="temp-ip" value="127.0.0.1" class="ribbon-input" />
+        </div>
+        <div class="flyout-row">
+          <label for="temp-port" class="flyout-row-label">端口</label>
+          <input type="number" id="temp-port" value="1573" class="ribbon-input" />
+        </div>
       </div>
-      <div class="card-hint">外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。</div>
+      <div class="card-hint" id="temp-source-hint">外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。</div>
     </div>
 
     <div class="toast-region" id="toast-region" aria-live="polite"></div>

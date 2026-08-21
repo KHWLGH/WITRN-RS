@@ -41,6 +41,7 @@
  * @property {boolean} statsRange
  * @property {string}  tempIp
  * @property {number}  tempPort
+ * @property {'device'|'external'} tempSource - 温度来源：本机仪表 / 外部 TCP
  * @property {string}  activeView       - 上次活动的工作区视图 id
  * @property {boolean} pdFollowRecording - PD 采集是否跟随主记录状态
  * @property {'auto'|'custom'} chartHeadroomMode - 图表纵向余量：auto=软件决定，custom=用户自定义
@@ -75,7 +76,7 @@
  * @typedef {Object} Energy
  * @property {number} wh
  * @property {number} mah
- * @property {number|null} lastTimestamp
+ * @property {number|null} lastX - 上一个已积分点的相对秒；录制段开始为 null
  */
 
 /**
@@ -196,6 +197,7 @@ export const defaultSettings = {
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573,
+  tempSource: 'external',
   activeView: 'monitor',
   pdFollowRecording: true,
   chartHeadroomMode: 'auto',
@@ -259,7 +261,7 @@ export const state = {
   },
 
   /** @type {Energy} */
-  energy: { wh: 0, mah: 0, lastTimestamp: null },
+  energy: { wh: 0, mah: 0, lastX: null },
 
   // ── Recording ──
   /** @type {boolean} */

@@ -1,6 +1,8 @@
 // @ts-check
 /**
  * @file 温度服务连接管理及温度相关 UI 可见性控制。
+ *
+ * 来源二选一：本机（仪表 HID 温度）或外部 TCP。连/断仍只走命令栏按钮。
  */
 
 import { setSeriesVisible } from './chart.js';
@@ -10,14 +12,43 @@ import { toast } from './ui/toast.js';
 
 const { invoke } = window.__TAURI__.core;
 
+const DEVICE_HINT = '使用当前连接仪表报告的温度。使用命令栏按钮连接或断开。';
+const EXTERNAL_HINT = '外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。';
+
+/** @returns {'device'|'external'} */
+export function currentTempSource() {
+  return state.settings.tempSource === 'device' ? 'device' : 'external';
+}
+
+/** 回显来源控件并显隐 IP/端口。 */
+export function syncTempSourceUI() {
+  const device = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-source-device'));
+  const external = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-source-external'));
+  const isDevice = currentTempSource() === 'device';
+  if (device) device.checked = isDevice;
+  if (external) external.checked = !isDevice;
+  const fields = document.getElementById('temp-external-fields');
+  if (fields) fields.hidden = isDevice;
+  const hint = document.getElementById('temp-source-hint');
+  if (hint) hint.textContent = isDevice ? DEVICE_HINT : EXTERNAL_HINT;
+}
+
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
 
-/** 连接到温度服务（TCP）。 */
+/** 连接到温度服务（本机或 TCP）。 */
 export async function connectTempService() {
+  if (currentTempSource() === 'device') {
+    if (!state.isConnected) {
+      toast.warning('请先连接设备');
+      return;
+    }
+    setTempConnected(true);
+    return;
+  }
+
   const ipEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   const portEl = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
   const ip = ipEl?.value || '127.0.0.1';
-  // 端口在输入框 change 时已校验；后端命令签名是 u16，越界值会被 Tauri 反序列化直接拒绝。
   const port = Number.parseInt(portEl?.value || '', 10);
 
   try {
@@ -32,6 +63,10 @@ export async function connectTempService() {
 
 /** 断开温度服务。 */
 export async function disconnectTempService() {
+  if (currentTempSource() === 'device') {
+    setTempConnected(false);
+    return;
+  }
   try {
     await invoke('disconnect_temp_service');
     setTempConnected(false);
@@ -57,6 +92,8 @@ export function setTempConnected(connected) {
 
   setDisabled('temp-ip', connected);
   setDisabled('temp-port', connected);
+  setDisabled('temp-source-device', connected);
+  setDisabled('temp-source-external', connected);
   syncTempUI(connected);
 
   if (connected) {

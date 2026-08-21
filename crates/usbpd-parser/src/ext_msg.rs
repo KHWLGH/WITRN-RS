@@ -406,21 +406,14 @@ fn status(data: &[u8], bit_loc: (u32, u32), ctx: &Ctx<'_>) -> Result<Metadata> {
     });
 
     // The CL/CV flag only means anything while a PPS supply is in force, which is
-    // what the RDO on record tells us.
+    // what the RDO on record tells us. No Request yet → leave the bit reserved.
     let in_pps = ctx
         .last_rdo
-        .ok_or(ParseError::MissingContext {
-            which: "last_rdo",
-            field: F,
-        })?
-        .get("Data Objects")
+        .and_then(|rdo| rdo.get("Data Objects"))
         .and_then(|m| m.get("RDO"))
         .and_then(|rdo| rdo.pdo())
         .map(|pdo| sl(pdo.raw().as_str(), 0, 4) == "1100")
-        .ok_or(ParseError::MissingContext {
-            which: "last_rdo",
-            field: F,
-        })?;
+        .unwrap_or(false);
 
     let ef = f(data, 3, 4);
     let mut event_flags = vec![

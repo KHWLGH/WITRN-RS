@@ -501,17 +501,13 @@ async function importPdCapture() {
       return;
     }
 
-    log.length = 0;
-    filtered = [];
-    bufferedWhilePaused = 0;
-    softCapWarned = false;
-    metaCache.clear();
-    clearSelection();
-
     const needBackend = result.entries.some((e) => {
       if (isDivider(e)) return false;
       return (e.bytes?.length ?? 0) > 0;
     });
+
+    /** @type {(typeof result.entries)} */
+    let nextEntries = result.entries;
     if (needBackend) {
       const loaded = await invokeCmd('pd_log_replace', {
         entries: result.entries.map((e) => {
@@ -519,19 +515,26 @@ async function importPdCapture() {
           return { t: e.t, divider: false, bytes: e.bytes ?? [] };
         }),
       });
-      if (Array.isArray(loaded) && loaded.length === result.entries.length) {
-        for (const ev of loaded) {
-          const entry = normalizePdPayload(ev);
-          if (entry) log.push(entry);
-        }
-      } else {
-        void invokeCmd('pd_log_clear');
-        for (const entry of result.entries) log.push(entry);
+      if (!Array.isArray(loaded) || loaded.length !== result.entries.length) {
+        toast.error('导入失败: 后端无法替换报文日志');
+        return;
+      }
+      nextEntries = [];
+      for (const ev of loaded) {
+        const entry = normalizePdPayload(ev);
+        if (entry) nextEntries.push(entry);
       }
     } else {
       void invokeCmd('pd_log_clear');
-      for (const entry of result.entries) log.push(entry);
     }
+
+    log.length = 0;
+    filtered = [];
+    bufferedWhilePaused = 0;
+    softCapWarned = false;
+    metaCache.clear();
+    clearSelection();
+    for (const entry of nextEntries) log.push(entry);
 
     rebuildFilterAndWindow();
     toast.success(`成功导入 ${log.length} 条报文`);

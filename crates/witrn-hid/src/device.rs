@@ -88,7 +88,7 @@ pub fn decode_pd_report(parser: &mut Parser, data: &[u8]) -> Result<Metadata> {
     // names the ordered set that framed it.
     let sop = sop_of(data[2]).ok_or(Error::UnknownOrderedSet { byte: data[2] })?;
     let end = (data[1] as usize + 2).clamp(3, data.len());
-    Ok(parser.try_parse(
+    Ok(parser.parse(
         &data[3..end],
         ParseOptions {
             sop,
@@ -96,7 +96,7 @@ pub fn decode_pd_report(parser: &mut Parser, data: &[u8]) -> Result<Metadata> {
             prop_protocol: true,
             ..Default::default()
         },
-    )?)
+    ))
 }
 
 /// A parsed report and the moment it was read.

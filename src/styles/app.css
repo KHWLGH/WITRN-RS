@@ -25,8 +25,9 @@ html[data-ui-scale-css] .app-shell {
   height: calc(100vh / var(--ui-scale, 1));
 }
 
-/* Linux 无边框窗口没有 shadow 装饰，加 1px 描边补偿轮廓 */
-:root[data-os="linux"]:not(.is-maximized) .app-shell {
+/* 无边框窗口在 Linux/macOS 没有 shadow 装饰，加 1px 描边补偿轮廓 */
+:root[data-os="linux"]:not(.is-maximized) .app-shell,
+:root[data-os="macos"]:not(.is-maximized) .app-shell {
   border: 1px solid var(--stroke-divider);
 }
 

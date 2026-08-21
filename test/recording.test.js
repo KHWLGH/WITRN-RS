@@ -36,7 +36,7 @@ function resetRecordingState() {
   state.recordingBaseSeconds = 0;
   state.lastRecordingStartTime = null;
   setChartColumns(emptyChartColumns());
-  state.energy = { wh: 12, mah: 34, lastTimestamp: 1234 };
+  state.energy = { wh: 12, mah: 34, lastX: 1234 };
   state.autoPauseSettings.triggerStartTime = 5678;
 }
 
@@ -45,14 +45,14 @@ test('recording session boundaries reset integration and auto-pause baselines', 
 
   startRecording();
   assert.equal(state.isRecording, true);
-  assert.equal(state.energy.lastTimestamp, null);
+  assert.equal(state.energy.lastX, null);
   assert.equal(state.autoPauseSettings.triggerStartTime, null);
 
-  state.energy.lastTimestamp = 9999;
+  state.energy.lastX = 9999;
   state.autoPauseSettings.triggerStartTime = 9999;
   stopRecording();
   assert.equal(state.isRecording, false);
-  assert.equal(state.energy.lastTimestamp, null);
+  assert.equal(state.energy.lastX, null);
   assert.equal(state.autoPauseSettings.triggerStartTime, null);
 });
 

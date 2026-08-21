@@ -172,14 +172,44 @@ fn a_status_message_reads_cl_cv_because_a_pps_request_is_in_force() {
 }
 
 #[test]
-fn a_status_message_without_a_request_on_record_cannot_be_decoded() {
+fn a_status_message_without_a_request_on_record_still_decodes() {
     let sdb = [30u8, 0x02, 0x00, 0x10, 0x01, 0x00, 0x01];
     let bytes = extended(header(1, 3, 2, 1, 1, 2), 0x8007, &sdb, 3);
 
-    // No preceding Request: the CL/CV flag has no meaning, so the body is reported raw.
-    let msg = Parser::new().parse(&bytes, opts());
-    assert!(msg.get("Error Data").is_some());
-    assert!(Parser::new().try_parse(&bytes, opts()).is_err());
+    let msg = Parser::new()
+        .try_parse(&bytes, opts())
+        .expect("Status without an RDO should still decode");
+    let sdb = msg.get("SDB").unwrap();
+    assert_eq!(
+        sdb.get("Internal Temp").unwrap().value().as_str(),
+        Some("30\u{b0}C")
+    );
+    assert!(sdb
+        .get("Event Flags")
+        .unwrap()
+        .get("CL/CV Mode")
+        .is_none());
+}
+
+#[test]
+fn an_unchunked_status_uses_data_size_not_ndo() {
+    let sdb = [30u8, 0x02, 0x00, 0x10, 0x01, 0x00, 0x01];
+    let mut bytes = header(1, 0, 2, 1, 1, 2).to_le_bytes().to_vec();
+    bytes.extend_from_slice(&0x0007u16.to_le_bytes());
+    bytes.extend_from_slice(&sdb);
+
+    let msg = Parser::new()
+        .try_parse(&bytes, opts())
+        .expect("unchunked Status with NDO=0 must slice by Data Size");
+    assert_eq!(
+        msg.get("SDB")
+            .unwrap()
+            .get("Internal Temp")
+            .unwrap()
+            .value()
+            .as_str(),
+        Some("30\u{b0}C")
+    );
 }
 
 #[test]
@@ -270,6 +300,26 @@ fn a_cable_responds_to_discover_identity_over_sop_prime() {
         Some("0x2109")
     );
     // The cable VDO is only decoded because the ID header said "Passive Cable".
+    assert!(block.get("Passive Cable VDO").is_some());
+}
+
+#[test]
+fn a_cable_responds_to_discover_identity_over_sop_double_prime() {
+    let mut parser = Parser::new();
+
+    let vdm_header = 0xFF01_A041u32;
+    let id_header = 0x1860_0000u32 | 0x2109;
+    let objects = [vdm_header, id_header, 0x0000_0000, 0x0001_0100, 0x0308_2032];
+
+    let msg = parser.parse(
+        &message(header(0, 5, 0, 0, 0, 0b01111), &objects),
+        ParseOptions {
+            sop: Sop::SopDoublePrime,
+            ..Default::default()
+        },
+    );
+
+    let block = msg.get("Data Objects").unwrap();
     assert!(block.get("Passive Cable VDO").is_some());
 }
 

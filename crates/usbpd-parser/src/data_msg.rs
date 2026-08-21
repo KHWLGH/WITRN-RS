@@ -751,7 +751,7 @@ fn vendor_defined(data: &[u8], bit_loc: (u32, u32), ctx: &Ctx<'_>) -> Result<Met
 
             let id_header = &fields[1];
             match ctx.sop {
-                Sop::SopPrime => {
+                Sop::SopPrime | Sop::SopDoublePrime => {
                     let product = id_header
                         .get("Product Type (Cable Plug/VPD)")
                         .and_then(|m| m.value().as_str())

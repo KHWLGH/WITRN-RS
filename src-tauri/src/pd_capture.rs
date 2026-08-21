@@ -87,7 +87,7 @@ impl PdLog {
 
     /// 用导入的原始帧重建日志。分隔行只出现在返回的事件里，不占 seq。
     pub fn replace(&mut self, entries: Vec<PdLoadEntry>) -> Result<Vec<PdEvent>, String> {
-        self.messages.clear();
+        let mut next = PdLog::default();
         let mut parser = Parser::new();
         let mut out = Vec::with_capacity(entries.len());
         for entry in entries {
@@ -100,8 +100,9 @@ impl PdLog {
             }
             let meta = decode_pd_report(&mut parser, &entry.bytes)
                 .map_err(|e| format!("导入的报文无法解析: {e}"))?;
-            out.push(self.push_message(entry.t, entry.bytes, meta));
+            out.push(next.push_message(entry.t, entry.bytes, meta));
         }
+        *self = next;
         Ok(out)
     }
 }
@@ -289,5 +290,26 @@ mod tests {
         let s = summarize(log.meta_at(1).unwrap());
         assert_eq!(s.msg_type, "Request");
         assert_eq!(s.summary, "[2] F 9.0V@3.0A");
+    }
+
+    #[test]
+    fn replace_failure_keeps_existing_messages() {
+        let caps = pd_frame(&[0xA1, 0x11, 0x2C, 0x91, 0x01, 0x08], 224);
+        let mut log = PdLog::default();
+        log.replace(vec![PdLoadEntry {
+            t: 1,
+            divider: false,
+            bytes: caps,
+        }])
+        .unwrap();
+        assert!(log.meta_at(0).is_some());
+
+        let failed = log.replace(vec![PdLoadEntry {
+            t: 2,
+            divider: false,
+            bytes: vec![],
+        }]);
+        assert!(failed.is_err());
+        assert!(log.meta_at(0).is_some());
     }
 }

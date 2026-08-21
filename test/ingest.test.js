@@ -33,8 +33,10 @@ function resetIngestState() {
     power: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
     temp: { min: Infinity, max: -Infinity, sum: 0, count: 0 },
   };
-  state.energy = { wh: 0, mah: 0, lastTimestamp: null };
+  state.energy = { wh: 0, mah: 0, lastX: null };
   state.currentTemp = null;
+  state.isTempConnected = false;
+  state.settings.tempSource = 'external';
   state.autoPauseSettings.enabled = false;
 }
 
@@ -44,7 +46,8 @@ test('signed-current ON keeps the sign; power and energy stay non-negative', () 
   resetIngestState();
   state.settings.signedCurrent = true;
   // 提前一小时的积分基线，让能量段有确定的正 dt
-  state.energy.lastTimestamp = Date.now() - 3_600_000;
+  state.energy.lastX = 0;
+  state.recordingBaseSeconds = 3600;
 
   addDataPoint(sample);
 
@@ -87,4 +90,45 @@ test('missing signal fields are stored as NaN', () => {
 
   assert.ok(Number.isNaN(state.chartData.dp.at(-1)));
   assert.ok(Number.isNaN(state.chartData.cc2.at(-1)));
+});
+
+test('out-of-range D+/D- are stored as NaN', () => {
+  resetIngestState();
+  addDataPoint({ voltage: 5, current: 1, power: 5, dp: 1e20, dn: 2.7 });
+  assert.ok(Number.isNaN(state.chartData.dp.at(-1)));
+  assert.equal(state.chartData.dn.at(-1), 2.7);
+});
+
+test('HID temperature is ignored until the temperature service is connected', () => {
+  resetIngestState();
+  state.settings.tempSource = 'device';
+  addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
+  assert.ok(Number.isNaN(state.chartData.temp.at(-1)));
+});
+
+test('device temperature source records HID temperature', () => {
+  resetIngestState();
+  state.settings.tempSource = 'device';
+  state.isTempConnected = true;
+  addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
+  assert.equal(state.chartData.temp.at(-1), 36.5);
+});
+
+test('external temperature source prefers TCP over HID', () => {
+  resetIngestState();
+  state.settings.tempSource = 'external';
+  state.isTempConnected = true;
+  state.currentTemp = 21.25;
+  addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
+  assert.equal(state.chartData.temp.at(-1), 21.25);
+});
+
+test('colliding wall-clock samples still advance x and energy', () => {
+  resetIngestState();
+  state.settings.sampleRate = 250;
+  addDataPoint({ voltage: 5, current: 1, power: 5 });
+  const firstX = state.chartSeries.x.at(-1);
+  addDataPoint({ voltage: 5, current: 1, power: 5 });
+  assert.ok(state.chartSeries.x.at(-1) > firstX);
+  assert.ok(state.energy.wh > 0);
 });

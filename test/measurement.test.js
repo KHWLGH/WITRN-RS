@@ -11,6 +11,7 @@ import {
 test('parses day-prefixed and fractional relative times', () => {
   assert.equal(parseRelativeTime('0.01:02:03.500'), 3723.5);
   assert.equal(parseRelativeTime('01:02:03.5'), 3723.5);
+  assert.equal(parseRelativeTime('1.00:00:00.000'), 86400);
   assert.equal(parseRelativeTime('not-a-time'), null);
 });
 

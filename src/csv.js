@@ -14,11 +14,12 @@ import {
   updateStatsDisplay,
 } from './data.js';
 import { calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
+import { applySampleRate, debouncedSaveSettings } from './settings.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
 import { toast } from './ui/toast.js';
-import { setSampleRateOption } from './utils.js';
+
 
 // 文件选择器保留原生实现：Tauri v2 通过对话框选择在运行时授予所选路径的 fs scope，
 // 换成应用内实现会直接破坏 writeTextFile / readTextFile 的权限。
@@ -54,11 +55,15 @@ export async function exportCSV(withTemp = false) {
    * @returns {string}
    */
   const formatExcelTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
-    return `="${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}"`;
+    const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+    const day = Math.floor(safe / 86400);
+    const rem = safe - day * 86400;
+    const h = Math.floor(rem / 3600);
+    const m = Math.floor((rem % 3600) / 60);
+    const s = Math.floor(rem % 60);
+    const ms = Math.floor((rem % 1) * 1000);
+    const hms = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    return day > 0 ? `="${day}.${hms}"` : `="${hms}"`;
   };
 
   const sampTime = state.settings.sampleRate;
@@ -118,18 +123,6 @@ export async function exportCSV(withTemp = false) {
 /** 从 CSV 文件导入数据。 */
 export async function importCSV() {
   try {
-    if (state.isRecording || state.chartData.timestamps.length > 0) {
-      const message = state.isRecording
-        ? '当前正在录制，导入 CSV 将停止录制并清除现有记录。\n确定要继续吗？'
-        : '当前已有数据，导入 CSV 将清除现有记录。\n确定要继续吗？';
-      const confirmed = await ask(message, {
-        title: '确认导入',
-        kind: 'warning',
-      });
-      if (!confirmed) return;
-      if (state.isRecording) stopRecording();
-    }
-
     const selected = await open({
       multiple: false,
       filters: [{ name: 'CSV File', extensions: ['csv'] }],
@@ -236,6 +229,17 @@ export async function importCSV() {
       throw new Error('No valid data found in CSV');
     }
 
+    if (state.isRecording || state.chartData.timestamps.length > 0) {
+      const message = state.isRecording
+        ? '当前正在录制，导入 CSV 将停止录制并清除现有记录。\n确定要继续吗？'
+        : '当前已有数据，导入 CSV 将清除现有记录。\n确定要继续吗？';
+      const confirmed = await ask(message, {
+        title: '确认导入',
+        kind: 'warning',
+      });
+      if (!confirmed) return;
+    }
+
     // uPlot 要求 x 非降序（二分查找 / 视窗切片依赖有序数据）；文件行乱序时按时间重排
     let isSorted = true;
     for (let i = 1; i < newSeconds.length; i++) {
@@ -261,11 +265,11 @@ export async function importCSV() {
     }
 
     // Commit changes
+    if (state.isRecording) stopRecording();
     clearAndResetStats();
 
-    state.settings.sampleRate = newSampleRate;
-    const rateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
-    if (rateEl) setSampleRateOption(rateEl, newSampleRate);
+    await applySampleRate(newSampleRate);
+    void debouncedSaveSettings();
     state.lastRecordingStartTime = newStartTime;
 
     const cols = emptyChartColumns(newSeconds.length);
@@ -295,7 +299,7 @@ export async function importCSV() {
     const importedEnergy = calculateEnergy(newTimestamps, newCurrent, newPower);
     state.energy.wh = importedEnergy.wh;
     state.energy.mah = importedEnergy.mah;
-    state.energy.lastTimestamp = null;
+    state.energy.lastX = null;
 
     const importedHasTemp = newTemp.some((t) => Number.isFinite(t));
     if (importedHasTemp) {

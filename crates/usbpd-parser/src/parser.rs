@@ -109,6 +109,11 @@ impl Parser {
         }
 
         if opts.sop.is_reset() {
+            if !opts.has_context() {
+                self.last_pdo = None;
+                self.last_ext = None;
+                self.last_rdo = None;
+            }
             return Ok(Metadata::new(
                 Raw::Text(opts.sop.as_str().into()),
                 BitLoc::None,
@@ -235,7 +240,8 @@ fn decode(
         .to_owned();
 
     // Number of Data Objects counts 32-bit words after the 16-bit Message Header.
-    let end = 2 + num_objs * 4;
+    // Unchunked extended messages set NDO=0; length is Extended Header Data Size.
+    let mut end = 2 + num_objs * 4;
 
     let mut body = None;
     let ex_header = if extended {
@@ -246,6 +252,19 @@ fn decode(
     } else {
         None
     };
+
+    if let Some(ex) = ex_header.as_ref() {
+        let chunked = ex.get("Chunked").and_then(|m| m.value().as_bool()) == Some(true);
+        if !chunked {
+            let size = ex
+                .get("Data Size")
+                .and_then(|m| m.value().as_int())
+                .unwrap_or(0)
+                .max(0) as usize;
+            end = 4 + size;
+        }
+    }
+    end = end.min(data.len());
 
     {
         let ctx = Ctx {
@@ -454,6 +473,22 @@ mod tests {
         );
         assert_eq!(msg.field(), "PD");
         assert_eq!(msg.value().as_str(), Some("Hard_Reset"));
+    }
+
+    #[test]
+    fn a_hard_reset_forgets_source_capabilities() {
+        let mut parser = Parser::new();
+        parser.parse(&CAPS, opts());
+        assert!(parser.last_pdo().is_some());
+        parser.parse(
+            &[],
+            ParseOptions {
+                sop: Sop::HardReset,
+                ..Default::default()
+            },
+        );
+        assert!(parser.last_pdo().is_none());
+        assert!(parser.last_rdo().is_none());
     }
 
     #[test]

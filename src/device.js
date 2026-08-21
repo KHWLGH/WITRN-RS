@@ -23,6 +23,8 @@ export async function refreshDeviceList() {
 
     select.innerHTML = '';
 
+    const previousPath = state.selectedDevicePath;
+
     if (state.deviceList.length === 0) {
       const option = document.createElement('option');
       option.value = '';
@@ -41,10 +43,9 @@ export async function refreshDeviceList() {
         select.appendChild(option);
       });
 
-      if (state.deviceList.length > 0) {
-        select.selectedIndex = 0;
-        onDeviceSelect();
-      }
+      const keepIndex = previousPath ? state.deviceList.findIndex((d) => d.path === previousPath) : -1;
+      select.selectedIndex = keepIndex >= 0 ? keepIndex : 0;
+      onDeviceSelect();
     }
 
     return state.deviceList;

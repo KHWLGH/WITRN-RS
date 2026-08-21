@@ -6,7 +6,7 @@
  * （#decorum-tb-minimize/maximize/close），本模块不再画按钮，只做样式
  * 层面的重绘（styles/app.css）。
  *
- * Linux：decorum 不支持，本模块自绘 最小化 / 最大化还原 / 关闭 三按钮
+ * Linux / macOS：decorum 不支持，本模块自绘 最小化 / 最大化还原 / 关闭 三按钮
  * （与 Windows 侧共享同一套 CSS 观感），并在四边+四角放透明热区调
  * startResizeDragging() 实现无边框窗口的边缘调整大小（Linux 无 shadow
  * 装饰，窗口管理器不提供拉伸边）。
@@ -26,7 +26,7 @@ const RESIZE_DIRECTIONS = /** @type {const} */ ({
   SouthWest: 'sw-resize',
 });
 
-/** 初始化标题栏拖拽与窗口控制。窗口按钮仅 Linux 需要自绘。 */
+/** 初始化标题栏拖拽与窗口控制。窗口按钮在非 Windows 上自绘。 */
 export function initWindowControls() {
   const appWindow = window.__TAURI__.window.getCurrentWindow();
 
@@ -47,7 +47,7 @@ export function initWindowControls() {
     });
   }
 
-  if (document.documentElement.getAttribute('data-os') !== 'linux') return;
+  if (document.documentElement.getAttribute('data-os') === 'windows') return;
 
   const container = document.getElementById('titlebar-controls');
   if (!container) return;

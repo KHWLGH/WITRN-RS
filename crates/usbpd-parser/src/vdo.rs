@@ -146,7 +146,7 @@ pub(crate) fn id_header_vdo(raw: &str, bit_loc: (u32, u32), sop: Sop) -> Result<
                 _ => "Reserved",
             },
         ),
-        Sop::SopPrime => Metadata::new(
+        Sop::SopPrime | Sop::SopDoublePrime => Metadata::new(
             sl(raw, 2, 5),
             (29, 27),
             "Product Type (Cable Plug/VPD)",
@@ -872,8 +872,8 @@ mod tests {
             .is_some());
         assert!(id_header_vdo(&raw, (0, 31), Sop::SopDoublePrime)
             .unwrap()
-            .get("Product Type (UFP)")
-            .is_none());
+            .get("Product Type (Cable Plug/VPD)")
+            .is_some());
     }
 
     #[test]
