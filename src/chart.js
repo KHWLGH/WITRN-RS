@@ -713,7 +713,8 @@ function mkYAxis(scaleKey, label, color, side) {
     labelSize: 16,
     labelGap: 2,
     font: `12px ${MONO_FONT}`,
-    gap: 4,
+    // 数字与竖脊之间的空隙；默认朝数字伸出的 ticks 已关闭（见 drawYAxisChrome）
+    gap: 6,
     size: axisAutoSize,
     // 等分刻度由 uniformSplits 决定，uPlot 基于 space / incrs 的自动选点被完全覆盖
     splits: (/** @type {any} */ u) => uniformSplits(u, scaleKey),
@@ -721,8 +722,8 @@ function mkYAxis(scaleKey, label, color, side) {
     // 四条 Y 轴画同一套主网格：量程已量化到相同的高度比例，像素级重合；
     // 令牌是不透明色，重复描边不会叠亮（见 tokens.css 的说明）
     grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
-    // 刻度线与网格解耦：刻度线用通道色，一眼看出哪条轴对应哪条曲线
-    ticks: { show: true, stroke: color, width: 1, size: 6 },
+    // 关掉 uPlot 朝数字伸出的横刻度：右侧会像负号。竖脊 + 朝图内的短刻度由 drawYAxisChrome 画
+    ticks: { show: false },
   };
 }
 
@@ -792,6 +793,69 @@ function drawMinorGrid(u) {
   ctx.restore();
 }
 
+/**
+ * 传统坐标轴形态：每条可见 Y 轴一条通道色竖脊；贴着绘图区边缘的轴再朝图内画短刻度。
+ * 刻度在竖脊朝图一侧（右侧是 `┤ 1` 而不是 `── 1`），不会被看成负号。
+ * 外侧轴（同一侧第二条）脊在轴沟里，短刻度若朝图会戳到内侧轴标题，故只画脊。
+ * @param {any} u
+ */
+function drawYAxisChrome(u) {
+  const { ctx, bbox } = u;
+  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
+
+  const left = bbox.left;
+  const right = bbox.left + bbox.width;
+  const top = bbox.top;
+  const bottom = bbox.top + bbox.height;
+  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
+  const tickLen = 5 * pxRatio;
+  const edgeEps = pxRatio * 1.5;
+
+  ctx.save();
+  ctx.lineWidth = pxRatio;
+  ctx.lineCap = 'butt';
+  const offset = (ctx.lineWidth % 2) / 2;
+  ctx.translate(offset, offset);
+
+  const axes = u.axes ?? [];
+  for (let i = 1; i < axes.length; i++) {
+    const axis = axes[i];
+    if (!axis?.show || axis._show === false || axis._pos == null) continue;
+    if (u.scales?.[axis.scale]?.min == null) continue;
+
+    const x = Math.round(axis._pos * pxRatio);
+    const stroke = typeof axis.stroke === 'function' ? axis.stroke(u, i) : axis.stroke;
+    if (!stroke) continue;
+
+    ctx.strokeStyle = stroke;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+
+    // side 3=左 → 刻度向右进图；side 1=右 → 刻度向左进图
+    const inward = axis.side === 3 ? 1 : axis.side === 1 ? -1 : 0;
+    const atPlotEdge =
+      inward === 1 ? Math.abs(x - left) <= edgeEps : inward === -1 ? Math.abs(x - right) <= edgeEps : false;
+    if (atPlotEdge && Array.isArray(axis._splits)) {
+      for (const v of axis._splits) {
+        const y = Math.round(u.valToPos(v, axis.scale, true));
+        if (y < top || y > bottom) continue;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + inward * tickLen, y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = chartTheme.grid;
+  ctx.beginPath();
+  ctx.moveTo(left, bottom);
+  ctx.lineTo(right, bottom);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 // ─── Legend ──────────────────────────────────────────────────────────────────
 
 /** 渲染顶部图例（仅列出当前可见的曲线，与旧版 generateLabels 过滤逻辑一致）。 */
@@ -816,6 +880,22 @@ function renderLegend() {
 }
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
+
+/**
+ * 缺测在 Float64Array 里只能是 NaN，uPlot 只把 == null 当缺口。
+ * NaN 会让 valToPos 得到 NaN，光标点 transform 无效，钉在绘图区左上角。
+ * 返回 null 让 uPlot 把该 series 的 hover 点移出视口。
+ * @param {any} u
+ * @param {number} seriesIdx
+ * @param {number|null} hoveredIdx
+ * @returns {number|null}
+ */
+function cursorDataIdx(u, seriesIdx, hoveredIdx) {
+  if (hoveredIdx == null) return null;
+  if (seriesIdx === 0) return hoveredIdx;
+  const y = u.data[seriesIdx]?.[hoveredIdx];
+  return Number.isFinite(y) ? hoveredIdx : null;
+}
 
 /**
  * 悬停 tooltip 插件：index 模式（显示最近 X 处所有可见曲线的值），
@@ -967,6 +1047,7 @@ export function initChart() {
       y: false,
       drag: { setScale: false, x: false, y: false },
       points: { size: 8 },
+      dataIdx: cursorDataIdx,
     },
     scales: {
       x: { time: false, range: /** @type {any} */ (xRange) },
@@ -1011,7 +1092,7 @@ export function initChart() {
       mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1),
     ],
     hooks: {
-      drawAxes: [drawMinorGrid],
+      drawAxes: [drawMinorGrid, drawYAxisChrome],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
