@@ -7,6 +7,7 @@ import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js'
 import { updateEnergyDisplay, updateSliderFill, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
+import { applyThemePreference, echoThemeUI } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
@@ -55,6 +56,9 @@ function normalizeSettings(saved) {
   }
   if (merged.tempSource !== 'device' && merged.tempSource !== 'external') {
     merged.tempSource = defaultSettings.tempSource;
+  }
+  if (merged.theme !== 'dark' && merged.theme !== 'light' && merged.theme !== 'system') {
+    merged.theme = defaultSettings.theme;
   }
   return merged;
 }
@@ -216,8 +220,10 @@ export async function loadSettings() {
     console.error('Failed to load settings:', e);
   } finally {
     echoUiScaleUI();
+    echoThemeUI();
     fillUiScaleHint();
     try {
+      applyThemePreference(state.settings.theme);
       await applyUiScale(state.settings.uiScalePercent);
     } catch {
       /* apply 内部已有 CSS 回退；这里只保证 isLoadingSettings 一定复位 */
@@ -297,6 +303,8 @@ export async function resetSettings() {
     setChecked('pd-follow-recording', state.settings.pdFollowRecording);
     echoHeadroomUI();
     echoUiScaleUI();
+    echoThemeUI();
+    applyThemePreference(state.settings.theme);
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位

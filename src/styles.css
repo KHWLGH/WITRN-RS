@@ -44,6 +44,10 @@ select {
   color: var(--text-primary);
 }
 
+:root[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%235c5c5c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+}
+
 .ribbon-select {
   padding: 4px 20px 4px 8px;
   background-color: var(--fill-control);
@@ -328,7 +332,7 @@ input[type="number"]::-webkit-outer-spin-button {
   height: 100%;
   width: 18px;
   transform: translateX(-50%);
-  background: var(--gray-68);
+  background: var(--text-tertiary);
   border: 1px solid var(--surface-card);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-2);
@@ -742,7 +746,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .u-cursor-x {
-  border-right: 1px dashed rgba(154, 154, 184, 0.45);
+  border-right: 1px dashed color-mix(in srgb, var(--chart-axis-text) 45%, transparent);
 }
 
 /* Custom Select (src/dropdown.js) — replaces the native <select> popup, which

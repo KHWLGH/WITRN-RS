@@ -1,13 +1,18 @@
 // @ts-check
 /**
- * @file 主题桥 — 把 CSS 设计令牌暴露给 canvas 侧（uPlot 无法读 CSS 变量）。
+ * @file 主题桥 — 把 CSS 设计令牌暴露给 canvas 侧（uPlot 无法读 CSS 变量），
+ * 并负责外观偏好（深色 / 浅色 / 跟随系统）的解析与生效。
  *
  * 通道色 / 图表基建色的唯一定义处是 styles/tokens.css；本模块启动时读入
  * `chartTheme`，chart.js 全部从这里取色，保证图例点 = 复选框色块 = 曲线同源。
  *
- * 换主题（未来亮色）：切换 <html data-theme> 后 MutationObserver 触发
+ * 换主题：切换 <html data-theme> 后 MutationObserver 触发
  * refreshTheme() 并回调注册方（chart.js 的 applyChartTheme）。
+ * data-theme 只写解析后的 dark / light；偏好本身存在 settings.theme
+ * 与 localStorage（THEME_STORAGE_KEY，供 theme-boot.js 首屏同步读取）。
  */
+
+import { state } from './state.js';
 
 /** @typedef {typeof chartTheme} ChartTheme */
 
@@ -45,6 +50,12 @@ const FALLBACK = {
   gridMinor: '#37374a',
 };
 
+/** 与 src/theme-boot.js 共用的 localStorage 键。 */
+export const THEME_STORAGE_KEY = 'witrn-theme';
+
+/** @typedef {'dark'|'light'|'system'} ThemePreference */
+/** @typedef {'dark'|'light'} ResolvedTheme */
+
 /** 图表用到的全部主题色。模块加载时填充，refreshTheme() 原地更新（引用稳定）。 */
 export const chartTheme = { ...FALLBACK };
 
@@ -69,6 +80,94 @@ export function onThemeChange(callback) {
     callback();
   });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}
+
+/**
+ * 把任意输入收成 dark / light / system。
+ * @param {unknown} value
+ * @returns {ThemePreference}
+ */
+export function normalizeThemePreference(value) {
+  return value === 'light' || value === 'system' || value === 'dark' ? value : 'dark';
+}
+
+/**
+ * 把偏好解析成实际生效的暗/亮。
+ * @param {unknown} preference
+ * @param {boolean} systemPrefersDark
+ * @returns {ResolvedTheme}
+ */
+export function resolveTheme(preference, systemPrefersDark) {
+  const pref = normalizeThemePreference(preference);
+  if (pref === 'light') return 'light';
+  if (pref === 'system') return systemPrefersDark ? 'dark' : 'light';
+  return 'dark';
+}
+
+/** @type {MediaQueryList|null} */
+let systemMql = null;
+/** @type {((event: MediaQueryListEvent) => void)|null} */
+let systemListener = null;
+
+function detachSystemListener() {
+  if (systemMql && systemListener) {
+    systemMql.removeEventListener('change', systemListener);
+  }
+  systemMql = null;
+  systemListener = null;
+}
+
+/**
+ * @returns {boolean}
+ */
+function systemPrefersDark() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+/**
+ * 写解析后的 data-theme，并镜像偏好到 localStorage 供 theme-boot.js 首屏读取。
+ * @param {unknown} preference
+ * @returns {ThemePreference}
+ */
+export function applyThemePreference(preference) {
+  const pref = normalizeThemePreference(preference);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, pref);
+    } catch {
+      /* 隐私模式等写失败不影响本次生效 */
+    }
+  }
+
+  if (typeof document === 'undefined' || !document.documentElement) return pref;
+
+  const resolved = resolveTheme(pref, systemPrefersDark());
+  document.documentElement.setAttribute('data-theme', resolved);
+
+  detachSystemListener();
+  if (pref === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    systemListener = () => {
+      document.documentElement.setAttribute('data-theme', resolveTheme('system', mql.matches));
+    };
+    mql.addEventListener('change', systemListener);
+    systemMql = mql;
+  }
+
+  return pref;
+}
+
+/** 回显设置页主题单选（loadSettings / resetSettings 共用）。 */
+export function echoThemeUI() {
+  if (typeof document === 'undefined') return;
+  const pref = normalizeThemePreference(state.settings.theme);
+  const dark = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-dark'));
+  const light = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-light'));
+  const system = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-system'));
+  if (dark) dark.checked = pref === 'dark';
+  if (light) light.checked = pref === 'light';
+  if (system) system.checked = pref === 'system';
 }
 
 refreshTheme();

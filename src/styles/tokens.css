@@ -1,12 +1,12 @@
 /*
- * WITRN-RS 设计令牌（Fluent 2 风格，暗色）
+ * WITRN-RS 设计令牌（Fluent 2 风格；:root 为暗色，[data-theme="light"] 为浅色）
  *
  * 三层结构：
  *   1. 原始色（primitives）  — 裸调色板，组件禁止直接引用
  *   2. 语义角色（semantic）  — 表面 / 文本 / 描边 / 强调 / 状态 / 通道色，组件消费这一层
  *   3. 组件旋钮（component） — 个别组件需要的尺寸类变量
  *
- * 亮色主题：后续在 :root[data-theme="light"] 中仅重新赋值语义层即可，
+ * 亮色主题：在 :root[data-theme="light"] 中仅重新赋值语义层，
  * 组件与图表（src/theme.js 读取）无需改动。
  */
 
@@ -67,6 +67,17 @@
   --accent-fill-pressed: #3f9ecf;
   --accent-text: var(--brand-light2);
   --accent-fill-faint: rgba(76, 194, 255, 0.12); /* 选区高亮 / 选中底色 */
+  --accent-fill-faint-hover: rgba(76, 194, 255, 0.18);
+  --accent-stroke: rgba(76, 194, 255, 0.32);
+
+  /* 实心强调按钮（记录开关）：暗色也用深蓝+白字，不用上面的亮阶填充 */
+  --accent-solid: #0067c0;
+  --accent-solid-hover: #0078d4;
+  --accent-solid-pressed: #005a9e;
+
+  /* 滚动条滑块（base.css；浅色会换成中灰） */
+  --scrollbar-thumb: var(--gray-24);
+  --scrollbar-thumb-hover: var(--gray-36);
 
   /* 状态色 */
   --status-danger: #ff99a4;
@@ -165,7 +176,64 @@
   --pd-row-height: 24px; /* PD 虚拟列表行高，须与 src/pd-model.js 的 PD_ROW_HEIGHT 一致 */
 }
 
-/* 亮色主题占位：仅重赋语义层（本版本不交付亮色，结构先就位） */
+/* 亮色：只重赋语义层。通道色保持暗色 hex，图表基建必须换不透明浅灰。 */
 :root[data-theme="light"] {
   color-scheme: light;
+
+  --surface-base: #f3f3f3;
+  --surface-content: #f9f9f9;
+  --surface-card: #ffffff;
+  --surface-flyout: #ffffff;
+
+  --fill-control: rgba(0, 0, 0, 0.037);
+  --fill-control-hover: rgba(0, 0, 0, 0.061);
+  --fill-control-pressed: rgba(0, 0, 0, 0.024);
+  --fill-subtle-hover: rgba(0, 0, 0, 0.04);
+  --fill-subtle-pressed: rgba(0, 0, 0, 0.02);
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #5c5c5c;
+  --text-tertiary: #858585;
+  --text-disabled: #adadad;
+  --text-on-accent: #ffffff;
+
+  --stroke-divider: rgba(0, 0, 0, 0.08);
+  --stroke-card: rgba(0, 0, 0, 0.06);
+  --stroke-control: rgba(0, 0, 0, 0.06);
+  --stroke-control-strong: rgba(0, 0, 0, 0.16);
+  --stroke-input-underline: rgba(0, 0, 0, 0.45);
+  --stroke-focus-outer: #000000;
+  --stroke-focus-inner: #ffffff;
+
+  --accent-fill: var(--brand-dark1);
+  --accent-fill-hover: #0056a6;
+  --accent-fill-pressed: #004c94;
+  --accent-text: var(--brand-dark1);
+  --accent-fill-faint: rgba(0, 95, 184, 0.12);
+  --accent-fill-faint-hover: rgba(0, 95, 184, 0.18);
+  --accent-stroke: rgba(0, 95, 184, 0.32);
+
+  --accent-solid: #005fb8;
+  --accent-solid-hover: #0067c0;
+  --accent-solid-pressed: #004e99;
+
+  --status-danger: #c42b1c;
+  --status-danger-bg: rgba(196, 43, 28, 0.08);
+  --status-success: #0f7b0f;
+  --status-success-bg: rgba(15, 123, 15, 0.08);
+  --status-caution: #9d5d00;
+  --status-caution-bg: rgba(157, 93, 0, 0.08);
+  --status-info-bg: rgba(0, 0, 0, 0.04);
+
+  --chart-axis-text: #6b6b80;
+  --chart-grid: #c8c8d4;
+  --chart-grid-minor: #dcdce6;
+
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-8: 0 4px 8px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-16: 0 8px 16px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+  --shadow-64: 0 32px 64px rgba(0, 0, 0, 0.24), 0 0 8px rgba(0, 0, 0, 0.2);
+
+  --scrollbar-thumb: #c2c2c2;
+  --scrollbar-thumb-hover: #a8a8a8;
 }

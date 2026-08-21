@@ -375,11 +375,11 @@ html[data-ui-scale-css] .app-shell {
 .cmd-state-btn.is-active {
   color: var(--accent-text);
   background: var(--accent-fill-faint);
-  border-color: rgba(76, 194, 255, 0.32);
+  border-color: var(--accent-stroke);
 }
 
 .cmd-state-btn.is-active:hover:not(:disabled) {
-  background: rgba(76, 194, 255, 0.18);
+  background: var(--accent-fill-faint-hover);
 }
 
 /* 记录按钮 — 命令栏中唯一的实心强调按钮。
@@ -389,18 +389,18 @@ html[data-ui-scale-css] .app-shell {
   min-width: 96px;
   justify-content: center;
   font-weight: 600;
-  background: #0067c0;
+  background: var(--accent-solid);
   border-color: transparent;
   color: #ffffff;
 }
 
 .cmd-primary-btn:hover:not(:disabled) {
-  background: #0078d4;
+  background: var(--accent-solid-hover);
   border-color: transparent;
 }
 
 .cmd-primary-btn:active:not(:disabled) {
-  background: #005a9e;
+  background: var(--accent-solid-pressed);
   color: #ffffff;
 }
 

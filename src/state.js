@@ -50,6 +50,7 @@
  * @property {boolean} showCc   - 图表叠加 CC1/CC2 曲线
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
+ * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
  */
 
 /**
@@ -206,6 +207,7 @@ export const defaultSettings = {
   showCc: false,
   signedCurrent: false,
   uiScalePercent: 100,
+  theme: 'dark',
 };
 
 /** @type {AutoPauseSettings} */

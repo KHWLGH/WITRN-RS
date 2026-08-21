@@ -2,6 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script src="theme-boot.js"></script>
     <link rel="stylesheet" href="vendor/uPlot.min.css" />
     <link rel="stylesheet" href="styles/tokens.css" />
     <link rel="stylesheet" href="styles/base.css" />
@@ -314,8 +315,15 @@
                   <div class="card-title">外观</div>
                   <div class="field-row">
                     <label>主题</label>
-                    <label class="radio-label"><input type="radio" name="theme-choice" checked disabled /> 深色</label>
-                    <label class="radio-label"><input type="radio" name="theme-choice" disabled /> 浅色（即将推出）</label>
+                    <label class="radio-label">
+                      <input type="radio" name="theme-choice" id="theme-choice-dark" checked /> 深色
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" name="theme-choice" id="theme-choice-light" /> 浅色
+                    </label>
+                    <label class="radio-label">
+                      <input type="radio" name="theme-choice" id="theme-choice-system" /> 跟随系统
+                    </label>
                   </div>
                   <div class="field-row">
                     <label for="ui-scale">界面缩放</label>

@@ -30,7 +30,14 @@ import { enhanceSelects } from './dropdown.js';
 import { applySampleRate, debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
 import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
-import { connectTempService, disconnectTempService, setTempConnected, syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
+import {
+  connectTempService,
+  disconnectTempService,
+  setTempConnected,
+  syncTempSourceUI,
+  updateTempUIVisibility,
+} from './temperature.js';
+import { applyThemePreference } from './theme.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
@@ -358,6 +365,26 @@ function setupControls() {
   btn('btn-reset-settings', async () => {
     const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
     if (yes) await resetSettings();
+  });
+
+  // 主题（设置页 外观 卡）
+  /** @param {'dark'|'light'|'system'} pref */
+  const applyThemeChoice = (pref) => {
+    state.settings.theme = pref;
+    applyThemePreference(pref);
+    debouncedSaveSettings();
+  };
+  const themeDark = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-dark'));
+  const themeLight = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-light'));
+  const themeSystem = /** @type {HTMLInputElement|null} */ (document.getElementById('theme-choice-system'));
+  themeDark?.addEventListener('change', () => {
+    if (themeDark.checked) applyThemeChoice('dark');
+  });
+  themeLight?.addEventListener('change', () => {
+    if (themeLight.checked) applyThemeChoice('light');
+  });
+  themeSystem?.addEventListener('change', () => {
+    if (themeSystem.checked) applyThemeChoice('system');
   });
 
   // 界面缩放（设置页 外观 卡）

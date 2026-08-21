@@ -90,12 +90,12 @@
 
 .pd-role-src {
   color: var(--ch-power);
-  background: rgba(255, 170, 74, 0.12);
+  background: color-mix(in srgb, var(--ch-power) 12%, transparent);
 }
 
 .pd-role-snk {
   color: var(--ch-voltage);
-  background: rgba(74, 158, 255, 0.12);
+  background: color-mix(in srgb, var(--ch-voltage) 12%, transparent);
 }
 
 .pd-role-cbl {
