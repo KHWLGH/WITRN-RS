@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Y 轴标题改到轴顶横向放置**：电压 / 电流 / 功率 / 温度不再竖排贴在轴侧；贴边轴的标题从竖脊朝图内伸出，外侧轴贴画布外沿，避免同侧双轴在 30px 轴沟里叠字；左右不再为竖排字预留 `labelSize`，绘图区变宽
+- **监控通道色改走鲜艳阶**：电压/电流等曲线与侧栏读数从 `Foreground2`（tint40 / shade30）改到官方 shared 色板的 tint20 / primary（lightBlue、seafoam、orange 等），选区与状态点同步提高饱和度；壳层与 PD 徽章仍用上一轮的 alias。
+- **配色对齐 Fluent UI Theme Colors**：`tokens.css` 原始色换成官方 grey / brand / shared 色阶，语义层按 webDark / webLight alias 重赋（表面、文本、不透明填充与描边、品牌实心钮与复合强调、cranberry/green/orange 状态色）。通道与 PD 徽章改走 `colorPalette*` Background2/Foreground2，浅色主题不再沿用暗色曲线色。图表网格改为中性描边令牌。
 - **实时采集流畅度**：主曲线存储改为可扩容 `Float64Array` 列（uPlot 零拷贝 `subarray` 视图），避免普通数组扩容拷贝与装箱扫描；流式绘制按上一帧耗时做预算（超过约 10ms 则只入库、有空再画最新全量，侧栏数字仍逐点刷新）；Y 极值未破时 `setData(..., false)` 只推 X 右沿。监控 Tab 切走后不再 `setData`/`setSize`，画布用绝对定位保几何，回来不叠两三次全量重绘。画面算法不变（稀疏 spline+填充，密集 linear+填充），不丢点、不做肉眼可辨的降采样。
 - **状态栏去掉设备名**：顶部连接区已有设备下拉，底部不再重复显示型号。
 - **PD 分析记录不再 2000 条封顶**：可增长日志 + 虚拟列表（只挂视口附近的行），存储与 DOM 解耦；跟随记录门控不变。后端 `pd-data` 改为紧凑事件（摘要 + 原始 HID 帧），解码树留在 Rust，点选时 `decode_pd_at` 按索引直接取出（含会话上下文，不重放 Parser）。捕获文件默认 v2，v1 整树文件仍可导入；导入不再截断。超过 50 万条 toast 警告，默认继续存储。

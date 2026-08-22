@@ -391,7 +391,7 @@ html[data-ui-scale-css] .app-shell {
   font-weight: 600;
   background: var(--accent-solid);
   border-color: transparent;
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 .cmd-primary-btn:hover:not(:disabled) {
@@ -401,7 +401,7 @@ html[data-ui-scale-css] .app-shell {
 
 .cmd-primary-btn:active:not(:disabled) {
   background: var(--accent-solid-pressed);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 .cmd-primary-btn:disabled {

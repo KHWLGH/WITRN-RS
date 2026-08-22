@@ -36,7 +36,7 @@ body {
 select {
   -webkit-appearance: none;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23d6d6d6' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23d6d6d6' d='M0 0h10L5 6z'/%3E%3C/svg%3E"); /* grey-84 */
   background-repeat: no-repeat;
   background-position: right 6px center;
   background-size: 10px 6px;
@@ -45,7 +45,7 @@ select {
 }
 
 :root[data-theme="light"] select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%235c5c5c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23424242' d='M0 0h10L5 6z'/%3E%3C/svg%3E"); /* grey-26 */
 }
 
 .ribbon-select {
@@ -349,7 +349,7 @@ input[type="number"]::-webkit-outer-spin-button {
   left: 50%;
   width: 6px;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--fill-recess);
   border-radius: 2px;
 }
 

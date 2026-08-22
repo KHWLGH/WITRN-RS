@@ -35,19 +35,19 @@ const TOKEN_MAP = /** @type {const} */ ({
 
 /** 令牌缺失时的兜底值（与 tokens.css 暗色值一致，防止 CSS 加载异常时图表全黑）。 */
 const FALLBACK = {
-  voltage: '#4a9eff',
-  current: '#4dd0a0',
-  power: '#ffaa4a',
-  temp: '#ff5f5f',
-  dp: '#e8c84a',
-  dn: '#b98ef5',
-  cc1: '#4adade',
-  cc2: '#f28ab8',
-  tempAxis: '#ff6f6f',
-  energy: '#c586c0',
-  axisText: '#9a9ab8',
-  grid: '#4b4b61',
-  gridMinor: '#37374a',
+  voltage: '#65ade5',
+  current: '#34d889',
+  power: '#f98845',
+  temp: '#dc5e62',
+  dp: '#efb839',
+  dn: '#c36bd1',
+  cc1: '#32c8d1',
+  cc2: '#ea66ba',
+  tempAxis: '#dc5e62',
+  energy: '#d161c4',
+  axisText: '#adadad',
+  grid: '#666666',
+  gridMinor: '#3d3d3d',
 };
 
 /** 与 src/theme-boot.js 共用的 localStorage 键。 */

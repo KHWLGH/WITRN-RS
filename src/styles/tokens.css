@@ -1,9 +1,9 @@
 /*
- * WITRN-RS 设计令牌（Fluent 2 风格；:root 为暗色，[data-theme="light"] 为浅色）
+ * WITRN-RS 设计令牌（Fluent UI webLight / webDark；:root 为暗色，[data-theme="light"] 为浅色）
  *
  * 三层结构：
- *   1. 原始色（primitives）  — 裸调色板，组件禁止直接引用
- *   2. 语义角色（semantic）  — 表面 / 文本 / 描边 / 强调 / 状态 / 通道色，组件消费这一层
+ *   1. 原始色（primitives）  — 官方 grey / brand / shared 色阶，组件禁止直接引用
+ *   2. 语义角色（semantic）  — 对齐 Fluent alias，组件只消费这一层
  *   3. 组件旋钮（component） — 个别组件需要的尺寸类变量
  *
  * 亮色主题：在 :root[data-theme="light"] 中仅重新赋值语义层，
@@ -11,108 +11,198 @@
  */
 
 :root {
-  /* ── 1. 原始色 ─────────────────────────────────────────────── */
-  --gray-8: #141414;
-  --gray-10: #1a1a1a;
-  --gray-12: #1f1f1f;
-  --gray-14: #242424;
-  --gray-16: #292929;
-  --gray-18: #2e2e2e;
-  --gray-24: #3d3d3d;
-  --gray-36: #5c5c5c;
-  --gray-52: #858585;
-  --gray-68: #adadad;
-  --gray-84: #d6d6d6;
+  /* ── 1. 原始色（Fluent global ramps） ───────────────────────── */
+  --white: #ffffff;
+  --black: #000000;
+  --black-alpha-20: rgba(0, 0, 0, 0.2);
+  --black-alpha-50: rgba(0, 0, 0, 0.5);
 
-  --brand-base: #0078d4;
-  --brand-dark1: #005fb8;
-  --brand-light2: #4cc2ff;
+  --grey-12: #1f1f1f;
+  --grey-14: #242424;
+  --grey-16: #292929;
+  --grey-18: #2e2e2e;
+  --grey-20: #333333;
+  --grey-22: #383838;
+  --grey-24: #3d3d3d;
+  --grey-26: #424242;
+  --grey-32: #525252;
+  --grey-36: #5c5c5c;
+  --grey-38: #616161;
+  --grey-40: #666666;
+  --grey-64: #a3a3a3;
+  --grey-68: #adadad;
+  --grey-74: #bdbdbd;
+  --grey-76: #c2c2c2;
+  --grey-82: #d1d1d1;
+  --grey-84: #d6d6d6;
+  --grey-88: #e0e0e0;
+  --grey-94: #f0f0f0;
+  --grey-96: #f5f5f5;
+  --grey-98: #fafafa;
 
-  /* ── 2. 语义角色（暗色值） ─────────────────────────────────── */
-  /* 让 WebKitGTK 用暗色绘制原生控件（滚动条 / spinner / 选择弹窗底色） */
+  --brand-20: #082338;
+  --brand-40: #0c3b5e;
+  --brand-70: #115ea3;
+  --brand-80: #0f6cbd;
+  --brand-90: #2886de;
+  --brand-100: #479ef5;
+  --brand-110: #62abf5;
+  --brand-150: #cfe4fa;
+  --brand-160: #ebf3fc;
+
+  --blue-shade30: #004377;
+  --blue-tint40: #a9d3f2;
+  --light-blue-primary: #3a96dd;
+  --light-blue-tint20: #65ade5;
+  --green-shade30: #094509;
+  --green-shade40: #052505;
+  --green-tint40: #9fd89f;
+  --green-tint60: #f1faf1;
+  --green-primary: #107c10;
+  --light-green-tint20: #3db838;
+  --seafoam-primary: #00cc6a;
+  --seafoam-tint20: #34d889;
+  --dark-orange-shade30: #7a2101;
+  --dark-orange-tint40: #f4bfab;
+  --red-primary: #d13438;
+  --red-shade30: #751d1f;
+  --red-tint20: #dc5e62;
+  --red-tint40: #f1bbbc;
+  --purple-shade30: #341a51;
+  --purple-tint40: #c6b1de;
+  --berry-primary: #c239b3;
+  --berry-tint20: #d161c4;
+  --gold-shade30: #6c5700;
+  --gold-tint40: #ecdfa5;
+  --marigold-primary: #eaa300;
+  --marigold-tint20: #efb839;
+  --lilac-primary: #b146c2;
+  --lilac-shade30: #63276d;
+  --lilac-tint20: #c36bd1;
+  --lilac-tint40: #e6bfed;
+  --teal-shade30: #02494c;
+  --teal-tint40: #9bd9db;
+  --light-teal-primary: #00b7c3;
+  --light-teal-tint20: #32c8d1;
+  --pink-primary: #e43ba6;
+  --pink-shade30: #80215d;
+  --pink-tint20: #ea66ba;
+  --pink-tint40: #f7c0e3;
+  --cranberry-primary: #c50f1f;
+  --cranberry-shade10: #b10e1c;
+  --cranberry-shade20: #960b18;
+  --cranberry-shade30: #6e0811;
+  --cranberry-shade40: #3b0509;
+  --cranberry-tint20: #d33f4c;
+  --cranberry-tint40: #eeacb2;
+  --cranberry-tint60: #fdf3f4;
+  --orange-primary: #f7630c;
+  --orange-shade20: #bc4b09;
+  --orange-shade40: #4a1e04;
+  --orange-tint20: #f98845;
+  --orange-tint60: #fff9f5;
+  --seafoam-shade30: #00723b;
+  --seafoam-tint40: #a8f0cd;
+  --pumpkin-shade30: #712d09;
+  --pumpkin-tint40: #efc4ad;
+  --mink-shade30: #343231;
+  --mink-tint40: #cecccb;
+  --royal-blue-shade30: #002c4e;
+  --royal-blue-tint40: #9abfdc;
+  --navy-shade30: #001665;
+  --navy-tint40: #a3b2e8;
+  --lavender-shade30: #3f3682;
+  --lavender-tint40: #d2ccf8;
+  --steel-shade30: #00333f;
+  --steel-tint40: #94c8d4;
+  --dark-teal-shade30: #003939;
+  --dark-teal-tint40: #92d1d1;
+  --forest-shade30: #294903;
+  --forest-tint40: #bdd99b;
+  --light-teal-shade30: #00666d;
+  --light-teal-tint40: #a6e9ed;
+
+  /* ── 2. 语义角色（暗色 = webDark alias） ───────────────────── */
   color-scheme: dark;
 
-  /* 表面分层（全部实色 — WebKitGTK 上不用 backdrop-filter） */
-  --surface-base: var(--gray-12); /* 壳 chrome：标题栏 / 命令栏 / 状态栏 */
-  --surface-content: var(--gray-14); /* 视图背景 */
-  --surface-card: var(--gray-16); /* 卡片 / 读数栏 / 图表容器 */
-  --surface-flyout: var(--gray-18); /* 菜单 / 弹窗 / toast（实色 + 阴影表达层级） */
+  /* 表面：Background2 / Background1 / CardBackground / Background1 */
+  --surface-base: var(--grey-12); /* 壳 chrome：标题栏 / 命令栏 / 状态栏 */
+  --surface-content: var(--grey-16); /* 视图背景 */
+  --surface-card: var(--grey-20); /* 卡片 / 读数栏 / 图表容器 */
+  --surface-flyout: var(--grey-16); /* 菜单 / 弹窗 / toast */
 
-  /* 控件填充（半透明白，可叠加在任意表面上） */
-  --fill-control: rgba(255, 255, 255, 0.061);
-  --fill-control-hover: rgba(255, 255, 255, 0.084);
-  --fill-control-pressed: rgba(255, 255, 255, 0.033);
-  --fill-subtle-hover: rgba(255, 255, 255, 0.06);
-  --fill-subtle-pressed: rgba(255, 255, 255, 0.031);
+  /* 控件填充（不透明 Neutral / Subtle） */
+  --fill-control: var(--grey-16);
+  --fill-control-hover: var(--grey-24);
+  --fill-control-pressed: var(--grey-12);
+  --fill-subtle-hover: var(--grey-22);
+  --fill-subtle-pressed: var(--grey-18);
+  --fill-recess: var(--black-alpha-20); /* 时间线条槽等凹陷 */
 
   /* 文本 */
-  --text-primary: #ffffff;
-  --text-secondary: var(--gray-84);
-  --text-tertiary: var(--gray-68);
-  --text-disabled: var(--gray-36);
-  --text-on-accent: #000000; /* Win11 暗色：强调填充为亮色 → 配黑字 */
+  --text-primary: var(--white);
+  --text-secondary: var(--grey-84);
+  --text-tertiary: var(--grey-68);
+  --text-disabled: var(--grey-36);
+  --text-on-accent: var(--white); /* colorNeutralForegroundOnBrand */
+  --text-on-danger: var(--white);
 
   /* 描边 */
-  --stroke-divider: rgba(255, 255, 255, 0.083);
-  --stroke-card: rgba(255, 255, 255, 0.055);
-  --stroke-control: rgba(255, 255, 255, 0.07);
-  --stroke-control-strong: rgba(255, 255, 255, 0.093);
-  --stroke-input-underline: rgba(255, 255, 255, 0.4); /* WinUI 输入框底边 */
-  --stroke-focus-outer: #ffffff;
-  --stroke-focus-inner: #000000;
+  --stroke-control: var(--grey-40); /* Stroke1 */
+  --stroke-card: var(--grey-32); /* Stroke2 */
+  --stroke-divider: var(--grey-24); /* Stroke3 */
+  --stroke-control-strong: var(--grey-68); /* StrokeAccessible */
+  --stroke-input-underline: var(--grey-68);
+  --stroke-focus-outer: var(--white);
+  --stroke-focus-inner: var(--black);
 
-  /* 强调色（Win11 暗色用亮阶做交互填充） */
-  --accent-fill: var(--brand-light2);
-  --accent-fill-hover: #47b1e8;
-  --accent-fill-pressed: #3f9ecf;
-  --accent-text: var(--brand-light2);
-  --accent-fill-faint: rgba(76, 194, 255, 0.12); /* 选区高亮 / 选中底色 */
-  --accent-fill-faint-hover: rgba(76, 194, 255, 0.18);
-  --accent-stroke: rgba(76, 194, 255, 0.32);
+  /* 复合强调（复选框 / Tab 下划线 / 选中条） */
+  --accent-fill: var(--brand-100);
+  --accent-fill-hover: var(--brand-110);
+  --accent-fill-pressed: var(--brand-90);
+  --accent-text: var(--brand-100);
+  --accent-fill-faint: color-mix(in srgb, var(--brand-100) 22%, transparent);
+  --accent-fill-faint-hover: color-mix(in srgb, var(--brand-100) 30%, transparent);
+  --accent-stroke: var(--brand-100);
 
-  /* 实心强调按钮（记录开关）：暗色也用深蓝+白字，不用上面的亮阶填充 */
-  --accent-solid: #0067c0;
-  --accent-solid-hover: #0078d4;
-  --accent-solid-pressed: #005a9e;
+  /* 实心品牌钮（记录开关）= BrandBackground */
+  --accent-solid: var(--brand-70);
+  --accent-solid-hover: var(--brand-80);
+  --accent-solid-pressed: var(--brand-40);
 
-  /* 滚动条滑块（base.css；浅色会换成中灰） */
-  --scrollbar-thumb: var(--gray-24);
-  --scrollbar-thumb-hover: var(--gray-36);
+  --overlay: var(--black-alpha-50);
+  --scrollbar-thumb: var(--grey-24);
+  --scrollbar-thumb-hover: var(--grey-36);
 
-  /* 状态色 */
-  --status-danger: #ff99a4;
-  --status-danger-bg: rgba(255, 153, 164, 0.1);
-  --status-success: #6ccb5f;
-  --status-success-bg: rgba(108, 203, 95, 0.1);
-  --status-caution: #fce100;
-  --status-caution-bg: rgba(252, 225, 0, 0.08);
-  --status-info-bg: rgba(255, 255, 255, 0.05);
+  /* 状态（Danger / Success / Warning） */
+  --status-danger: var(--cranberry-tint20);
+  --status-danger-bg: var(--cranberry-shade40);
+  --status-success: var(--light-green-tint20);
+  --status-success-bg: var(--green-shade40);
+  --status-caution: var(--orange-tint20);
+  --status-caution-bg: var(--orange-shade40);
+  --status-info-bg: var(--grey-22);
 
-  /* 破坏性操作按钮填充（Win11 danger fill） */
-  --danger-fill: #c42b1c;
-  --danger-fill-hover: #d13438;
-  --danger-fill-pressed: #a52016;
-  --text-on-danger: #ffffff;
+  --danger-fill: var(--cranberry-primary);
+  --danger-fill-hover: var(--cranberry-shade10);
+  --danger-fill-pressed: var(--cranberry-shade20);
 
-  /* 通道色 — 唯一定义处：卡片强调条 / 复选框 / 图例 / 曲线（src/theme.js 读取）全部同源 */
-  --ch-voltage: #4a9eff;
-  --ch-current: #4dd0a0;
-  --ch-power: #ffaa4a;
-  --ch-temp: #ff5f5f;
-  --ch-temp-axis: #ff6f6f; /* 温度轴文字比曲线略亮，保证可读性 */
-  --ch-energy: #c586c0;
-  --ch-dp: #e8c84a;
-  --ch-dn: #b98ef5;
-  --ch-cc1: #4adade;
-  --ch-cc2: #f28ab8;
+  /* 通道色 = 鲜艳阶（暗 = tint20，浅 = primary） */
+  --ch-voltage: var(--light-blue-tint20);
+  --ch-current: var(--seafoam-tint20);
+  --ch-power: var(--orange-tint20);
+  --ch-temp: var(--red-tint20);
+  --ch-temp-axis: var(--red-tint20);
+  --ch-energy: var(--berry-tint20);
+  --ch-dp: var(--marigold-tint20);
+  --ch-dn: var(--lilac-tint20);
+  --ch-cc1: var(--light-teal-tint20);
+  --ch-cc2: var(--pink-tint20);
 
-  /* 图表基建色（src/theme.js 读取）
-     两级网格：主网格（X + 全部 Y 轴共用一套等分刻度）与次网格（主格中线）。
-     必须用不透明色：四条 Y 轴会把主网格重复画在同一像素上，半透明会叠色，
-     导致「同时显示两条曲线时网格更亮」。 */
-  --chart-axis-text: #9a9ab8;
-  --chart-grid: #4b4b61; /* 主网格 + X 轴刻度线 */
-  --chart-grid-minor: #37374a; /* 次网格 */
+  /* 图表基建：必须不透明（四条 Y 轴会叠画同一像素） */
+  --chart-axis-text: var(--text-tertiary);
+  --chart-grid: var(--stroke-control);
+  --chart-grid-minor: var(--stroke-divider);
 
   /* 几何 */
   --radius-control: 4px; /* 按钮 / 输入框 / 下拉 / 菜单项 */
@@ -127,11 +217,11 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  /* 阴影（Fluent 阴影四档，暗色环境值） */
-  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.24), 0 0 2px rgba(0, 0, 0, 0.12);
-  --shadow-8: 0 4px 8px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.12);
-  --shadow-16: 0 8px 16px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.12);
-  --shadow-64: 0 32px 64px rgba(0, 0, 0, 0.56), 0 0 8px rgba(0, 0, 0, 0.4);
+  /* 阴影（Fluent Neutral Shadow Key + Ambient） */
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.24);
+  --shadow-8: 0 4px 8px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.24);
+  --shadow-16: 0 8px 16px rgba(0, 0, 0, 0.28), 0 0 2px rgba(0, 0, 0, 0.24);
+  --shadow-64: 0 32px 64px rgba(0, 0, 0, 0.48), 0 0 8px rgba(0, 0, 0, 0.4);
 
   /* 动效 */
   --dur-fast: 150ms;
@@ -178,156 +268,163 @@
   --pd-list-basis: 56%;
   --pd-detail-basis: 44%;
 
-  /* PD 消息类型（列表 Msg 格；浅色主题重赋） */
-  --pd-msg-crc-bg: #1f5f6b;
-  --pd-msg-crc-fg: #d4f4f8;
-  --pd-msg-request-bg: #7a3540;
-  --pd-msg-request-fg: #ffd6d9;
-  --pd-msg-accept-bg: #0f5c52;
-  --pd-msg-accept-fg: #c8f4ea;
-  --pd-msg-psrdy-bg: #164e3e;
-  --pd-msg-psrdy-fg: #c6f0dc;
-  --pd-msg-reject-bg: #7a2e28;
-  --pd-msg-reject-fg: #ffd4d0;
-  --pd-msg-reset-bg: #8a4b12;
-  --pd-msg-reset-fg: #ffe0b8;
-  --pd-msg-vdm-bg: #5a2d70;
-  --pd-msg-vdm-fg: #efd6ff;
-  --pd-msg-srccap-bg: #3a3a48;
-  --pd-msg-srccap-fg: #f2f2f2;
-  --pd-msg-snkcap-bg: #2f3f55;
-  --pd-msg-snkcap-fg: #d6e8ff;
+  /* PD 徽章：colorPalette* Background2 + Foreground2（暗 = shade30 / tint40） */
+  --pd-msg-crc-bg: var(--teal-shade30);
+  --pd-msg-crc-fg: var(--teal-tint40);
+  --pd-msg-request-bg: var(--red-shade30);
+  --pd-msg-request-fg: var(--red-tint40);
+  --pd-msg-accept-bg: var(--green-shade30);
+  --pd-msg-accept-fg: var(--green-tint40);
+  --pd-msg-psrdy-bg: var(--seafoam-shade30);
+  --pd-msg-psrdy-fg: var(--seafoam-tint40);
+  --pd-msg-reject-bg: var(--cranberry-shade30);
+  --pd-msg-reject-fg: var(--cranberry-tint40);
+  --pd-msg-reset-bg: var(--pumpkin-shade30);
+  --pd-msg-reset-fg: var(--pumpkin-tint40);
+  --pd-msg-vdm-bg: var(--purple-shade30);
+  --pd-msg-vdm-fg: var(--purple-tint40);
+  --pd-msg-srccap-bg: var(--mink-shade30);
+  --pd-msg-srccap-fg: var(--mink-tint40);
+  --pd-msg-snkcap-bg: var(--royal-blue-shade30);
+  --pd-msg-snkcap-fg: var(--royal-blue-tint40);
   --pd-msg-other-bg: var(--fill-control);
   --pd-msg-other-fg: var(--text-secondary);
-  --pd-msg-get-bg: #1a4d78;
-  --pd-msg-get-fg: #cfe4ff;
-  --pd-msg-swap-bg: #6b5314;
-  --pd-msg-swap-fg: #ffe8b0;
-  --pd-msg-alert-bg: #3d3a78;
-  --pd-msg-alert-fg: #ddd9ff;
-  --pd-msg-ping-bg: #3a4a52;
-  --pd-msg-ping-fg: #d4e4ea;
-  --pd-msg-mode-bg: #0f4f4a;
-  --pd-msg-mode-fg: #c8f0ea;
-  --pd-msg-ext-bg: #3a4a28;
-  --pd-msg-ext-fg: #e0f0c8;
-  --pd-dir-src-bg: #3a3a48;
-  --pd-dir-src-fg: #f2f2f2;
-  --pd-dir-snk-bg: #2f3f55;
-  --pd-dir-snk-fg: #d6e8ff;
-  --pd-dir-plug-bg: #5a2d70;
-  --pd-dir-plug-fg: #efd6ff;
-  --pd-hex-bg: #0e4f63;
-  --pd-hex-fg: #9ee7f2;
-  --pd-header-table-bg: #1d3f7a;
-  --pd-header-table-fg: #d6e6ff;
-  --pd-object-table-bg: #1f5a32;
-  --pd-object-table-fg: #d4f3dc;
+  --pd-msg-get-bg: var(--navy-shade30);
+  --pd-msg-get-fg: var(--navy-tint40);
+  --pd-msg-swap-bg: var(--gold-shade30);
+  --pd-msg-swap-fg: var(--gold-tint40);
+  --pd-msg-alert-bg: var(--lavender-shade30);
+  --pd-msg-alert-fg: var(--lavender-tint40);
+  --pd-msg-ping-bg: var(--steel-shade30);
+  --pd-msg-ping-fg: var(--steel-tint40);
+  --pd-msg-mode-bg: var(--dark-teal-shade30);
+  --pd-msg-mode-fg: var(--dark-teal-tint40);
+  --pd-msg-ext-bg: var(--forest-shade30);
+  --pd-msg-ext-fg: var(--forest-tint40);
+  --pd-dir-src-bg: var(--mink-shade30);
+  --pd-dir-src-fg: var(--mink-tint40);
+  --pd-dir-snk-bg: var(--royal-blue-shade30);
+  --pd-dir-snk-fg: var(--royal-blue-tint40);
+  --pd-dir-plug-bg: var(--purple-shade30);
+  --pd-dir-plug-fg: var(--purple-tint40);
+  --pd-hex-bg: var(--light-teal-shade30);
+  --pd-hex-fg: var(--light-teal-tint40);
+  --pd-header-table-bg: var(--blue-shade30);
+  --pd-header-table-fg: var(--blue-tint40);
+  --pd-object-table-bg: var(--green-shade30);
+  --pd-object-table-fg: var(--green-tint40);
 }
 
-/* 亮色：只重赋语义层。通道色保持暗色 hex，图表基建必须换不透明浅灰。 */
+/* 亮色：只重赋语义层。通道 / PD 徽章改走 Foreground2 / Background2 浅色侧。 */
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --surface-base: #f3f3f3;
-  --surface-content: #f9f9f9;
-  --surface-card: #ffffff;
-  --surface-flyout: #ffffff;
+  --surface-base: var(--grey-98);
+  --surface-content: var(--white);
+  --surface-card: var(--grey-98);
+  --surface-flyout: var(--white);
 
-  --fill-control: rgba(0, 0, 0, 0.037);
-  --fill-control-hover: rgba(0, 0, 0, 0.061);
-  --fill-control-pressed: rgba(0, 0, 0, 0.024);
-  --fill-subtle-hover: rgba(0, 0, 0, 0.04);
-  --fill-subtle-pressed: rgba(0, 0, 0, 0.02);
+  --fill-control: var(--white);
+  --fill-control-hover: var(--grey-96);
+  --fill-control-pressed: var(--grey-88);
+  --fill-subtle-hover: var(--grey-96);
+  --fill-subtle-pressed: var(--grey-88);
 
-  --text-primary: #1a1a1a;
-  --text-secondary: #5c5c5c;
-  --text-tertiary: #858585;
-  --text-disabled: #adadad;
-  --text-on-accent: #ffffff;
+  --text-primary: var(--grey-14);
+  --text-secondary: var(--grey-26);
+  --text-tertiary: var(--grey-38);
+  --text-disabled: var(--grey-74);
+  --text-on-accent: var(--white);
 
-  --stroke-divider: rgba(0, 0, 0, 0.08);
-  --stroke-card: rgba(0, 0, 0, 0.06);
-  --stroke-control: rgba(0, 0, 0, 0.06);
-  --stroke-control-strong: rgba(0, 0, 0, 0.16);
-  --stroke-input-underline: rgba(0, 0, 0, 0.45);
-  --stroke-focus-outer: #000000;
-  --stroke-focus-inner: #ffffff;
+  --stroke-control: var(--grey-82);
+  --stroke-card: var(--grey-88);
+  --stroke-divider: var(--grey-94);
+  --stroke-control-strong: var(--grey-38);
+  --stroke-input-underline: var(--grey-38);
+  --stroke-focus-outer: var(--black);
+  --stroke-focus-inner: var(--white);
 
-  --accent-fill: var(--brand-dark1);
-  --accent-fill-hover: #0056a6;
-  --accent-fill-pressed: #004c94;
-  --accent-text: var(--brand-dark1);
-  --accent-fill-faint: rgba(0, 95, 184, 0.12);
-  --accent-fill-faint-hover: rgba(0, 95, 184, 0.18);
-  --accent-stroke: rgba(0, 95, 184, 0.32);
+  --accent-fill: var(--brand-80);
+  --accent-fill-hover: var(--brand-70);
+  --accent-fill-pressed: var(--brand-40);
+  --accent-text: var(--brand-80);
+  --accent-fill-faint: color-mix(in srgb, var(--brand-80) 12%, transparent);
+  --accent-fill-faint-hover: color-mix(in srgb, var(--brand-80) 18%, transparent);
+  --accent-stroke: var(--brand-80);
 
-  --accent-solid: #005fb8;
-  --accent-solid-hover: #0067c0;
-  --accent-solid-pressed: #004e99;
+  --accent-solid: var(--brand-80);
+  --accent-solid-hover: var(--brand-70);
+  --accent-solid-pressed: var(--brand-40);
 
-  --status-danger: #c42b1c;
-  --status-danger-bg: rgba(196, 43, 28, 0.08);
-  --status-success: #0f7b0f;
-  --status-success-bg: rgba(15, 123, 15, 0.08);
-  --status-caution: #9d5d00;
-  --status-caution-bg: rgba(157, 93, 0, 0.08);
-  --status-info-bg: rgba(0, 0, 0, 0.04);
-
-  --chart-axis-text: #6b6b80;
-  --chart-grid: #c8c8d4;
-  --chart-grid-minor: #dcdce6;
+  --status-danger: var(--cranberry-primary);
+  --status-danger-bg: var(--cranberry-tint60);
+  --status-success: var(--green-primary);
+  --status-success-bg: var(--green-tint60);
+  --status-caution: var(--orange-shade20);
+  --status-caution-bg: var(--orange-tint60);
+  --status-info-bg: var(--grey-96);
 
   --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
   --shadow-8: 0 4px 8px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
   --shadow-16: 0 8px 16px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
   --shadow-64: 0 32px 64px rgba(0, 0, 0, 0.24), 0 0 8px rgba(0, 0, 0, 0.2);
 
-  --scrollbar-thumb: #c2c2c2;
-  --scrollbar-thumb-hover: #a8a8a8;
+  --scrollbar-thumb: var(--grey-76);
+  --scrollbar-thumb-hover: var(--grey-64);
 
-  --pd-msg-crc-bg: #b6e8f0;
-  --pd-msg-crc-fg: #0b4a54;
-  --pd-msg-request-bg: #f5c4c8;
-  --pd-msg-request-fg: #6b1c24;
-  --pd-msg-accept-bg: #b7eadb;
-  --pd-msg-accept-fg: #0b4a3f;
-  --pd-msg-psrdy-bg: #c3ead6;
-  --pd-msg-psrdy-fg: #0d4a36;
-  --pd-msg-reject-bg: #f5c8c4;
-  --pd-msg-reject-fg: #6b211c;
-  --pd-msg-reset-bg: #f5d7b0;
-  --pd-msg-reset-fg: #6b3a0a;
-  --pd-msg-vdm-bg: #e4c8f5;
-  --pd-msg-vdm-fg: #4a1c63;
-  --pd-msg-srccap-bg: #e4e4ea;
-  --pd-msg-srccap-fg: #2a2a33;
-  --pd-msg-snkcap-bg: #d5e4f5;
-  --pd-msg-snkcap-fg: #1c334d;
+  --ch-voltage: var(--light-blue-primary);
+  --ch-current: var(--seafoam-primary);
+  --ch-power: var(--orange-primary);
+  --ch-temp: var(--red-primary);
+  --ch-temp-axis: var(--red-primary);
+  --ch-energy: var(--berry-primary);
+  --ch-dp: var(--marigold-primary);
+  --ch-dn: var(--lilac-primary);
+  --ch-cc1: var(--light-teal-primary);
+  --ch-cc2: var(--pink-primary);
+
+  --pd-msg-crc-bg: var(--teal-tint40);
+  --pd-msg-crc-fg: var(--teal-shade30);
+  --pd-msg-request-bg: var(--red-tint40);
+  --pd-msg-request-fg: var(--red-shade30);
+  --pd-msg-accept-bg: var(--green-tint40);
+  --pd-msg-accept-fg: var(--green-shade30);
+  --pd-msg-psrdy-bg: var(--seafoam-tint40);
+  --pd-msg-psrdy-fg: var(--seafoam-shade30);
+  --pd-msg-reject-bg: var(--cranberry-tint40);
+  --pd-msg-reject-fg: var(--cranberry-shade30);
+  --pd-msg-reset-bg: var(--pumpkin-tint40);
+  --pd-msg-reset-fg: var(--pumpkin-shade30);
+  --pd-msg-vdm-bg: var(--purple-tint40);
+  --pd-msg-vdm-fg: var(--purple-shade30);
+  --pd-msg-srccap-bg: var(--mink-tint40);
+  --pd-msg-srccap-fg: var(--mink-shade30);
+  --pd-msg-snkcap-bg: var(--royal-blue-tint40);
+  --pd-msg-snkcap-fg: var(--royal-blue-shade30);
   --pd-msg-other-bg: var(--fill-control);
   --pd-msg-other-fg: var(--text-secondary);
-  --pd-msg-get-bg: #cfe4f7;
-  --pd-msg-get-fg: #0d3a5c;
-  --pd-msg-swap-bg: #f5e3b0;
-  --pd-msg-swap-fg: #5a4308;
-  --pd-msg-alert-bg: #ddd8f5;
-  --pd-msg-alert-fg: #2c2860;
-  --pd-msg-ping-bg: #d4e0e6;
-  --pd-msg-ping-fg: #243038;
-  --pd-msg-mode-bg: #b8e8e0;
-  --pd-msg-mode-fg: #0a3d38;
-  --pd-msg-ext-bg: #dde8c4;
-  --pd-msg-ext-fg: #2e3c14;
-  --pd-dir-src-bg: #e4e4ea;
-  --pd-dir-src-fg: #2a2a33;
-  --pd-dir-snk-bg: #d5e4f5;
-  --pd-dir-snk-fg: #1c334d;
-  --pd-dir-plug-bg: #e4c8f5;
-  --pd-dir-plug-fg: #4a1c63;
-  --pd-hex-bg: #d4eef3;
-  --pd-hex-fg: #0b4a54;
-  --pd-header-table-bg: #d6e4fb;
-  --pd-header-table-fg: #16315f;
-  --pd-object-table-bg: #d6f0de;
-  --pd-object-table-fg: #164226;
+  --pd-msg-get-bg: var(--navy-tint40);
+  --pd-msg-get-fg: var(--navy-shade30);
+  --pd-msg-swap-bg: var(--gold-tint40);
+  --pd-msg-swap-fg: var(--gold-shade30);
+  --pd-msg-alert-bg: var(--lavender-tint40);
+  --pd-msg-alert-fg: var(--lavender-shade30);
+  --pd-msg-ping-bg: var(--steel-tint40);
+  --pd-msg-ping-fg: var(--steel-shade30);
+  --pd-msg-mode-bg: var(--dark-teal-tint40);
+  --pd-msg-mode-fg: var(--dark-teal-shade30);
+  --pd-msg-ext-bg: var(--forest-tint40);
+  --pd-msg-ext-fg: var(--forest-shade30);
+  --pd-dir-src-bg: var(--mink-tint40);
+  --pd-dir-src-fg: var(--mink-shade30);
+  --pd-dir-snk-bg: var(--royal-blue-tint40);
+  --pd-dir-snk-fg: var(--royal-blue-shade30);
+  --pd-dir-plug-bg: var(--purple-tint40);
+  --pd-dir-plug-fg: var(--purple-shade30);
+  --pd-hex-bg: var(--light-teal-tint40);
+  --pd-hex-fg: var(--light-teal-shade30);
+  --pd-header-table-bg: var(--blue-tint40);
+  --pd-header-table-fg: var(--blue-shade30);
+  --pd-object-table-bg: var(--green-tint40);
+  --pd-object-table-fg: var(--green-shade30);
 }

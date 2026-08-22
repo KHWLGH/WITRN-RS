@@ -26,7 +26,7 @@ export function formatRelativeHMS(seconds) {
 
 /**
  * 将 HEX 颜色字符串转换为 rgba() 格式。
- * @param {string} hex - 例如 "#4a9eff"
+ * @param {string} hex - 例如 "#65ade5"
  * @param {number} opacityPercent - 0-100
  * @returns {string}
  */

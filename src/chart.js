@@ -553,13 +553,13 @@ const Y_SCALES = ['voltage', 'current', 'power', 'temp'];
  * 同一像素行，四条轴的网格线因此严格重合。
  *
  * 用 u.height（画布总高）而非 u.bbox.height 推算：bbox 依赖轴宽、轴宽依赖刻度
- * 文字、刻度又依赖等分数，读 bbox 会形成布局循环。60 是坐标轴与标签的大致占用，
- * 余下按约 80px/格换算——只随窗口尺寸变化，不随数据抖动。
+ * 文字、刻度又依赖等分数，读 bbox 会形成布局循环。70 是 X 轴 + 轴顶横向标题
+ * 的大致占用，余下按约 80px/格换算——只随窗口尺寸变化，不随数据抖动。
  * @param {any} u
  * @returns {number}
  */
 function yDivisions(u) {
-  const plotHeight = Math.max(80, (Number(u?.height) || 300) - 60);
+  const plotHeight = Math.max(80, (Number(u?.height) || 300) - 70);
   return Math.min(7, Math.max(3, Math.round(plotHeight / 80)));
 }
 
@@ -695,8 +695,16 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
 }
 
 /**
+ * 轴顶横向标题占用的上边距（CSS px）。
+ * 顶刻度数字相对绘图区顶边居中，大约伸出 6px；再加标题行高与缝隙。
+ * 取代 uPlot 默认 ~17px 顶垫，避免标题与顶刻度挤在一起。
+ */
+const Y_AXIS_LABEL_PAD = 24;
+
+/**
  * 构造一条 Y 轴配置。
  * 颜色参数为读取 chartTheme 的闭包（uPlot 对 stroke 支持函数形式），换主题后 redraw 即生效。
+ * 标题不走 uPlot 的 `label`（只能竖排贴在轴侧并额外占 labelSize），改由 drawYAxisLabels 画在轴顶。
  * @param {string} scaleKey
  * @param {string} label
  * @param {() => string} color
@@ -708,10 +716,8 @@ function mkYAxis(scaleKey, label, color, side) {
     scale: scaleKey,
     side,
     stroke: color,
-    label,
+    axisTitle: label,
     labelFont: `12px ${CHART_FONT}`,
-    labelSize: 16,
-    labelGap: 2,
     font: `12px ${MONO_FONT}`,
     // 数字与竖脊之间的空隙；默认朝数字伸出的 ticks 已关闭（见 drawYAxisChrome）
     gap: 6,
@@ -852,6 +858,62 @@ function drawYAxisChrome(u) {
   ctx.moveTo(left, bottom);
   ctx.lineTo(right, bottom);
   ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
+ * 在每条可见 Y 轴顶部画横向标题。
+ * 轴沟只有约 30px，标题宽约 50px，居中于列会和邻居叠字。
+ * 贴着绘图区的轴：标题从竖脊朝图内伸出；外侧轴：贴画布外沿。
+ * @param {any} u
+ */
+function drawYAxisLabels(u) {
+  const { ctx, bbox } = u;
+  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
+
+  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
+  const axes = u.axes ?? [];
+  const canvasW = ctx.canvas.width;
+  const left = bbox.left;
+  const right = bbox.left + bbox.width;
+  const gap = 4 * pxRatio;
+  const y = bbox.top - 8 * pxRatio;
+  const edgeEps = pxRatio * 1.5;
+
+  ctx.save();
+  ctx.textBaseline = 'bottom';
+
+  for (let i = 1; i < axes.length; i++) {
+    const axis = axes[i];
+    if (!axis?.show || axis._show === false || axis._pos == null) continue;
+    if (u.scales?.[axis.scale]?.min == null) continue;
+    const title = axis.axisTitle;
+    if (!title) continue;
+
+    const stroke = typeof axis.stroke === 'function' ? axis.stroke(u, i) : axis.stroke;
+    if (!stroke) continue;
+
+    const pos = axis._pos * pxRatio;
+    const atLeftEdge = axis.side === 3 && Math.abs(pos - left) <= edgeEps;
+    const atRightEdge = axis.side === 1 && Math.abs(pos - right) <= edgeEps;
+
+    let x = pos;
+    /** @type {CanvasTextAlign} */
+    let align = 'center';
+    if (axis.side === 3) {
+      align = 'left';
+      x = atLeftEdge ? pos + gap : gap;
+    } else if (axis.side === 1) {
+      align = 'right';
+      x = atRightEdge ? pos - gap : canvasW - gap;
+    }
+
+    ctx.font = Array.isArray(axis.labelFont) ? axis.labelFont[0] : `12px ${CHART_FONT}`;
+    ctx.fillStyle = stroke;
+    ctx.textAlign = align;
+    ctx.fillText(title, x, y);
+  }
 
   ctx.restore();
 }
@@ -1043,6 +1105,8 @@ export function initChart() {
     ms: 1,
     pxAlign: 1,
     legend: { show: false },
+    // 顶边留给横向轴标题；左右/底仍走 uPlot 按轴自动垫
+    padding: /** @type {any} */ ([Y_AXIS_LABEL_PAD, null, null, null]),
     cursor: {
       y: false,
       drag: { setScale: false, x: false, y: false },
@@ -1092,7 +1156,7 @@ export function initChart() {
       mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1),
     ],
     hooks: {
-      drawAxes: [drawMinorGrid, drawYAxisChrome],
+      drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
