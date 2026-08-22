@@ -43,6 +43,7 @@ __pycache__/
 .idea/
 
 # Playwright CLI snapshots and screenshots
+.playwright-cli/
 **/.playwright-cli/
 
 example/
