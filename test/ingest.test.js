@@ -123,6 +123,19 @@ test('external temperature source prefers TCP over HID', () => {
   assert.equal(state.chartData.temp.at(-1), 21.25);
 });
 
+test('a sleep-sized wall-clock jump does not explode energy', () => {
+  resetIngestState();
+  state.settings.sampleRate = 250;
+  addDataPoint({ voltage: 5, current: 1, power: 5 });
+  const firstX = state.chartSeries.x.at(-1);
+  const whBefore = state.energy.wh;
+  state.recordingStartTime = Date.now() - 3_600_000;
+  addDataPoint({ voltage: 5, current: 1, power: 5 });
+  const dx = state.chartSeries.x.at(-1) - firstX;
+  assert.ok(dx < 1, `x jumped ${dx}s across a simulated sleep`);
+  assert.ok(state.energy.wh - whBefore < 0.01, 'hour-long sleep must not integrate as one hour');
+});
+
 test('colliding wall-clock samples still advance x and energy', () => {
   resetIngestState();
   state.settings.sampleRate = 250;

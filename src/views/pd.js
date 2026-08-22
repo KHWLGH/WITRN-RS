@@ -59,6 +59,10 @@ let initialized = false;
 let softCapWarned = false;
 /** 已入库报文的最大 seq；用于去重和 `pd_log_after` 补洞。 */
 let lastIngestedSeq = -1;
+/** 与后端 `PdLog.generation` 对齐；导入 / 清空后用来丢掉过期的实时事件。 */
+let acceptedGen = /** @type {number|null} */ (null);
+/** 导入或清空进行中，暂不接受实时事件。 */
+let ingestSuspended = false;
 
 /** 当前选中的日志下标。 */
 /** @type {number|null} */
@@ -153,10 +157,17 @@ function rememberSeq(entry) {
  * @returns {boolean} 是否写入了一条日志
  */
 function ingestOne(payload, live = true) {
+  if (live && ingestSuspended) return false;
   if (live && followRecordingEnabled() && !state.isRecording) return false;
   const entry = normalizePdPayload(payload);
   if (!entry) return false;
   if (!isDivider(entry)) {
+    const gen = Number.isFinite(entry.gen) ? /** @type {number} */ (entry.gen) : null;
+    if (live && acceptedGen === -1 && gen !== null) return false;
+    if (live && gen !== null && acceptedGen !== null && acceptedGen !== -1 && gen !== acceptedGen) {
+      return false;
+    }
+    if (gen !== null) acceptedGen = gen;
     const seq = entry.seq;
     if (seq !== undefined && Number.isFinite(seq) && seq <= lastIngestedSeq) return false;
   }
@@ -259,6 +270,8 @@ function syncPdUi() {
 
 document.addEventListener?.('witrn:monitor-changed', () => {
   syncPdUi();
+  // 点开始后后端门已开、本地 ingest 刚放行：把等待期间入库的握手补进来。
+  if (state.isRecording) void fillPdGap();
 });
 
 /** 设备断开时插入分隔行，区分两次会话。 */
@@ -744,9 +757,12 @@ export function clearPdEntries() {
   bufferedWhilePaused = 0;
   softCapWarned = false;
   lastIngestedSeq = -1;
+  acceptedGen = -1;
   metaCache.clear();
   clearSelection();
-  void invokeCmd('pd_log_clear');
+  void invokeCmd('pd_log_clear').then((gen) => {
+    acceptedGen = typeof gen === 'number' && Number.isFinite(gen) ? gen : null;
+  });
   rebuildFilterAndWindow();
 }
 
@@ -811,6 +827,9 @@ async function importPdCapture() {
       return;
     }
 
+    ingestSuspended = true;
+    await invokeCmd('set_pd_capture_enabled', { enabled: false });
+
     const needBackend = result.entries.some((e) => {
       if (isDivider(e)) return false;
       return (e.bytes?.length ?? 0) > 0;
@@ -843,11 +862,13 @@ async function importPdCapture() {
     bufferedWhilePaused = 0;
     softCapWarned = false;
     lastIngestedSeq = -1;
+    acceptedGen = null;
     metaCache.clear();
     clearSelection();
     for (const entry of nextEntries) {
       log.push(entry);
       rememberSeq(entry);
+      if (!isDivider(entry) && Number.isFinite(entry.gen)) acceptedGen = /** @type {number} */ (entry.gen);
     }
 
     rebuildFilterAndWindow();
@@ -855,6 +876,9 @@ async function importPdCapture() {
   } catch (e) {
     console.error(e);
     toast.error(`导入失败: ${/** @type {Error} */ (e).message}`);
+  } finally {
+    ingestSuspended = false;
+    syncBackendCaptureFlag();
   }
 }
 

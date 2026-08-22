@@ -60,7 +60,8 @@ pub fn decode_general_sample(data: &[u8]) -> Result<GeneralSample> {
     let voltage = f32_at(46);
     let current = f32_at(50);
 
-    if !(0.0..=60.0).contains(&voltage) || !(-10.0..=10.0).contains(&current) {
+    // K2 标称 ±10 A；略放宽以免过冲 / 量化把整帧丢掉。远超量程的才当坏帧。
+    if !(0.0..=60.0).contains(&voltage) || !(-20.0..=20.0).contains(&current) {
         return Err(Error::InvalidMeasurement {
             field: "voltage/current",
         });
@@ -313,6 +314,20 @@ mod tests {
 
         let mut data = report();
         data[46..50].copy_from_slice(&60.1f32.to_le_bytes());
+        assert!(matches!(
+            decode_general_sample(&data),
+            Err(Error::InvalidMeasurement { .. })
+        ));
+
+        let mut data = report();
+        data[50..54].copy_from_slice(&10.1f32.to_le_bytes());
+        assert!(
+            decode_general_sample(&data).is_ok(),
+            "slight current overshoot must not drop the frame"
+        );
+
+        let mut data = report();
+        data[50..54].copy_from_slice(&20.1f32.to_le_bytes());
         assert!(matches!(
             decode_general_sample(&data),
             Err(Error::InvalidMeasurement { .. })

@@ -28,6 +28,7 @@
  *   meta?: PdMeta,
  *   bytes?: number[],
  *   seq?: number,
+ *   gen?: number,
  * }} PdEntry
  */
 /** @typedef {{ t: number, divider: true }} PdDivider */
@@ -454,15 +455,33 @@ export function bitsToHexWord(bits) {
 export function hexWordsFromWire(wire) {
   /** @type {PdHexWord[]} */
   const words = [];
-  if (wire.length >= 2) {
-    const header = wire[0] | (wire[1] << 8);
-    words.push({ label: 'Msg Header', hex: `0x${header.toString(16).toUpperCase().padStart(4, '0')}` });
+  if (wire.length < 2) return words;
+  const header = wire[0] | (wire[1] << 8);
+  words.push({ label: 'Msg Header', hex: `0x${header.toString(16).toUpperCase().padStart(4, '0')}` });
+  const extended = (header & 0x8000) !== 0;
+  let i = 2;
+  if (extended && wire.length >= 4) {
+    const ext = wire[2] | (wire[3] << 8);
+    words.push({ label: 'Ext Header', hex: `0x${ext.toString(16).toUpperCase().padStart(4, '0')}` });
+    i = 4;
   }
-  for (let i = 2, n = 0; i + 3 < wire.length; i += 4, n++) {
+  for (let n = 0; i + 3 < wire.length; i += 4, n++) {
     const word = wire[i] | (wire[i + 1] << 8) | (wire[i + 2] << 16) | (wire[i + 3] << 24);
     words.push({
       label: `Data Object ${n}`,
       hex: `0x${(word >>> 0).toString(16).toUpperCase().padStart(8, '0')}`,
+    });
+  }
+  if (i < wire.length) {
+    let rem = 0;
+    const leftover = wire.length - i;
+    for (let b = 0; b < leftover; b++) rem |= wire[i + b] << (8 * b);
+    words.push({
+      label: 'Data',
+      hex: `0x${(rem >>> 0)
+        .toString(16)
+        .toUpperCase()
+        .padStart(leftover * 2, '0')}`,
     });
   }
   return words;
@@ -964,6 +983,7 @@ export function normalizePdPayload(payload) {
     const bytes = normalizeBytes(rec.bytes);
     if (bytes) entry.bytes = bytes;
     if (Number.isFinite(rec.seq)) entry.seq = /** @type {number} */ (rec.seq);
+    if (Number.isFinite(rec.gen)) entry.gen = /** @type {number} */ (rec.gen);
     copyBusSample(rec, entry);
     return entry;
   }
@@ -987,6 +1007,7 @@ export function normalizePdPayload(payload) {
     const bytes = normalizeBytes(rec.bytes);
     if (bytes) entry.bytes = bytes;
     if (Number.isFinite(rec.seq)) entry.seq = /** @type {number} */ (rec.seq);
+    if (Number.isFinite(rec.gen)) entry.gen = /** @type {number} */ (rec.gen);
     return entry;
   }
   return null;

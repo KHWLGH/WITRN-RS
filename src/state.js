@@ -246,6 +246,8 @@ export const state = {
   __toggleRecording: null,
   /** @type {(() => void)|null} 清空图表并重置统计与能量 */
   __clearMonitorData: null,
+  /** @type {(() => void)|null} 手动或拔线断开时在 PD 日志插入分隔行 */
+  __markPdDisconnect: null,
 
   // ── Raw data storage（chartData / chartSeries 同一份列）──
   /** @type {ChartSeriesColumns} */

@@ -40,10 +40,10 @@ function resetRecordingState() {
   state.autoPauseSettings.triggerStartTime = 5678;
 }
 
-test('recording session boundaries reset integration and auto-pause baselines', () => {
+test('recording session boundaries reset integration and auto-pause baselines', async () => {
   resetRecordingState();
 
-  startRecording();
+  await startRecording();
   assert.equal(state.isRecording, true);
   assert.equal(state.energy.lastX, null);
   assert.equal(state.autoPauseSettings.triggerStartTime, null);
@@ -56,13 +56,13 @@ test('recording session boundaries reset integration and auto-pause baselines', 
   assert.equal(state.autoPauseSettings.triggerStartTime, null);
 });
 
-test('recording after an import continues from the last relative x value', () => {
+test('recording after an import continues from the last relative x value', async () => {
   resetRecordingState();
   state.chartSeries.timestamps.set([1_000_000, 2_000_000]);
   state.chartSeries.x.set([3723.5, 3724.5]);
   state.settings.sampleRate = 250;
 
-  startRecording();
+  await startRecording();
   assert.equal(state.recordingBaseSeconds, 3724.75);
   stopRecording();
 });

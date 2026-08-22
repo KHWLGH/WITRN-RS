@@ -330,6 +330,7 @@ function setupControls() {
   // 直接 import data.js：那条边会把 chart.js / temperature.js 拖进 PD 的单元测试环境。
   state.__toggleRecording = () => (state.isRecording ? stopRecording() : startRecording());
   state.__clearMonitorData = () => clearAndResetStats();
+  state.__markPdDisconnect = () => markPdDisconnect();
 
   // 记录 / 连接 / 跟随设置任一变化都要重刷记录按钮：文案与提示语都取决于它们
   // （data.js 与 csv.js 在自己的流程里也直接调，覆盖不派发事件的场景，如清空图表）

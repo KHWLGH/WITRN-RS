@@ -184,11 +184,7 @@ fn a_status_message_without_a_request_on_record_still_decodes() {
         sdb.get("Internal Temp").unwrap().value().as_str(),
         Some("30\u{b0}C")
     );
-    assert!(sdb
-        .get("Event Flags")
-        .unwrap()
-        .get("CL/CV Mode")
-        .is_none());
+    assert!(sdb.get("Event Flags").unwrap().get("CL/CV Mode").is_none());
 }
 
 #[test]

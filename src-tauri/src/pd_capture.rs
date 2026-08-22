@@ -38,6 +38,8 @@ pub struct PdEvent {
     pub ibus: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes: Option<Vec<u8>>,
+    #[serde(default)]
+    pub gen: u64,
 }
 
 /// 导入时的一条原始记录（前端 v2 捕获文件 / 替换命令）。
@@ -76,7 +78,11 @@ struct PdMessage {
 #[derive(Default)]
 pub struct PdLog {
     messages: Vec<PdMessage>,
+    generation: u64,
 }
+
+/// 超过该条数停止入库，避免无界增长把进程吃满。
+pub const PD_LOG_HARD_CAP: usize = 1_000_000;
 
 fn is_false(v: &bool) -> bool {
     !*v
@@ -90,11 +96,13 @@ pub fn now_ms() -> u64 {
 }
 
 impl PdLog {
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> u64 {
         self.messages.clear();
+        self.generation = self.generation.wrapping_add(1);
+        self.generation
     }
 
-    /// 追加一条已解析报文，返回发给前端的紧凑事件。
+    /// 追加一条已解析报文，返回发给前端的紧凑事件。满员时返回 `None`。
     pub fn push_message(
         &mut self,
         t: u64,
@@ -102,16 +110,20 @@ impl PdLog {
         meta: Metadata,
         vbus: Option<f32>,
         ibus: Option<f32>,
-    ) -> PdEvent {
+    ) -> Option<PdEvent> {
+        if self.messages.len() >= PD_LOG_HARD_CAP {
+            return None;
+        }
         let seq = self.messages.len() as u64;
         let mut event = PdEvent::message(t, seq, &report, &meta);
         event.vbus = vbus;
         event.ibus = ibus;
+        event.gen = self.generation;
         self.messages.push(PdMessage {
             event: event.clone(),
             meta,
         });
-        event
+        Some(event)
     }
 
     pub fn meta_at(&self, index: usize) -> Option<&Metadata> {
@@ -130,8 +142,8 @@ impl PdLog {
             .unwrap_or_default()
     }
 
-    /// 用导入的原始帧重建日志。分隔行只出现在返回的事件里，不占 seq。
-    pub fn replace(&mut self, entries: Vec<PdLoadEntry>) -> Result<Vec<PdEvent>, String> {
+    /// 解析导入帧，不碰现有日志。调用方持锁后再 [`install`](Self::install)。
+    pub fn build(entries: Vec<PdLoadEntry>) -> Result<(Self, Vec<PdEvent>), String> {
         let mut next = PdLog::default();
         let mut parser = Parser::new();
         let mut out = Vec::with_capacity(entries.len());
@@ -145,10 +157,32 @@ impl PdLog {
             }
             let meta = decode_pd_report(&mut parser, &entry.bytes)
                 .map_err(|e| format!("导入的报文无法解析: {e}"))?;
-            out.push(next.push_message(entry.t, entry.bytes, meta, entry.vbus, entry.ibus));
+            let event = next
+                .push_message(entry.t, entry.bytes, meta, entry.vbus, entry.ibus)
+                .ok_or_else(|| "导入超过日志上限".to_string())?;
+            out.push(event);
+        }
+        Ok((next, out))
+    }
+
+    /// 用已解析的日志替换自身，并给事件盖上新的 generation。
+    pub fn install(&mut self, mut next: PdLog, mut events: Vec<PdEvent>) -> Vec<PdEvent> {
+        next.generation = self.generation.wrapping_add(1);
+        for event in &mut events {
+            event.gen = next.generation;
+        }
+        for message in &mut next.messages {
+            message.event.gen = next.generation;
         }
         *self = next;
-        Ok(out)
+        events
+    }
+
+    /// 用导入的原始帧重建日志。分隔行只出现在返回的事件里，不占 seq。
+    #[cfg(test)]
+    pub fn replace(&mut self, entries: Vec<PdLoadEntry>) -> Result<Vec<PdEvent>, String> {
+        let (next, events) = Self::build(entries)?;
+        Ok(self.install(next, events))
     }
 }
 
@@ -169,6 +203,7 @@ impl PdEvent {
             vbus: None,
             ibus: None,
             bytes: None,
+            gen: 0,
         }
     }
 
@@ -189,6 +224,7 @@ impl PdEvent {
             vbus: None,
             ibus: None,
             bytes: Some(report.to_vec()),
+            gen: 0,
         }
     }
 }
@@ -515,21 +551,25 @@ mod tests {
         let mut parser = Parser::new();
         let caps = pd_frame(&[0xA1, 0x11, 0x2C, 0x91, 0x01, 0x08], 224);
         let crc = pd_frame(&[0x41, 0x00], 224);
-        let e0 = log.push_message(
-            1,
-            caps.clone(),
-            decode_pd_report(&mut parser, &caps).unwrap(),
-            None,
-            None,
-        );
+        let e0 = log
+            .push_message(
+                1,
+                caps.clone(),
+                decode_pd_report(&mut parser, &caps).unwrap(),
+                None,
+                None,
+            )
+            .unwrap();
         assert_eq!(e0.seq, Some(0));
-        let e1 = log.push_message(
-            2,
-            crc.clone(),
-            decode_pd_report(&mut parser, &crc).unwrap(),
-            None,
-            None,
-        );
+        let e1 = log
+            .push_message(
+                2,
+                crc.clone(),
+                decode_pd_report(&mut parser, &crc).unwrap(),
+                None,
+                None,
+            )
+            .unwrap();
         assert_eq!(e1.seq, Some(1));
         assert!(log.meta_at(1).is_some());
         assert!(log.meta_at(2).is_none());
@@ -589,6 +629,8 @@ mod tests {
         assert_eq!(events[0].vbus, Some(5.097));
         assert_eq!(events[0].ibus, Some(0.044));
         assert_eq!(events[2].vbus, None);
+        assert_eq!(events[0].gen, 1);
+        assert_eq!(events[2].gen, 1);
     }
 
     #[test]

@@ -52,10 +52,11 @@ pub(crate) fn vdm_header(raw: &str, bit_loc: (u32, u32)) -> Result<Metadata> {
     const F: &str = "VDM Header";
 
     let fields = if flag(sl(raw, 16, 17), F)? {
-        let version = match sl(raw, 17, 21) {
-            "0000" => "Version 1.0",
-            "0100" => "Version 2.0",
-            "0101" => "Version 2.1",
+        // Spec bits 14..13 only. Matching four bits used to label real 2.1 (`10xx`) Reserved.
+        let version = match sl(raw, 17, 19) {
+            "00" => "Version 1.0",
+            "01" => "Version 2.0",
+            "10" => "Version 2.1",
             _ => "Reserved",
         };
         let command_type = match sl(raw, 24, 26) {
@@ -85,7 +86,8 @@ pub(crate) fn vdm_header(raw: &str, bit_loc: (u32, u32)) -> Result<Metadata> {
                 format!("0x{:04X}", num(sl(raw, 0, 16), F)?),
             ),
             Metadata::new(sl(raw, 16, 17), (15, 15), "VDM Type", "Structured"),
-            Metadata::new(sl(raw, 17, 21), (14, 11), "Structured VDM Version", version),
+            Metadata::new(sl(raw, 17, 19), (14, 13), "Structured VDM Version", version),
+            Metadata::reserved(sl(raw, 19, 21), (12, 11)),
             Metadata::new(
                 sl(raw, 21, 24),
                 (10, 8),
@@ -829,6 +831,17 @@ mod tests {
             Some("Discover Identity")
         );
         assert_eq!(h.get("Command Type").unwrap().value().as_str(), Some("REQ"));
+    }
+
+    #[test]
+    fn structured_vdm_version_2_1_is_bits_14_13() {
+        // SVID 0xFF00, structured, version 2.1 (bits 14..13 = 10), REQ, Discover Identity.
+        let raw = bits(&[0x01, 0xC0, 0x00, 0xFF], Order::Little);
+        let h = vdm_header(&raw, (0, 31)).unwrap();
+        assert_eq!(
+            h.get("Structured VDM Version").unwrap().value().as_str(),
+            Some("Version 2.1")
+        );
     }
 
     #[test]

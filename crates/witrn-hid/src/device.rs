@@ -446,6 +446,9 @@ fn sop_of(byte: u8) -> Option<Sop> {
         160 => Some(Sop::SopDoublePrime),
         128 => Some(Sop::SopPrimeDebug),
         96 => Some(Sop::SopDoublePrimeDebug),
+        // Continues the meter's 32-step SOP* encoding (224, 192, …, 96).
+        64 => Some(Sop::HardReset),
+        32 => Some(Sop::CableReset),
         _ => None,
     }
 }
@@ -629,6 +632,8 @@ mod tests {
         assert_eq!(sop_of(160), Some(Sop::SopDoublePrime));
         assert_eq!(sop_of(128), Some(Sop::SopPrimeDebug));
         assert_eq!(sop_of(96), Some(Sop::SopDoublePrimeDebug));
+        assert_eq!(sop_of(64), Some(Sop::HardReset));
+        assert_eq!(sop_of(32), Some(Sop::CableReset));
     }
 
     /// An unrecognised ordered set used to decode as `SOP`. That is not a cosmetic

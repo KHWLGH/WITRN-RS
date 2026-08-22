@@ -4,10 +4,18 @@
  */
 
 import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
+import { nextRecordingX } from './measurement.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncRecordUI } from './ui/controlbar.js';
 import { formatRelativeHMS } from './utils.js';
+
+/** @param {string} cmd @param {Record<string, unknown>} [args] */
+function invokeCmd(cmd, args) {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (typeof invoke !== 'function') return Promise.resolve(null);
+  return invoke(cmd, args);
+}
 
 /** 按当前状态刷新命令栏的记录按钮（开始 / 继续 / 暂停）。 */
 export function refreshRecordButton() {
@@ -64,8 +72,7 @@ export function addDataPoint(data) {
   const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
   let relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
   const prevX = cols.x.length > 0 ? cols.x.at(-1) : Number.NaN;
-  const minStep = Math.max(state.settings.sampleRate / 1000, 0.001);
-  if (Number.isFinite(prevX) && relSeconds <= prevX) relSeconds = prevX + minStep;
+  relSeconds = nextRecordingX(prevX, relSeconds, state.settings.sampleRate);
 
   cols.timestamps.push(nowMs);
   cols.voltage.push(data.voltage);
@@ -137,18 +144,18 @@ export function updateSliderFill() {
   const start = state.settings.rangeStart / 10;
   const end = state.settings.rangeEnd / 10;
   const fill = document.getElementById('slider-fill');
-  if (fill) {
+  if (fill?.style) {
     fill.style.left = `${start}%`;
     fill.style.width = `${end - start}%`;
   }
 
   const handleStart = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-start'));
   const handleEnd = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-end'));
-  if (handleStart) {
+  if (handleStart?.style) {
     handleStart.style.left = `${start}%`;
     handleStart.setAttribute('aria-valuenow', String(start));
   }
-  if (handleEnd) {
+  if (handleEnd?.style) {
     handleEnd.style.left = `${end}%`;
     handleEnd.setAttribute('aria-valuenow', String(end));
   }
@@ -499,6 +506,26 @@ export function resetEnergy() {
   updateEnergyDisplay();
 }
 
+/** 把实时卡片清成占位，避免清空 / 导入后仍显示上一轮活点。 */
+export function resetRealtimeCards() {
+  lastRealtime = null;
+  /** @param {string} id */
+  const dash = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '--';
+  };
+  dash('rt-voltage');
+  dash('rt-current');
+  dash('rt-power');
+  dash('rt-temp');
+  dash('rt-dp');
+  dash('rt-dn');
+  dash('rt-cc1');
+  dash('rt-cc2');
+  const dirEl = document.getElementById('rt-current-dir');
+  if (dirEl) dirEl.hidden = true;
+}
+
 /** 清空图表数据和相关状态。 */
 export function clearChart() {
   if (state.isRecording) stopRecording();
@@ -506,6 +533,7 @@ export function clearChart() {
   rangeStatsCache = null;
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
+  resetRealtimeCards();
 
   if (!state.isTempConnected) {
     state.hasTempData = false;
@@ -525,13 +553,20 @@ export function clearChart() {
 
 // ─── Recording control ───────────────────────────────────────────────────────
 
-/** 开始录制。 */
-export function startRecording() {
+/** 开始录制。先打开后端 PD 门再置本地标志，避免点开始后立刻插充电器丢握手。 */
+export async function startRecording() {
   if (!state.isConnected) {
     console.warn('Attempted to start recording while not connected');
     return;
   }
   if (state.isRecording) return;
+
+  try {
+    await invokeCmd('set_pd_capture_enabled', { enabled: true });
+  } catch (e) {
+    console.error(e);
+  }
+  if (!state.isConnected || state.isRecording) return;
 
   state.isRecording = true;
   const now = Date.now();
@@ -548,6 +583,12 @@ export function startRecording() {
   // 暂停期间不属于下一段能量积分区间。
   state.energy.lastX = null;
   state.autoPauseSettings.triggerStartTime = null;
+
+  // 录制跟最新数据走：先前缩放过的选区百分比会随着点数增长漂到错误窗口。
+  state.settings.rangeStart = 0;
+  state.settings.rangeEnd = 1000;
+  updateSliderFill();
+  updateChartRange();
 
   const el = document.getElementById('record-status');
   if (el) el.textContent = '记录中...';
@@ -580,6 +621,9 @@ export function stopRecording() {
   state.__setRangeControlsEnabled?.(true);
   // 预算跳过的帧在暂停时补一张全质量图
   updateCharts();
+
+  // 跟随记录关闭时采集门保持开；开启时与本地 isRecording 一起关掉。
+  void invokeCmd('set_pd_capture_enabled', { enabled: !state.settings.pdFollowRecording });
 
   // 单一咽喉点：手动停止 / 自动暂停 / 拔设备 / CSV 导入引发的停止都会走到这里
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));

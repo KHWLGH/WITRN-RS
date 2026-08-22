@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **U3 识别 PID 0x5044**：实测到另一款 U3 固件变体上报 `0716:5044`，原先只认 `0x5063`，设备页会显示「未知 WITRN 设备」。现与 C5 一样按双 PID 识别为 WITRN U3
+
 ### Changed
 - **高频记录 + PD 同时开时图表跟手**：HID 读线程与 IPC 发射线程拆开，`pd-data` 改为按帧合并的 `pd-data-batch`（报文一条不丢）；采样率改为 `AtomicU64`，读循环不再每圈抢锁。主图在可见窗口超过 2×宽度后改送增量 min/max 像素桶（全量仍在 `F64Col`，悬停二分回原始点），绘制预算最多让一帧。记录中侧栏数字并入 rAF。PD 列表按行补丁复用，切回时用 `pd_log_after` 按 seq 补洞。Windows WebView2 打开 GPU 栅格，图表 canvas 提到合成层。
 - **Y 轴标题改到轴顶横向放置**：电压 / 电流 / 功率 / 温度不再竖排贴在轴侧；贴边轴的标题从竖脊朝图内伸出，外侧轴贴画布外沿，避免同侧双轴在 30px 轴沟里叠字；左右不再为竖排字预留 `labelSize`，绘图区变宽
@@ -45,6 +48,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **摄入与捕获测试**：`test/ingest.test.js`（有符号电流开/关的存储与统计、信号线列对齐、能量恒正）、`test/pd-capture-state.test.js`（采集状态机与 ingest 门控一致性）、`test/pd-capture-file.test.js`（捕获文件往返、摘要重算、畸形输入与深度上限拒绝）、`test/pd-clear-linkage.test.js`（跟随记录开/关时清空的级联与确认文案，走真实的 `ask` 回退路径）、`test/measurement.test.js` 扩展（CSV 表头列映射四种格式）
 
 ### Fixed
+- **休眠 / NTP 不再把能量算爆**：相对时间轴遇到超过约 2 秒的空档只前进一个采样间隔，后续积分按夹过的 x 走
+- **点开始后立刻插充电器不再丢 PD 握手**：先等后端 `set_pd_capture_enabled` 打开再置本地记录标志，并在记录开始时按 seq 补洞
+- **不完整的 EPR Source Capabilities 不再覆盖 last_pdo**：只有拼完 PDO 列表的报文才作为后续 Request 的上下文
+- **读取身份时重连不再盖掉新连接**：`identify_current_device` 恢复读线程时核对 `connection_epoch`，期间用户另连/断开则放弃恢复
+- **PD 导入不再和实时 seq 串台**：日志带 generation，导入/清空期间挂起实时摄入，过期事件直接丢掉
+- **Hard Reset / Cable Reset 有 SOP 字节**：按仪表 32 步进编码识别 64 / 32，会话状态会按复位清掉
+- **节流窗口保留峰值电流**，避免采样间隔内的尖峰被 last-wins 吃掉；读线程退出时冲掉未发的最后一点
+- **电流略超 ±10 A 不再丢整帧**：有效范围放到 ±20 A，明显乱值仍拒绝
+- **开始记录时复位选区**到全历史，避免锁定的百分比窗口随点数增长漂走
+- **HID 超时不再假装还连着**：曾经读到过报告之后连续 2 秒 `Ok(0)` 视为拔线
+- **手动断开也画 PD 分隔行**
+- **CSV 导入不再把 SampTime 写进持久化配置**；功率列按绝对值入库，与实时路径一致
+- **清空图表后实时卡片不再残留上一轮读数**；导入则以文件最后一点刷新
+- **扩展报文 hex 条先拆 Ext Header**，不再把扩展头和前两字节数据糊成一个 32-bit 字
+- **Structured VDM Version 2.1** 按规格 bits 14..13 = `10` 识别，不再标成 Reserved
+- **PD 导入解析不再握着日志锁**；温度服务 DNS / 5 秒连接也不再占着任务锁
+- **PD 日志 100 万条硬顶**，有界同步通道满时丢采样/延后发射，避免内存与队列无界涨
 - **拖动界面缩放滑条不再抽搐**：缩放整页会改变滑条自身几何，拖动过程中每一步都 `setZoom` 会让原生 range 按新尺寸重新跟指针，比例来回跳。改为拖动只更新百分比读数，松手（`change`）再应用缩放
 - **小窗口下的遮挡与截断**（不分档、所有尺寸受益）：实时侧栏卡片 `flex-shrink: 0`——温度服务连接后温度卡显示、卡片总高超出面板时，原先 flexbox 会先压扁每张卡裁掉数值下沿与 min/max 行（卡片的 `overflow: hidden` 把 flex 最小尺寸归零，900×600 下每卡被裁 16–28px，面板滚动永远不触发），现在恢复正常滚动；浮出面板加 `max-height`（超长时内部滚动，不再伸出视口被裁）；实时侧栏 min/max 读数改省略号截断（原为无省略号硬裁）；时间线导航器 `flex-shrink: 0`（纵向紧张时不再被静默压扁）；设置页字段行允许折行（"外观"行不再溢出 300px 窄卡片边框）；X 轴刻度间距 64→80px，修复 HH:MM:SS.d 标签互相重叠（等宽 12px 下约 10 字符 ≈ 72px，64px 间距在任意宽度都会碰撞）
 

@@ -41,6 +41,12 @@ pub const KNOWN_DEVICES: &[KnownDevice] = &[
         vid: WITRN_VID,
         pid: 0x5063,
     },
+    // Some U3 firmware/variants report PID 0x5044 (observed in the field).
+    KnownDevice {
+        name: "WITRN U3",
+        vid: WITRN_VID,
+        pid: 0x5044,
+    },
     // Some C5 firmware/variants report PID 0x5053 (observed in the field).
     KnownDevice {
         name: "WITRN C5",
@@ -368,12 +374,9 @@ fn identify_current_device(
         })
     })();
 
-    if state.connection_epoch.load(Ordering::Relaxed) != epoch {
-        return Err("设备已断开".to_string());
-    }
-
-    match connect_device_by_path(path, state.clone(), app.clone()) {
+    match connect_device_on_path(path, &state, app.clone(), Some(epoch)) {
         Ok(_) => identity_result,
+        Err(error) if error == CONNECTION_CHANGED => Err(CONNECTION_CHANGED.to_string()),
         Err(error) => {
             if let Ok(mut info) = state.current_device_info.lock() {
                 *info = None;
@@ -387,11 +390,22 @@ fn identify_current_device(
     }
 }
 
+const CONNECTION_CHANGED: &str = "设备连接已变更";
+
 #[tauri::command(async)]
 fn connect_device_by_path(
     path: String,
     state: State<'_, AppState>,
     app: AppHandle,
+) -> Result<String, String> {
+    connect_device_on_path(path, &state, app, None)
+}
+
+fn connect_device_on_path(
+    path: String,
+    state: &AppState,
+    app: AppHandle,
+    expected_epoch: Option<u64>,
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
 
@@ -411,6 +425,11 @@ fn connect_device_by_path(
         .device_task
         .lock()
         .map_err(|_| "设备任务状态已损坏".to_string())?;
+    if let Some(expected) = expected_epoch {
+        if state.connection_epoch.load(Ordering::Relaxed) != expected {
+            return Err(CONNECTION_CHANGED.to_string());
+        }
+    }
     stop_task(&mut task_slot);
 
     // 打开设备
@@ -434,7 +453,7 @@ fn connect_device_by_path(
     let pd_capture_arc = Arc::clone(&state.pd_capture_enabled);
     let device_info_arc = Arc::clone(&state.current_device_info);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(8192);
     let emit_app = app.clone();
     let emit_join = thread::spawn(move || loop {
         match rx.recv_timeout(Duration::from_millis(8)) {
@@ -453,6 +472,8 @@ fn connect_device_by_path(
         let mut last_bus: Option<(f32, f32)> = None;
         // PD state belongs to this connection and is discarded with the thread.
         let mut pd_parser = Parser::new();
+        let mut last_report_at = Instant::now();
+        let mut saw_report = false;
 
         loop {
             if !running_for_thread.load(Ordering::Relaxed) {
@@ -465,7 +486,22 @@ fn connect_device_by_path(
             // even if the device reports faster.
             let read_timeout_ms = rate_ms.min(20) as i32;
             let maybe_sample = match device.read_timeout(&mut buf, read_timeout_ms) {
+                Ok(0) => {
+                    // hidapi 超时是 Ok(0)。部分平台拔线也一直超时，不会走 Err。
+                    if saw_report && last_report_at.elapsed() >= UNPLUG_IDLE {
+                        if running_for_thread.load(Ordering::Relaxed) {
+                            if let Ok(mut info) = device_info_arc.lock() {
+                                *info = None;
+                            }
+                            let _ = tx.send(DeviceOutgoing::Disconnected);
+                        }
+                        break;
+                    }
+                    None
+                }
                 Ok(read_len) => {
+                    last_report_at = Instant::now();
+                    saw_report = true;
                     let report = &buf[..read_len.min(buf.len())];
                     match ReportKind::of(report) {
                         Some(ReportKind::General) => parse_device_data(report),
@@ -488,8 +524,12 @@ fn connect_device_by_path(
                                                 ibus,
                                             )
                                         };
-                                        if tx.send(DeviceOutgoing::Pd(Box::new(event))).is_err() {
-                                            break;
+                                        if let Some(event) = event {
+                                            match tx.try_send(DeviceOutgoing::Pd(Box::new(event))) {
+                                                Ok(()) => {}
+                                                Err(mpsc::TrySendError::Disconnected(_)) => break,
+                                                Err(mpsc::TrySendError::Full(_)) => {}
+                                            }
                                         }
                                     }
                                 }
@@ -519,7 +559,7 @@ fn connect_device_by_path(
 
             if let Some(sample) = maybe_sample {
                 last_bus = Some((sample.voltage, sample.current));
-                pending = Some(sample);
+                pending = Some(retain_pending_sample(pending.take(), sample));
             }
 
             let emit_interval = Duration::from_millis(rate_ms);
@@ -528,11 +568,20 @@ fn connect_device_by_path(
                 .unwrap_or(true);
             if pending.is_some() && due {
                 let sample = pending.take().unwrap();
-                if tx.send(DeviceOutgoing::Sample(sample)).is_err() {
-                    break;
+                match tx.try_send(DeviceOutgoing::Sample(sample)) {
+                    Ok(()) => last_emit = Some(Instant::now()),
+                    Err(mpsc::TrySendError::Disconnected(_)) => break,
+                    Err(mpsc::TrySendError::Full(msg)) => {
+                        if let DeviceOutgoing::Sample(sample) = msg {
+                            pending = Some(sample);
+                        }
+                        last_emit = Some(Instant::now());
+                    }
                 }
-                last_emit = Some(Instant::now());
             }
+        }
+        if let Some(sample) = pending.take() {
+            let _ = tx.try_send(DeviceOutgoing::Sample(sample));
         }
         // device dropped here, HID connection closed cleanly
         running_for_thread.store(false, Ordering::Relaxed);
@@ -589,13 +638,12 @@ fn set_pd_capture_enabled(enabled: bool, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-fn pd_log_clear(state: State<'_, AppState>) -> Result<(), String> {
-    state
+fn pd_log_clear(state: State<'_, AppState>) -> Result<u64, String> {
+    Ok(state
         .pd_log
         .lock()
         .map_err(|_| "PD 日志状态已损坏".to_string())?
-        .clear();
-    Ok(())
+        .clear())
 }
 
 #[tauri::command]
@@ -614,11 +662,12 @@ fn pd_log_replace(
     entries: Vec<PdLoadEntry>,
     state: State<'_, AppState>,
 ) -> Result<Vec<PdEvent>, String> {
-    state
+    let (next, events) = PdLog::build(entries)?;
+    let mut log = state
         .pd_log
         .lock()
-        .map_err(|_| "PD 日志状态已损坏".to_string())?
-        .replace(entries)
+        .map_err(|_| "PD 日志状态已损坏".to_string())?;
+    Ok(log.install(next, events))
 }
 
 #[tauri::command]
@@ -677,11 +726,13 @@ fn connect_temp_service(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let mut task_slot = state
-        .temp_task
-        .lock()
-        .map_err(|_| "温度任务状态已损坏".to_string())?;
-    stop_task(&mut task_slot);
+    {
+        let mut task_slot = state
+            .temp_task
+            .lock()
+            .map_err(|_| "温度任务状态已损坏".to_string())?;
+        stop_task(&mut task_slot);
+    }
 
     let addr = format!("{ip}:{port}");
     let mut addrs: Vec<_> = (ip.as_str(), port)
@@ -716,6 +767,12 @@ fn connect_temp_service(
     stream
         .set_read_timeout(Some(Duration::from_millis(250)))
         .map_err(|e| format!("设置超时失败: {}", e))?;
+
+    let mut task_slot = state
+        .temp_task
+        .lock()
+        .map_err(|_| "温度任务状态已损坏".to_string())?;
+    stop_task(&mut task_slot);
 
     // 启动接收线程
     let running = Arc::new(AtomicBool::new(true));
@@ -789,6 +846,16 @@ fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String>
         .map_err(|_| "温度任务状态已损坏".to_string())?;
     stop_task(&mut task_slot);
     Ok("已断开温度服务连接".to_string())
+}
+
+/// 连续超时超过此时长且曾经读到过报告，视为拔线。
+const UNPLUG_IDLE: Duration = Duration::from_secs(2);
+
+fn retain_pending_sample(pending: Option<DeviceData>, sample: DeviceData) -> DeviceData {
+    match pending {
+        Some(prev) if prev.current.abs() > sample.current.abs() => prev,
+        _ => sample,
+    }
 }
 
 fn line_voltage(value: f32) -> Option<f32> {
@@ -895,6 +962,19 @@ mod tests {
     }
 
     #[test]
+    fn known_pids_map_to_model_names() {
+        assert_eq!(model_name_for(WITRN_VID, 0x5060), "WITRN K2");
+        assert_eq!(model_name_for(WITRN_VID, 0x5063), "WITRN U3");
+        assert_eq!(model_name_for(WITRN_VID, 0x5044), "WITRN U3");
+        assert_eq!(model_name_for(WITRN_VID, 0x5053), "WITRN C5");
+        assert_eq!(model_name_for(WITRN_VID, 0x5064), "WITRN C5");
+        assert_eq!(
+            model_name_for(WITRN_VID, 0x50FF),
+            "未知 WITRN 设备 (0716:50FF)"
+        );
+    }
+
+    #[test]
     fn drain_keeps_every_sample_and_pd_event() {
         let sample = |voltage: f32| DeviceData {
             voltage,
@@ -955,7 +1035,39 @@ mod tests {
 
         let mut frame = valid_frame();
         frame[50..54].copy_from_slice(&10.1f32.to_le_bytes());
+        assert!(
+            parse_device_data(&frame).is_some(),
+            "10.1 A overshoot should still parse"
+        );
+
+        let mut frame = valid_frame();
+        frame[50..54].copy_from_slice(&20.1f32.to_le_bytes());
         assert!(parse_device_data(&frame).is_none());
+    }
+
+    #[test]
+    fn throttle_keeps_the_higher_current_sample() {
+        let mild = DeviceData {
+            voltage: 5.0,
+            current: 0.2,
+            power: 1.0,
+            dp: None,
+            dn: None,
+            cc1: 0.0,
+            cc2: 0.0,
+            temperature: None,
+            ah: 0.0,
+            wh: 0.0,
+        };
+        let spike = DeviceData {
+            current: 3.5,
+            power: 17.5,
+            ..mild.clone()
+        };
+        let kept = retain_pending_sample(Some(mild.clone()), spike.clone());
+        assert_eq!(kept.current, 3.5);
+        let kept = retain_pending_sample(Some(spike.clone()), mild);
+        assert_eq!(kept.current, 3.5);
     }
 
     #[test]

@@ -5,6 +5,7 @@ import {
   calculateEnergy,
   calculateEnergyInRange,
   mapCsvColumns,
+  nextRecordingX,
   parseRelativeTime,
 } from '../src/measurement.js';
 
@@ -13,6 +14,12 @@ test('parses day-prefixed and fractional relative times', () => {
   assert.equal(parseRelativeTime('01:02:03.5'), 3723.5);
   assert.equal(parseRelativeTime('1.00:00:00.000'), 86400);
   assert.equal(parseRelativeTime('not-a-time'), null);
+});
+
+test('nextRecordingX clamps backward and sleep-sized jumps', () => {
+  assert.equal(nextRecordingX(1, 0.5, 250), 1.25);
+  assert.ok(nextRecordingX(1, 3601, 250) - 1 < 1);
+  assert.equal(nextRecordingX(1, 1.2, 250), 1.2);
 });
 
 test('integrates only adjacent measurement intervals', () => {

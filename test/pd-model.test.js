@@ -245,6 +245,12 @@ test('hex words follow USB-PD little-endian object layout', () => {
     { label: 'Data Object 0', hex: '0x0A81912C' },
   ]);
   assert.equal(bitsToHexWord('0111000110100001'), '0x71A1');
+  assert.deepEqual(hexWordsFromWire([0xa1, 0x91, 0x10, 0x80, 0x2c, 0x91, 0x01, 0x08, 0xaa]), [
+    { label: 'Msg Header', hex: '0x91A1' },
+    { label: 'Ext Header', hex: '0x8010' },
+    { label: 'Data Object 0', hex: '0x0801912C' },
+    { label: 'Data', hex: '0xAA' },
+  ]);
 });
 
 test('headerFields and objectTables flatten the decode tree', () => {

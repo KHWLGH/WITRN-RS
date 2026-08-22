@@ -21,9 +21,29 @@ export function parseRelativeTime(label) {
   return Number.isFinite(seconds) ? seconds : null;
 }
 
+/** 相邻采样点超过该秒数视为中断（休眠 / NTP / 漏采），不把空档积进 Wh/mAh。 */
+export const MAX_ENERGY_STEP_S = 2;
+
+/**
+ * 把下一点的相对秒限制在采样间隔附近：时钟回拨时前进一个间隔，
+ * 休眠或 NTP 前跳时也不把空档写进 x 轴。
+ * @param {number} prevX
+ * @param {number} relSeconds
+ * @param {number} sampleRateMs
+ * @returns {number}
+ */
+export function nextRecordingX(prevX, relSeconds, sampleRateMs) {
+  const minStep = Math.max(Number(sampleRateMs) / 1000, 0.001);
+  const maxStep = Math.max(minStep * 8, MAX_ENERGY_STEP_S);
+  if (!Number.isFinite(prevX)) return relSeconds;
+  if (relSeconds <= prevX) return prevX + minStep;
+  if (relSeconds - prevX > maxStep) return prevX + minStep;
+  return relSeconds;
+}
+
 /**
  * 按相邻采样点积分能量和容量。录制会话边界由调用方通过分段重置时间基线保证；
- * 这里仅跳过倒序、非有限或缺失值区间。
+ * 这里仅跳过倒序、非有限或缺失值区间。直播路径的休眠空档由 {@link nextRecordingX} 先夹掉。
  * @param {number[]} timestamps 毫秒时间戳
  * @param {number[]} current
  * @param {number[]} power

@@ -10,11 +10,12 @@ import {
   stopRecording,
   updateChartRange,
   updateEnergyDisplay,
+  updateRealtimeDisplay,
   updateStats,
   updateStatsDisplay,
 } from './data.js';
 import { calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
-import { applySampleRate, debouncedSaveSettings } from './settings.js';
+import { applySampleRate } from './settings.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -204,7 +205,7 @@ export async function importCSV() {
       const currentRaw = parseFloat(parts[2]);
       // 与实时摄入同一规则：方向开启保留符号，关闭取绝对值
       const current = state.settings.signedCurrent ? currentRaw : Math.abs(currentRaw);
-      const power = parseFloat(parts[3]);
+      const power = Math.abs(parseFloat(parts[3]));
       const temp = optCol(parts, colMap.tempIdx);
 
       if (Number.isNaN(voltage) || Number.isNaN(current) || Number.isNaN(power)) continue;
@@ -267,8 +268,8 @@ export async function importCSV() {
     if (state.isRecording) stopRecording();
     clearAndResetStats();
 
+    // 文件里的相对时间已经是 x；采样间隔只用于本次继续记录，不写回持久化配置。
     await applySampleRate(newSampleRate);
-    void debouncedSaveSettings();
     state.lastRecordingStartTime = newStartTime;
 
     const cols = emptyChartColumns(newSeconds.length);
@@ -317,6 +318,17 @@ export async function importCSV() {
     updateCharts();
 
     updateTempUIVisibility();
+    const last = newVoltage.length - 1;
+    updateRealtimeDisplay({
+      voltage: newVoltage[last],
+      current: newCurrent[last],
+      power: newPower[last],
+      temp: newTemp[last],
+      dp: newDp[last],
+      dn: newDn[last],
+      cc1: newCc1[last],
+      cc2: newCc2[last],
+    });
     // 导入后已有数据，记录按钮从「开始记录」变为「继续记录」
     refreshRecordButton();
 

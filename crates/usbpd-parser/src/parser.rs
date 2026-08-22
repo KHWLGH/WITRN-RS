@@ -309,11 +309,16 @@ fn decode(
 
 /// Whether `msg` advertises Source capabilities, and so should become the `last_pdo`
 /// a later Request resolves against.
+///
+/// A chunked `EPR_Source_Capabilities` only qualifies once reassembly has produced
+/// a data-object list. An incomplete chunk still has the same message type, but
+/// writing it into `last_pdo` would make the next Request resolve against a stub.
 pub fn is_pdo(msg: &Metadata) -> bool {
-    matches!(
-        message_type_of(msg),
-        Some("Source_Capabilities" | "EPR_Source_Capabilities")
-    )
+    match message_type_of(msg) {
+        Some("Source_Capabilities") => true,
+        Some("EPR_Source_Capabilities") => msg.data_objects().is_some(),
+        _ => false,
+    }
 }
 
 /// Whether `msg` is a Request, and so should become the `last_rdo` a later Status
@@ -478,7 +483,7 @@ mod tests {
     #[test]
     fn a_hard_reset_forgets_source_capabilities() {
         let mut parser = Parser::new();
-        parser.parse(&CAPS, opts());
+        parser.parse(CAPS, opts());
         assert!(parser.last_pdo().is_some());
         parser.parse(
             &[],
@@ -515,6 +520,39 @@ mod tests {
         );
         assert_eq!(bad.field(), "System");
         assert_eq!(bad.value().as_str(), Some("CRC Check Failed"));
+    }
+
+    #[test]
+    fn incomplete_epr_source_caps_do_not_replace_last_pdo() {
+        let mut parser = Parser::new();
+        parser.parse(CAPS, opts());
+        let before = parser.last_pdo().unwrap().message_type().map(str::to_owned);
+        assert_eq!(before.as_deref(), Some("Source_Capabilities"));
+
+        // Extended EPR_Source_Capabilities, chunked chunk 0, Data Size 48, only 4 payload bytes.
+        let mut epr = vec![0u8; 8];
+        // Extended=1, NDO=2, MessageID=0, Source/DFP, Rev 3.x, type 10001.
+        let header: u16 = 1 << 15 | 2 << 12 | 1 << 8 | 0b10 << 6 | 1 << 5 | 0b10001;
+        epr[0..2].copy_from_slice(&header.to_le_bytes());
+        let ex: u16 = 1 << 15 | 48;
+        epr[2..4].copy_from_slice(&ex.to_le_bytes());
+        epr[4..8].copy_from_slice(&0x0801_912Cu32.to_le_bytes());
+
+        let msg = parser.parse(&epr, opts());
+        assert_eq!(
+            msg.get("Message Header")
+                .unwrap()
+                .get("Message Type")
+                .unwrap()
+                .value()
+                .as_str(),
+            Some("EPR_Source_Capabilities")
+        );
+        assert!(
+            !is_pdo(&msg),
+            "incomplete EPR Source Caps must not count as last_pdo"
+        );
+        assert_eq!(parser.last_pdo().unwrap().message_type(), before.as_deref());
     }
 
     #[test]

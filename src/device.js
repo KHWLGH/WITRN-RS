@@ -168,6 +168,10 @@ export function setConnected(connected) {
   refreshRecordButton();
   refreshDeviceIdentifyState();
 
+  if (!connected) {
+    state.__markPdDisconnect?.();
+  }
+
   if (!connected && state.isRecording) {
     stopRecording();
     return; // stopRecording 已广播
