@@ -45,6 +45,7 @@ __pycache__/
 # Playwright CLI snapshots and screenshots
 .playwright-cli/
 **/.playwright-cli/
+output/
 
 example/
 *.suo
