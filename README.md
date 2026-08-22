@@ -4,7 +4,7 @@
 
 WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (WITRN) USB 电压电流表。该项目基于 **Tauri v2** 构建，后端使用 **Rust**，前端使用原生 **JavaScript/HTML/CSS**。
 
-**注意：本软件大部分使用Copilot等VibeCoding工具制作，可能存在未知问题**
+**注意：本软件大部分使用Claude Code、Grok Build、Codex等VibeCoding工具制作，可能存在未知问题**
 
 ## 致谢
 感谢 WITRN 提供的 USB-PD 采集硬件支持

@@ -101,6 +101,33 @@ test('accepts an empty capture', () => {
   assert.deepEqual(parsed.entries, []);
 });
 
+test('v2 capture round-trips last bus samples', () => {
+  const compact = {
+    t: 42,
+    sop: 'SOP',
+    type: 'GoodCRC',
+    role: 'SNK',
+    summary: '',
+    vbus: 5.097,
+    ibus: 0.044,
+    bytes: [0xfe, 0x03, 224, 0x41, 0x00],
+  };
+  const parsed = parsePdCaptureFile({
+    app: 'WITRN-RS',
+    kind: 'pd-capture',
+    version: 2,
+    exportedAt: '2026-01-01T00:00:00.000Z',
+    entries: [compact],
+  });
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.entries[0].vbus, 5.097);
+  assert.equal(parsed.entries[0].ibus, 0.044);
+
+  const exported = buildPdCaptureFile(parsed.entries);
+  assert.equal(exported.entries[0].vbus, 5.097);
+  assert.equal(exported.entries[0].ibus, 0.044);
+});
+
 test('v2 compact entries round-trip without a decode tree', () => {
   const compact = {
     t: 42,

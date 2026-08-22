@@ -284,8 +284,20 @@
             <span class="cmd-spacer"></span>
             <span class="cmd-label" id="pd-counter"></span>
           </div>
-          <div class="pd-split">
+          <div class="pd-split" id="pd-split">
             <div class="pd-master">
+              <div class="pd-table-head" id="pd-table-head" hidden>
+                <span class="pd-col-n">#</span>
+                <span class="pd-col-time">Elapsed</span>
+                <span class="pd-col-sop">SOP</span>
+                <span class="pd-col-msg">Msg</span>
+                <span class="pd-col-id">ID</span>
+                <span class="pd-col-dir">Direction</span>
+                <span class="pd-col-obj">Obj</span>
+                <span class="pd-col-rev">Rev</span>
+                <span class="pd-col-vi">V/I</span>
+                <span class="pd-col-note">Note</span>
+              </div>
               <div class="pd-list" id="pd-list" hidden></div>
               <div class="empty-state" id="pd-empty">
                 <i class="codicon codicon-zap"></i>
@@ -293,11 +305,22 @@
                 <div>连接设备后自动捕获 USB-PD 报文（插拔充电器时的握手最有价值）</div>
               </div>
             </div>
+            <div
+              class="pd-splitter"
+              id="pd-splitter"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-valuemin="22"
+              aria-valuemax="80"
+              aria-valuenow="56"
+              aria-label="调整列表与详情高度"
+              tabindex="0"
+            ></div>
             <div class="pd-detail-pane">
               <div class="empty-state" id="pd-detail-empty">
                 <i class="codicon codicon-list-selection"></i>
                 <div class="empty-state-title">选择报文查看详情</div>
-                <div>点击左侧列表中的报文行，此处显示完整字段解码</div>
+                <div>点击上方列表中的报文行，此处按字 / 表拆开当前帧</div>
               </div>
               <div class="pd-detail-body" id="pd-detail-body" hidden></div>
             </div>

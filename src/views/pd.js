@@ -6,21 +6,34 @@
  * - 监听在 app.js 启动时就注册（插拔瞬间的握手报文最有价值，不等用户打开 Tab）；
  * - 日志可增长，不丢最旧；渲染只挂视口附近的行；
  * - 视图隐藏时完全跳过 DOM 工作，重新显示时重建过滤索引并同步窗口。
- * - 布局为左列表 + 右详情：点击行选中，字段树只在右栏渲染一份。
+ * - 布局为上表 + 下详情：点击行选中，详情按 hex 字 / Header 表 / 对象表渲染。
  */
 
 import {
   buildPdCaptureFile,
-  childrenOf,
+  buildRowOffsets,
+  directionClass,
+  displayType,
   filterIndices,
+  formatBusVI,
+  formatDirectionDisplay,
+  formatElapsed,
+  headerFields,
+  hexWordsForEntry,
   isDivider,
   matchesFilter,
+  msgTypeClass,
   nextMessageIndex,
   normalizePdPayload,
+  noteUsesTwoLines,
+  objectTables,
   PD_ROW_HEIGHT,
   PD_SOFT_CAP,
   parsePdCaptureFile,
-  visibleRange,
+  rowHeightOf,
+  sessionOrigin,
+  VI_SAMPLE_TITLE,
+  visibleRangeByOffsets,
 } from '../pd-model.js';
 import { debouncedSaveSettings } from '../settings.js';
 import { state } from '../state.js';
@@ -57,6 +70,12 @@ let listSpacer = null;
 /** @type {HTMLElement|null} */
 let listWindow = null;
 
+/** 过滤行顶边前缀和，长度 = filtered.length + 1。 */
+/** @type {number[]} */
+let rowOffsets = [0];
+let noteColWidth = 0;
+let monoAdvance = 0;
+
 // ─── 摘取 DOM ────────────────────────────────────────────────────────────────
 
 const els = {
@@ -75,6 +94,9 @@ const els = {
   followRecording: () => /** @type {HTMLInputElement|null} */ (document.getElementById('pd-follow-recording')),
   detailBody: () => document.getElementById('pd-detail-body'),
   detailEmpty: () => document.getElementById('pd-detail-empty'),
+  tableHead: () => document.getElementById('pd-table-head'),
+  split: () => document.getElementById('pd-split'),
+  splitter: () => document.getElementById('pd-splitter'),
 };
 
 function currentFilterText() {
@@ -135,6 +157,7 @@ export function ingestPdData(payload) {
   if (viewHidden()) return;
   if (matchesFilter(entry, currentFilterText(), currentHideGoodCrc())) {
     filtered.push(log.length - 1);
+    appendRowOffset(entry);
   }
   scheduleWindowSync(true);
 }
@@ -186,6 +209,7 @@ export function markPdDisconnect() {
   if (!paused && !viewHidden()) {
     if (matchesFilter(divider, currentFilterText(), currentHideGoodCrc())) {
       filtered.push(log.length - 1);
+      appendRowOffset(divider);
     }
     scheduleWindowSync(true);
   }
@@ -233,29 +257,41 @@ function syncWindow(followTail = false) {
     return;
   }
 
+  refreshRowMetrics();
+  if (rowOffsets.length !== filtered.length + 1) rebuildRowOffsets();
+  const total = rowOffsets[rowOffsets.length - 1] ?? 0;
+
   if (followTail && autoscrollEnabled()) {
-    list.scrollTop = filtered.length * PD_ROW_HEIGHT;
+    list.scrollTop = total;
   }
 
-  const { start, end } = visibleRange(filtered.length, list.scrollTop, list.clientHeight);
-  listSpacer.style.height = `${filtered.length * PD_ROW_HEIGHT}px`;
-  listWindow.style.transform = `translateY(${start * PD_ROW_HEIGHT}px)`;
+  const { start, end } = visibleRangeByOffsets(rowOffsets, list.scrollTop, list.clientHeight);
+  listSpacer.style.height = `${total}px`;
+  listWindow.style.transform = `translateY(${rowOffsets[start] ?? 0}px)`;
 
+  const origin = sessionOrigin(log);
   const fragment = document.createDocumentFragment();
   for (let i = start; i < end; i++) {
     const logIndex = filtered[i];
     const entry = log[logIndex];
     if (!entry) continue;
-    fragment.appendChild(buildRow(entry, logIndex));
+    fragment.appendChild(buildRow(entry, logIndex, i + 1, origin));
   }
   listWindow.replaceChildren(fragment);
 
   updateEmptyState();
   updateCounter();
+  const afterWidth = measureNoteColWidth();
+  if (afterWidth > 0 && Math.abs(afterWidth - noteColWidth) > 0.5) {
+    noteColWidth = afterWidth;
+    rebuildRowOffsets();
+    scheduleWindowSync(followTail);
+  }
 }
 
 function rebuildFilterAndWindow() {
   filtered = filterIndices(log, currentFilterText(), currentHideGoodCrc());
+  rebuildRowOffsets();
   if (selectedIndex !== null) {
     const still = filtered.includes(selectedIndex);
     if (!still) clearSelection();
@@ -263,12 +299,52 @@ function rebuildFilterAndWindow() {
   syncWindow(autoscrollEnabled());
 }
 
+function measureNoteColWidth() {
+  const note = els.tableHead()?.querySelector('.pd-col-note');
+  const width = note?.getBoundingClientRect().width ?? 0;
+  return width > 1 ? width : 0;
+}
+
+function measureMonoAdvance() {
+  const probe = document.createElement('span');
+  probe.className = 'pd-note-probe';
+  probe.textContent = '0000000000';
+  document.body.append(probe);
+  const width = probe.getBoundingClientRect().width / 10;
+  probe.remove();
+  return width > 0 ? width : 7;
+}
+
+function refreshRowMetrics() {
+  const nextWidth = measureNoteColWidth();
+  if (!monoAdvance) monoAdvance = measureMonoAdvance();
+  if (nextWidth > 0 && Math.abs(nextWidth - noteColWidth) > 0.5) {
+    noteColWidth = nextWidth;
+    rebuildRowOffsets();
+  }
+}
+
+function rebuildRowOffsets() {
+  rowOffsets = buildRowOffsets(log, filtered, noteColWidth, monoAdvance);
+}
+
+/** @param {PdEntry|PdDivider} entry */
+function appendRowOffset(entry) {
+  if (rowOffsets.length !== filtered.length) {
+    rebuildRowOffsets();
+    return;
+  }
+  rowOffsets.push(rowOffsets[rowOffsets.length - 1] + rowHeightOf(entry, noteColWidth, monoAdvance));
+}
+
 /**
  * @param {PdEntry|PdDivider} entry
  * @param {number} logIndex
+ * @param {number} visibleN
+ * @param {number} origin
  * @returns {HTMLElement}
  */
-function buildRow(entry, logIndex) {
+function buildRow(entry, logIndex, visibleN, origin) {
   if (isDivider(entry)) {
     const div = document.createElement('div');
     div.className = 'pd-divider-row';
@@ -282,15 +358,21 @@ function buildRow(entry, logIndex) {
   row.tabIndex = 0;
   row.dataset.index = String(logIndex);
   if (selectedIndex === logIndex) row.classList.add('selected');
+  if (noteUsesTwoLines(msg.summary, noteColWidth, monoAdvance)) row.classList.add('pd-row-wrap');
+  const vi = formatBusVI(msg.vbus, msg.ibus);
 
-  const roleClass = msg.role === 'SRC' ? 'pd-role-src' : msg.role === 'SNK' ? 'pd-role-snk' : 'pd-role-cbl';
-  row.innerHTML = [
-    `<span class="pd-time">${formatTime(msg.t)}</span>`,
-    `<span class="pd-badge pd-sop">${escapeHtml(msg.sop)}</span>`,
-    msg.role ? `<span class="pd-badge ${roleClass}">${msg.role}</span>` : '<span class="pd-badge-gap"></span>',
-    `<span class="pd-type">${escapeHtml(msg.type)}</span>`,
-    `<span class="pd-summary">${escapeHtml(msg.summary)}</span>`,
-  ].join('');
+  row.append(
+    cell('pd-col-n', String(visibleN)),
+    cell('pd-col-time', formatElapsed(msg.t, origin), formatTime(msg.t)),
+    cell('pd-col-sop', msg.sop),
+    cell(`pd-col-msg ${msgTypeClass(msg.type)}`, displayType(msg.type)),
+    cell('pd-col-id', msg.id ?? ''),
+    dirCell(msg.direction ?? ''),
+    cell('pd-col-obj', msg.obj ?? ''),
+    cell('pd-col-rev', msg.rev ?? ''),
+    cell('pd-col-vi', vi, vi ? VI_SAMPLE_TITLE : undefined),
+    cell('pd-col-note', msg.summary, msg.summary),
+  );
 
   row.addEventListener('click', () => void selectIndex(logIndex, row));
   row.addEventListener('keydown', (e) => {
@@ -305,6 +387,29 @@ function buildRow(entry, logIndex) {
   return row;
 }
 
+/**
+ * @param {string} className
+ * @param {string} text
+ * @param {string} [title]
+ */
+function cell(className, text, title) {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  if (title) span.title = title;
+  return span;
+}
+
+/** @param {string} direction */
+function dirCell(direction) {
+  const span = document.createElement('span');
+  const tone = directionClass(direction);
+  span.className = tone ? `pd-col-dir ${tone}` : 'pd-col-dir';
+  span.textContent = direction ? formatDirectionDisplay(direction) : '';
+  if (direction) span.title = direction;
+  return span;
+}
+
 /** @param {1|-1} dir */
 function moveSelection(dir) {
   const from = selectedIndex === null ? (dir > 0 ? -1 : filtered.length) : filtered.indexOf(selectedIndex);
@@ -313,8 +418,8 @@ function moveSelection(dir) {
   const pos = filtered.indexOf(next);
   const list = els.list();
   if (list && pos >= 0) {
-    const rowTop = pos * PD_ROW_HEIGHT;
-    const rowBot = rowTop + PD_ROW_HEIGHT;
+    const rowTop = rowOffsets[pos] ?? pos * PD_ROW_HEIGHT;
+    const rowBot = rowOffsets[pos + 1] ?? rowTop + PD_ROW_HEIGHT;
     if (rowTop < list.scrollTop) list.scrollTop = rowTop;
     else if (rowBot > list.scrollTop + list.clientHeight) list.scrollTop = rowBot - list.clientHeight;
   }
@@ -358,16 +463,118 @@ async function renderDetail(entry, logIndex) {
   }
   if (selectedIndex !== logIndex) return;
   if (!meta) {
-    toast.warning('这条报文没有可显示的解码树');
+    toast.warning('这条报文没有可显示的解码结果');
     return;
   }
   cacheMeta(logIndex, meta);
   const body = els.detailBody();
   if (!body) return;
-  body.replaceChildren(buildTree(meta));
+  entry.meta = meta;
+  body.replaceChildren(buildDetail(entry, meta));
   body.hidden = false;
   const empty = els.detailEmpty();
   if (empty) empty.hidden = true;
+}
+
+/**
+ * @param {PdEntry} entry
+ * @param {PdMeta} meta
+ */
+function buildDetail(entry, meta) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pd-detail-stack';
+
+  const vi = formatBusVI(entry.vbus, entry.ibus);
+  if (vi) {
+    const sample = document.createElement('div');
+    sample.className = 'pd-detail-vi';
+    sample.title = VI_SAMPLE_TITLE;
+    sample.textContent = `V/I  ${vi}`;
+    wrap.appendChild(sample);
+  }
+
+  const words = hexWordsForEntry(entry);
+  if (words.length) wrap.appendChild(buildHexStrip(entry.sop, words));
+
+  const header = headerFields(meta);
+  if (header.length) wrap.appendChild(buildKvTable(header, 'pd-header-table'));
+
+  for (const obj of objectTables(meta)) {
+    if (obj.fields.length === 0 && !obj.chip && !obj.hex) continue;
+    const block = document.createElement('div');
+    block.className = 'pd-object-block';
+    const title = document.createElement('div');
+    title.className = 'pd-object-title';
+    const name = document.createElement('span');
+    name.textContent = obj.title;
+    title.appendChild(name);
+    if (obj.chip) {
+      const chip = document.createElement('span');
+      chip.className = 'pd-object-chip';
+      chip.textContent = obj.chip;
+      title.appendChild(chip);
+    }
+    if (obj.hex) {
+      const hex = document.createElement('span');
+      hex.className = 'pd-object-hex';
+      hex.textContent = obj.hex;
+      title.appendChild(hex);
+    }
+    block.appendChild(title);
+    if (obj.fields.length) block.appendChild(buildKvTable(obj.fields, 'pd-object-table'));
+    wrap.appendChild(block);
+  }
+
+  return wrap;
+}
+
+/**
+ * @param {string} sop
+ * @param {{ label: string, hex: string }[]} words
+ */
+function buildHexStrip(sop, words) {
+  const table = document.createElement('table');
+  table.className = 'pd-hex-strip';
+  const head = document.createElement('tr');
+  const body = document.createElement('tr');
+  const sopTh = document.createElement('th');
+  sopTh.textContent = 'SOP*';
+  const sopTd = document.createElement('td');
+  sopTd.textContent = sop || '—';
+  head.appendChild(sopTh);
+  body.appendChild(sopTd);
+  for (const word of words) {
+    const th = document.createElement('th');
+    th.textContent = word.label;
+    const td = document.createElement('td');
+    td.textContent = word.hex;
+    head.appendChild(th);
+    body.appendChild(td);
+  }
+  table.append(head, body);
+  return table;
+}
+
+/**
+ * @param {{ label: string, value: string, className?: string }[]} fields
+ * @param {string} extraClass
+ */
+function buildKvTable(fields, extraClass) {
+  const table = document.createElement('table');
+  table.className = `pd-kv-table ${extraClass}`;
+  const head = document.createElement('tr');
+  const body = document.createElement('tr');
+  for (const field of fields) {
+    const th = document.createElement('th');
+    th.textContent = field.label;
+    const td = document.createElement('td');
+    td.textContent = field.value;
+    if (field.className) td.className = field.className;
+    head.appendChild(th);
+    body.appendChild(td);
+  }
+  table.append(head, body);
+  return table;
 }
 
 /** @param {number} index @param {PdMeta} meta */
@@ -377,36 +584,6 @@ function cacheMeta(index, meta) {
     const first = metaCache.keys().next().value;
     if (first !== undefined) metaCache.delete(first);
   }
-}
-
-/**
- * 递归构建字段树（选中时才调用）。
- * @param {PdMeta} meta
- * @returns {HTMLElement}
- */
-function buildTree(meta) {
-  const children = childrenOf(meta);
-  if (children.length === 0) {
-    const leaf = document.createElement('div');
-    leaf.className = 'pd-leaf';
-    const value = meta.value === null ? '' : String(meta.value);
-    const bits = meta.bit_loc ? ` [${meta.bit_loc[0]}:${meta.bit_loc[1]}]` : '';
-    leaf.innerHTML =
-      `<span class="pd-leaf-field">${escapeHtml(meta.field)}</span>` +
-      `<span class="pd-leaf-value">${escapeHtml(value)}</span>` +
-      `<span class="pd-leaf-raw">${escapeHtml(meta.raw)}${bits}</span>`;
-    return leaf;
-  }
-
-  const node = document.createElement('details');
-  node.className = 'pd-node';
-  node.open = true;
-  const summary = document.createElement('summary');
-  const quick = meta.quick_pdo ?? meta.quick_rdo;
-  summary.textContent = quick ? `${meta.field} — ${quick}` : meta.field;
-  node.appendChild(summary);
-  for (const child of children) node.appendChild(buildTree(child));
-  return node;
 }
 
 function clearSelection() {
@@ -432,6 +609,7 @@ function clearSelection() {
 export function clearPdEntries() {
   log.length = 0;
   filtered = [];
+  rowOffsets = [0];
   bufferedWhilePaused = 0;
   softCapWarned = false;
   metaCache.clear();
@@ -512,7 +690,7 @@ async function importPdCapture() {
       const loaded = await invokeCmd('pd_log_replace', {
         entries: result.entries.map((e) => {
           if (isDivider(e)) return { t: e.t, divider: true, bytes: [] };
-          return { t: e.t, divider: false, bytes: e.bytes ?? [] };
+          return { t: e.t, divider: false, bytes: e.bytes ?? [], vbus: e.vbus, ibus: e.ibus };
         }),
       });
       if (!Array.isArray(loaded) || loaded.length !== result.entries.length) {
@@ -549,8 +727,10 @@ async function importPdCapture() {
 function updateEmptyState() {
   const list = els.list();
   const empty = els.empty();
+  const head = els.tableHead();
   const hasRows = filtered.length > 0;
   if (list) list.hidden = !hasRows;
+  if (head) head.hidden = !hasRows;
   if (empty) empty.hidden = hasRows;
 }
 
@@ -571,12 +751,45 @@ function formatTime(t) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
-/** @param {string} text */
-function escapeHtml(text) {
-  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
 // ─── 视图钩子 ────────────────────────────────────────────────────────────────
+
+function initSplitter() {
+  const split = els.split();
+  const handle = els.splitter();
+  if (!split || !handle) return;
+
+  /** @param {number} listRatio */
+  const apply = (listRatio) => {
+    const clamped = Math.min(0.8, Math.max(0.22, listRatio));
+    split.style.setProperty('--pd-list-basis', `${(clamped * 100).toFixed(1)}%`);
+    split.style.setProperty('--pd-detail-basis', `${((1 - clamped) * 100).toFixed(1)}%`);
+    handle.setAttribute('aria-valuenow', String(Math.round(clamped * 100)));
+  };
+
+  /** @type {number|null} */
+  let pointer = null;
+  handle.addEventListener('pointerdown', (e) => {
+    pointer = e.pointerId;
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (pointer === null) return;
+    const rect = split.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    apply((e.clientY - rect.top) / rect.height);
+  });
+  handle.addEventListener('pointerup', () => {
+    pointer = null;
+  });
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const current = Number.parseFloat(getComputedStyle(split).getPropertyValue('--pd-list-basis')) / 100;
+    const basis = Number.isFinite(current) ? current : 0.56;
+    apply(basis + (e.key === 'ArrowUp' ? -0.04 : 0.04));
+  });
+}
 
 /** 首次打开 PD 视图：绑定控制条。 */
 export function initPdView() {
@@ -654,12 +867,19 @@ export function initPdView() {
       document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
     });
   }
+  initSplitter();
+
   els.autoscroll()?.addEventListener('change', (e) => {
     const listEl = els.list();
     if (/** @type {HTMLInputElement} */ (e.target).checked && listEl) {
-      listEl.scrollTop = filtered.length * PD_ROW_HEIGHT;
+      listEl.scrollTop = rowOffsets[rowOffsets.length - 1] ?? 0;
       scheduleWindowSync(false);
     }
+  });
+
+  void document.fonts?.ready?.then(() => {
+    monoAdvance = 0;
+    scheduleWindowSync(false);
   });
 
   syncPdUi();

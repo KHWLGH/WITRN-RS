@@ -11,7 +11,7 @@
  *             Tauri minWidth=900，900–979 是实机最窄区间，必进此档
  *   W3 <900 ：安全网——极端 DPI 下 OS 给出的窗口可能小于 minWidth
  *             （如 150% 缩放的 1280 宽屏幕仅 ≈853 逻辑 px），以及浏览器调试
- *   W4 <700 ：PD 分栏 640px 硬底以下 → 纵向堆叠（同为安全网）
+ *   W4 <700 ：极窄窗再收紧 PD 表列与详情下限（同为安全网）
  *   H1 <620 ：纵向紧凑——最小窗高 600 与低分屏最大化（1366×768 @125% ≈ 577）
  *             都会进入；时间轴 64px + 图表下限 240px 后纵向 min-content ≈ 433px
  * 边界取 .98px 小数，避免整数视口边界双触发；不用 range 语法，兼容旧 WebKitGTK。
@@ -80,21 +80,16 @@
 /* ── W4：视口 < 700，PD 分栏纵向堆叠（安全网） ───────────────── */
 
 @media (max-width: 699.98px) {
-  .pd-split {
-    flex-direction: column;
-  }
-
-  .pd-master {
-    flex: 1 1 55%;
-    min-width: 0;
-    min-height: 160px;
-    border-right: none;
-    border-bottom: 1px solid var(--stroke-divider);
-  }
-
+  .pd-master,
   .pd-detail-pane {
-    flex: 1 1 45%;
-    min-width: 0;
+    min-height: 100px;
+  }
+
+  .pd-table-head,
+  .pd-row {
+    grid-template-columns: 28px 72px 44px minmax(88px, 1fr) 22px 104px 24px 24px 72px minmax(80px, 1.6fr);
+    column-gap: 4px;
+    padding: 0 4px;
   }
 
   /* 复选框收为纯勾选框（三个均已带 title 说明） */

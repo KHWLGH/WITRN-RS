@@ -715,6 +715,7 @@ html[data-ui-scale-css] .app-shell {
 .pd-list {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   position: relative;
 }

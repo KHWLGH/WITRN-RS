@@ -208,8 +208,8 @@ struct DeviceData {
     cc1: f32,                 // CC1
     cc2: f32,                 // CC2
     temperature: Option<f32>, // 仪表温度；缺失为 null，避免 JSON NaN 丢掉整帧
-    ah: f32,          // 累计容量 Ah
-    wh: f32,          // 累计能量 Wh
+    ah: f32,                  // 累计容量 Ah
+    wh: f32,                  // 累计能量 Wh
 }
 
 struct BackgroundTask {
@@ -392,6 +392,8 @@ fn connect_device_by_path(
         let mut buf = [0u8; 64];
         let mut last_emit: Option<Instant> = None;
         let mut pending: Option<DeviceData> = None;
+        // 最近一次 0xFF 采样，给 PD 报文盖 V/I；不随监控节流 take() 清掉。
+        let mut last_bus: Option<(f32, f32)> = None;
         // PD state belongs to this connection and is discarded with the thread.
         let mut pd_parser = Parser::new();
 
@@ -420,10 +422,14 @@ fn connect_device_by_path(
                             match decode_pd_report(&mut pd_parser, report) {
                                 Ok(metadata) => {
                                     if pd_capture_arc.load(Ordering::Relaxed) {
-                                        let event = {
+                                        let mut event = {
                                             let mut log = pd_log_arc.lock().unwrap();
                                             log.push_message(now_ms(), report.to_vec(), metadata)
                                         };
+                                        if let Some((vbus, ibus)) = last_bus {
+                                            event.vbus = Some(vbus);
+                                            event.ibus = Some(ibus);
+                                        }
                                         let _ = app.emit("pd-data", event);
                                     }
                                 }
@@ -452,6 +458,7 @@ fn connect_device_by_path(
             }
 
             if let Some(sample) = maybe_sample {
+                last_bus = Some((sample.voltage, sample.current));
                 pending = Some(sample);
             }
 

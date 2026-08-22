@@ -1,37 +1,58 @@
 /*
- * 视图层样式：PD 协议分析（左列表 + 右详情）。设备与设置视图复用 app.css 的 .page/.card。
+ * 视图层样式：PD 协议分析（上表 + 下详情）。设备与设置视图复用 app.css 的 .page/.card。
  */
 
-/* ── PD 主从分栏 ─────────────────────────────────────────────── */
+/* ── PD 上下分栏 ─────────────────────────────────────────────── */
 
 .pd-split {
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 
 .pd-master {
-  flex: 0 1 55%;
-  min-width: 380px;
-  min-height: 0;
+  flex: 1 1 var(--pd-list-basis, 56%);
+  min-width: 0;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--stroke-divider);
+  overflow-x: auto;
+}
+
+.pd-splitter {
+  flex: none;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--stroke-divider);
+  touch-action: none;
+}
+
+.pd-splitter:hover,
+.pd-splitter:focus-visible {
+  background: var(--accent-fill);
 }
 
 .pd-detail-pane {
-  flex: 1;
-  min-width: 260px;
-  min-height: 0;
+  flex: 1 1 var(--pd-detail-basis, 44%);
+  min-width: 0;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: auto;
   background: var(--surface-base);
 }
 
 .pd-detail-body {
-  padding: 10px 16px;
+  padding: 10px 12px 16px;
   font-size: 12px;
+}
+
+.pd-detail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: min-content;
 }
 
 /* ── PD 报文列表 ─────────────────────────────────────────────── */
@@ -44,17 +65,44 @@
   font-family: var(--font-ui);
 }
 
+.pd-table-head,
+.pd-list {
+  min-width: 880px;
+  scrollbar-gutter: stable;
+}
+
+.pd-table-head,
 .pd-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 40px 92px 56px minmax(108px, 1.1fr) 28px 124px 32px 28px 96px minmax(140px, 2.4fr);
+  column-gap: 6px;
   align-items: center;
-  gap: 10px;
-  height: var(--pd-row-height, 24px);
   box-sizing: border-box;
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.pd-table-head {
+  flex: none;
+  height: 24px;
+  overflow-y: hidden;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--stroke-divider);
+  background: var(--surface-base);
+  user-select: none;
+}
+
+.pd-row {
+  height: var(--pd-row-height, 24px);
+  overflow: hidden;
   cursor: pointer;
   border-bottom: 1px solid var(--stroke-divider);
   user-select: none;
+}
+
+.pd-row.pd-row-wrap {
+  height: var(--pd-row-height-wrap, 40px);
 }
 
 .pd-row:hover {
@@ -65,57 +113,175 @@
   background: var(--accent-fill-faint);
 }
 
-.pd-time {
+.pd-col-n,
+.pd-col-id,
+.pd-col-obj,
+.pd-col-rev {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pd-col-time,
+.pd-col-vi {
   font-family: var(--font-mono);
-  color: var(--text-tertiary);
-  flex: none;
-}
-
-.pd-badge {
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--fill-control);
-  color: var(--text-secondary);
-  flex: none;
-  min-width: 42px;
-  text-align: center;
-}
-
-.pd-badge-gap {
-  min-width: 42px;
-  flex: none;
-}
-
-.pd-role-src {
-  color: var(--ch-power);
-  background: color-mix(in srgb, var(--ch-power) 12%, transparent);
-}
-
-.pd-role-snk {
-  color: var(--ch-voltage);
-  background: color-mix(in srgb, var(--ch-voltage) 12%, transparent);
-}
-
-.pd-role-cbl {
-  color: var(--text-tertiary);
-}
-
-.pd-type {
-  font-weight: 600;
-  flex: none;
-  min-width: 170px;
-}
-
-.pd-summary {
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+}
+
+.pd-col-time {
+  color: var(--text-tertiary);
+}
+
+.pd-col-sop,
+.pd-col-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-col-msg {
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 2px;
+  line-height: 16px;
+}
+
+.pd-row .pd-col-dir {
+  justify-self: start;
+  width: max-content;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.pd-col-vi {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.pd-col-note {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  line-height: 16px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.pd-msg-crc {
+  background: var(--pd-msg-crc-bg);
+  color: var(--pd-msg-crc-fg);
+}
+
+.pd-msg-request {
+  background: var(--pd-msg-request-bg);
+  color: var(--pd-msg-request-fg);
+}
+
+.pd-msg-accept {
+  background: var(--pd-msg-accept-bg);
+  color: var(--pd-msg-accept-fg);
+}
+
+.pd-msg-psrdy {
+  background: var(--pd-msg-psrdy-bg);
+  color: var(--pd-msg-psrdy-fg);
+}
+
+.pd-msg-reject {
+  background: var(--pd-msg-reject-bg);
+  color: var(--pd-msg-reject-fg);
+}
+
+.pd-msg-reset {
+  background: var(--pd-msg-reset-bg);
+  color: var(--pd-msg-reset-fg);
+}
+
+.pd-msg-vdm {
+  background: var(--pd-msg-vdm-bg);
+  color: var(--pd-msg-vdm-fg);
+}
+
+.pd-msg-srccap {
+  background: var(--pd-msg-srccap-bg);
+  color: var(--pd-msg-srccap-fg);
+}
+
+.pd-msg-snkcap {
+  background: var(--pd-msg-snkcap-bg);
+  color: var(--pd-msg-snkcap-fg);
+}
+
+.pd-msg-other {
+  background: var(--pd-msg-other-bg);
+  color: var(--pd-msg-other-fg);
+}
+
+.pd-msg-get {
+  background: var(--pd-msg-get-bg);
+  color: var(--pd-msg-get-fg);
+}
+
+.pd-msg-swap {
+  background: var(--pd-msg-swap-bg);
+  color: var(--pd-msg-swap-fg);
+}
+
+.pd-msg-alert {
+  background: var(--pd-msg-alert-bg);
+  color: var(--pd-msg-alert-fg);
+}
+
+.pd-msg-ping {
+  background: var(--pd-msg-ping-bg);
+  color: var(--pd-msg-ping-fg);
+}
+
+.pd-msg-mode {
+  background: var(--pd-msg-mode-bg);
+  color: var(--pd-msg-mode-fg);
+}
+
+.pd-msg-ext {
+  background: var(--pd-msg-ext-bg);
+  color: var(--pd-msg-ext-fg);
+}
+
+.pd-dir-src {
+  background: var(--pd-dir-src-bg);
+  color: var(--pd-dir-src-fg);
+}
+
+.pd-dir-snk {
+  background: var(--pd-dir-snk-bg);
+  color: var(--pd-dir-snk-fg);
+}
+
+.pd-dir-plug {
+  background: var(--pd-dir-plug-bg);
+  color: var(--pd-dir-plug-fg);
+}
+
+.pd-note-probe {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: pre;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .pd-divider-row {
@@ -128,44 +294,86 @@
   color: var(--text-disabled);
   font-size: 11px;
   user-select: none;
+  grid-column: 1 / -1;
 }
 
-/* ── 右栏字段树 ──────────────────────────────────────────────── */
+/* ── 详情：hex 字条 / Header 表 / PDO 表 ──────────────────────── */
 
-.pd-node > summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-weight: 600;
-  padding: 2px 0;
-  user-select: none;
-}
-
-.pd-node .pd-node,
-.pd-node .pd-leaf {
-  margin-left: 16px;
-}
-
-.pd-leaf {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 1px 0;
-}
-
-.pd-leaf-field {
-  color: var(--text-secondary);
-  min-width: 180px;
-  flex: none;
-}
-
-.pd-leaf-value {
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  user-select: text;
-}
-
-.pd-leaf-raw {
-  color: var(--text-disabled);
+.pd-hex-strip,
+.pd-kv-table {
+  width: max-content;
+  border-collapse: collapse;
+  table-layout: auto;
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.pd-hex-strip th,
+.pd-hex-strip td,
+.pd-kv-table th,
+.pd-kv-table td {
+  border: 1px solid color-mix(in srgb, var(--stroke-control-strong) 70%, transparent);
+  padding: 2px 4px;
+  text-align: left;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.pd-hex-strip th {
+  background: var(--pd-hex-bg);
+  color: var(--pd-hex-fg);
+  font-weight: 600;
+}
+
+.pd-hex-strip td {
+  color: var(--text-primary);
+}
+
+.pd-kv-table.pd-header-table th {
+  background: var(--pd-header-table-bg);
+  color: var(--pd-header-table-fg);
+}
+
+.pd-kv-table.pd-object-table th {
+  background: var(--pd-object-table-bg);
+  color: var(--pd-object-table-fg);
+}
+
+.pd-object-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pd-object-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pd-object-chip {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pd-object-hex {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.pd-detail-vi {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pd-kv-table td.pd-dir-src,
+.pd-kv-table td.pd-dir-snk,
+.pd-kv-table td.pd-dir-plug {
+  font-weight: 600;
 }

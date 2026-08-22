@@ -173,7 +173,56 @@
   --monitor-gutter: 12px; /* 监控主体 padding / gap */
   --chart-min-height: 300px;
   --chart-pad: 15px; /* 图表容器内边距 */
-  --pd-row-height: 24px; /* PD 虚拟列表行高，须与 src/pd-model.js 的 PD_ROW_HEIGHT 一致 */
+  --pd-row-height: 24px; /* 单行行高，须与 src/pd-model.js 的 PD_ROW_HEIGHT 一致 */
+  --pd-row-height-wrap: 40px; /* Note 折两行时的行高，须与 PD_ROW_HEIGHT_WRAP 一致 */
+  --pd-list-basis: 56%;
+  --pd-detail-basis: 44%;
+
+  /* PD 消息类型（列表 Msg 格；浅色主题重赋） */
+  --pd-msg-crc-bg: #1f5f6b;
+  --pd-msg-crc-fg: #d4f4f8;
+  --pd-msg-request-bg: #7a3540;
+  --pd-msg-request-fg: #ffd6d9;
+  --pd-msg-accept-bg: #0f5c52;
+  --pd-msg-accept-fg: #c8f4ea;
+  --pd-msg-psrdy-bg: #164e3e;
+  --pd-msg-psrdy-fg: #c6f0dc;
+  --pd-msg-reject-bg: #7a2e28;
+  --pd-msg-reject-fg: #ffd4d0;
+  --pd-msg-reset-bg: #8a4b12;
+  --pd-msg-reset-fg: #ffe0b8;
+  --pd-msg-vdm-bg: #5a2d70;
+  --pd-msg-vdm-fg: #efd6ff;
+  --pd-msg-srccap-bg: #3a3a48;
+  --pd-msg-srccap-fg: #f2f2f2;
+  --pd-msg-snkcap-bg: #2f3f55;
+  --pd-msg-snkcap-fg: #d6e8ff;
+  --pd-msg-other-bg: var(--fill-control);
+  --pd-msg-other-fg: var(--text-secondary);
+  --pd-msg-get-bg: #1a4d78;
+  --pd-msg-get-fg: #cfe4ff;
+  --pd-msg-swap-bg: #6b5314;
+  --pd-msg-swap-fg: #ffe8b0;
+  --pd-msg-alert-bg: #3d3a78;
+  --pd-msg-alert-fg: #ddd9ff;
+  --pd-msg-ping-bg: #3a4a52;
+  --pd-msg-ping-fg: #d4e4ea;
+  --pd-msg-mode-bg: #0f4f4a;
+  --pd-msg-mode-fg: #c8f0ea;
+  --pd-msg-ext-bg: #3a4a28;
+  --pd-msg-ext-fg: #e0f0c8;
+  --pd-dir-src-bg: #3a3a48;
+  --pd-dir-src-fg: #f2f2f2;
+  --pd-dir-snk-bg: #2f3f55;
+  --pd-dir-snk-fg: #d6e8ff;
+  --pd-dir-plug-bg: #5a2d70;
+  --pd-dir-plug-fg: #efd6ff;
+  --pd-hex-bg: #0e4f63;
+  --pd-hex-fg: #9ee7f2;
+  --pd-header-table-bg: #1d3f7a;
+  --pd-header-table-fg: #d6e6ff;
+  --pd-object-table-bg: #1f5a32;
+  --pd-object-table-fg: #d4f3dc;
 }
 
 /* 亮色：只重赋语义层。通道色保持暗色 hex，图表基建必须换不透明浅灰。 */
@@ -236,4 +285,49 @@
 
   --scrollbar-thumb: #c2c2c2;
   --scrollbar-thumb-hover: #a8a8a8;
+
+  --pd-msg-crc-bg: #b6e8f0;
+  --pd-msg-crc-fg: #0b4a54;
+  --pd-msg-request-bg: #f5c4c8;
+  --pd-msg-request-fg: #6b1c24;
+  --pd-msg-accept-bg: #b7eadb;
+  --pd-msg-accept-fg: #0b4a3f;
+  --pd-msg-psrdy-bg: #c3ead6;
+  --pd-msg-psrdy-fg: #0d4a36;
+  --pd-msg-reject-bg: #f5c8c4;
+  --pd-msg-reject-fg: #6b211c;
+  --pd-msg-reset-bg: #f5d7b0;
+  --pd-msg-reset-fg: #6b3a0a;
+  --pd-msg-vdm-bg: #e4c8f5;
+  --pd-msg-vdm-fg: #4a1c63;
+  --pd-msg-srccap-bg: #e4e4ea;
+  --pd-msg-srccap-fg: #2a2a33;
+  --pd-msg-snkcap-bg: #d5e4f5;
+  --pd-msg-snkcap-fg: #1c334d;
+  --pd-msg-other-bg: var(--fill-control);
+  --pd-msg-other-fg: var(--text-secondary);
+  --pd-msg-get-bg: #cfe4f7;
+  --pd-msg-get-fg: #0d3a5c;
+  --pd-msg-swap-bg: #f5e3b0;
+  --pd-msg-swap-fg: #5a4308;
+  --pd-msg-alert-bg: #ddd8f5;
+  --pd-msg-alert-fg: #2c2860;
+  --pd-msg-ping-bg: #d4e0e6;
+  --pd-msg-ping-fg: #243038;
+  --pd-msg-mode-bg: #b8e8e0;
+  --pd-msg-mode-fg: #0a3d38;
+  --pd-msg-ext-bg: #dde8c4;
+  --pd-msg-ext-fg: #2e3c14;
+  --pd-dir-src-bg: #e4e4ea;
+  --pd-dir-src-fg: #2a2a33;
+  --pd-dir-snk-bg: #d5e4f5;
+  --pd-dir-snk-fg: #1c334d;
+  --pd-dir-plug-bg: #e4c8f5;
+  --pd-dir-plug-fg: #4a1c63;
+  --pd-hex-bg: #d4eef3;
+  --pd-hex-fg: #0b4a54;
+  --pd-header-table-bg: #d6e4fb;
+  --pd-header-table-fg: #16315f;
+  --pd-object-table-bg: #d6f0de;
+  --pd-object-table-fg: #164226;
 }
