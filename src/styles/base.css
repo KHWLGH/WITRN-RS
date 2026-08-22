@@ -15,9 +15,20 @@
 }
 
 /* 强调填充（亮底）上的控件用内圈加对比，形成 Fluent 双环 */
-.btn-accent:focus-visible,
-.range-handle:focus-visible {
+.btn-accent:focus-visible {
   box-shadow: 0 0 0 1px var(--stroke-focus-inner);
+}
+
+/* 导航器拇指是伪元素圆点，焦点环画在圆上而不是通高命中条上 */
+.range-handle:focus-visible {
+  outline: none;
+}
+
+.range-handle:focus-visible::after {
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px var(--stroke-focus-inner),
+    0 0 0 3px var(--stroke-focus-outer);
 }
 
 /* 文本选区 */

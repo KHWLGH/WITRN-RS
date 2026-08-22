@@ -126,8 +126,12 @@
     font-size: 12px;
   }
 
-  .realtime-sub {
-    font-size: 13px;
+  .realtime-card.energy .realtime-value {
+    font: 700 16px / 18px var(--font-mono);
+  }
+
+  .realtime-metric + .realtime-metric {
+    margin-top: 2px;
   }
 
   .signal-cell {
