@@ -20,7 +20,6 @@ import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
 import { toast } from './ui/toast.js';
 
-
 // 文件选择器保留原生实现：Tauri v2 通过对话框选择在运行时授予所选路径的 fs scope，
 // 换成应用内实现会直接破坏 writeTextFile / readTextFile 的权限。
 const { save, open } = window.__TAURI__.dialog;

@@ -35,13 +35,15 @@ export function addDataPoint(data) {
   const hidTemp = Number.isFinite(data.temperature) ? /** @type {number} */ (data.temperature) : Number.NaN;
   let tempValue = Number.NaN;
   if (state.isTempConnected) {
-    tempValue =
-      state.settings.tempSource === 'device' ? hidTemp : (state.currentTemp ?? Number.NaN);
+    tempValue = state.settings.tempSource === 'device' ? hidTemp : (state.currentTemp ?? Number.NaN);
   }
+
+  const realtime = { ...data, current: currentValue, power: powerAbs, temp: tempValue };
+  lastRealtime = realtime;
 
   // 仅录制模式：未录制时只更新实时显示
   if (!state.isRecording) {
-    updateRealtimeDisplay({ ...data, current: currentValue, power: powerAbs, temp: tempValue });
+    updateRealtimeDisplay(realtime);
     const el = document.getElementById('data-count');
     if (el) el.textContent = String(state.chartData.timestamps.length);
     return;
@@ -93,7 +95,6 @@ export function addDataPoint(data) {
   }
   state.energy.lastX = relSeconds;
 
-  updateRealtimeDisplay({ ...data, current: currentValue, power: powerAbs, temp: tempValue });
   scheduleStatsUpdate();
   // 全量模式的能量读数是 O(1)，逐点刷新更跟手；范围模式要重扫可见区间，交给上面的节流路径。
   if (!state.settings.statsRange) updateEnergyDisplay();
@@ -447,6 +448,8 @@ export function updateEnergyDisplay() {
 let __statsUpdateTimer = null;
 /** @type {boolean} */
 let __rangeUiPending = false;
+/** @type {Parameters<typeof updateRealtimeDisplay>[0]|null} */
+let lastRealtime = null;
 
 /**
  * 范围标签与点数：跟 rAF 走，不跟每个采样点走。
@@ -456,6 +459,7 @@ export function scheduleRangeUi() {
   __rangeUiPending = true;
   requestAnimationFrame(() => {
     __rangeUiPending = false;
+    if (lastRealtime) updateRealtimeDisplay(lastRealtime);
     updateChartRange();
     const el = document.getElementById('data-count');
     if (el) el.textContent = String(state.chartSeries.x.length);

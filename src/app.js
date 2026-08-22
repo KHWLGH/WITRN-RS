@@ -47,7 +47,7 @@ import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
 import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
-import { clearPdEntries, ingestPdData, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
+import { clearPdEntries, ingestPdBatch, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -626,8 +626,8 @@ async function setupEventListener() {
   });
 
   // PD 报文启动即监听（插拔瞬间的握手最有价值，不等用户打开 PD Tab）
-  await listen('pd-data', (/** @type {{ payload: import('./pd-model.js').PdMeta }} */ event) => {
-    ingestPdData(event.payload);
+  await listen('pd-data-batch', (/** @type {{ payload: unknown }} */ event) => {
+    ingestPdBatch(event.payload);
   });
 
   await listen('device-disconnected', async () => {

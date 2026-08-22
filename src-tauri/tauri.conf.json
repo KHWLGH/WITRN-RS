@@ -19,7 +19,8 @@
         "fullscreen": false,
         "decorations": false,
         "shadow": true,
-        "transparent": false
+        "transparent": false,
+        "additionalBrowserArgs": "--enable-gpu-rasterization --enable-features=CanvasOopRasterization"
       }
     ],
     "security": {

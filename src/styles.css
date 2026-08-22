@@ -713,6 +713,12 @@ input[type="number"]::-webkit-outer-spin-button {
   position: relative;
 }
 
+#main-chart canvas,
+#navigator-chart canvas {
+  contain: strict;
+  transform: translateZ(0);
+}
+
 /* ── Chart legend (top, only visible series) ── */
 .chart-legend {
   display: flex;

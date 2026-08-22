@@ -68,6 +68,7 @@ pub struct PdSummary {
 }
 
 struct PdMessage {
+    event: PdEvent,
     meta: Metadata,
 }
 
@@ -94,15 +95,39 @@ impl PdLog {
     }
 
     /// 追加一条已解析报文，返回发给前端的紧凑事件。
-    pub fn push_message(&mut self, t: u64, report: Vec<u8>, meta: Metadata) -> PdEvent {
+    pub fn push_message(
+        &mut self,
+        t: u64,
+        report: Vec<u8>,
+        meta: Metadata,
+        vbus: Option<f32>,
+        ibus: Option<f32>,
+    ) -> PdEvent {
         let seq = self.messages.len() as u64;
-        let event = PdEvent::message(t, seq, &report, &meta);
-        self.messages.push(PdMessage { meta });
+        let mut event = PdEvent::message(t, seq, &report, &meta);
+        event.vbus = vbus;
+        event.ibus = ibus;
+        self.messages.push(PdMessage {
+            event: event.clone(),
+            meta,
+        });
         event
     }
 
     pub fn meta_at(&self, index: usize) -> Option<&Metadata> {
         self.messages.get(index).map(|m| &m.meta)
+    }
+
+    /// `after_seq` 为 `None` 时返回全部；否则返回 `seq > after_seq` 的紧凑事件。
+    pub fn events_after(&self, after_seq: Option<u64>) -> Vec<PdEvent> {
+        let start = match after_seq {
+            None => 0,
+            Some(seq) => (seq + 1) as usize,
+        };
+        self.messages
+            .get(start..)
+            .map(|slice| slice.iter().map(|m| m.event.clone()).collect())
+            .unwrap_or_default()
     }
 
     /// 用导入的原始帧重建日志。分隔行只出现在返回的事件里，不占 seq。
@@ -120,10 +145,7 @@ impl PdLog {
             }
             let meta = decode_pd_report(&mut parser, &entry.bytes)
                 .map_err(|e| format!("导入的报文无法解析: {e}"))?;
-            let mut event = next.push_message(entry.t, entry.bytes, meta);
-            event.vbus = entry.vbus;
-            event.ibus = entry.ibus;
-            out.push(event);
+            out.push(next.push_message(entry.t, entry.bytes, meta, entry.vbus, entry.ibus));
         }
         *self = next;
         Ok(out)
@@ -497,9 +519,17 @@ mod tests {
             1,
             caps.clone(),
             decode_pd_report(&mut parser, &caps).unwrap(),
+            None,
+            None,
         );
         assert_eq!(e0.seq, Some(0));
-        let e1 = log.push_message(2, crc.clone(), decode_pd_report(&mut parser, &crc).unwrap());
+        let e1 = log.push_message(
+            2,
+            crc.clone(),
+            decode_pd_report(&mut parser, &crc).unwrap(),
+            None,
+            None,
+        );
         assert_eq!(e1.seq, Some(1));
         assert!(log.meta_at(1).is_some());
         assert!(log.meta_at(2).is_none());
@@ -508,6 +538,10 @@ mod tests {
             "Source_Capabilities"
         );
         assert_eq!(summarize(log.meta_at(1).unwrap()).msg_type, "GoodCRC");
+        assert_eq!(log.events_after(None).len(), 2);
+        assert_eq!(log.events_after(Some(0)).len(), 1);
+        assert_eq!(log.events_after(Some(1)).len(), 0);
+        assert_eq!(log.events_after(Some(0))[0].seq, Some(1));
     }
 
     #[test]

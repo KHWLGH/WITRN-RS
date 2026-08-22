@@ -57,6 +57,8 @@ let renderScheduled = false;
 let followTailPending = false;
 let initialized = false;
 let softCapWarned = false;
+/** 已入库报文的最大 seq；用于去重和 `pd_log_after` 补洞。 */
+let lastIngestedSeq = -1;
 
 /** 当前选中的日志下标。 */
 /** @type {number|null} */
@@ -137,13 +139,28 @@ function syncBackendCaptureFlag() {
 // ─── 摄入 ────────────────────────────────────────────────────────────────────
 
 /**
- * app.js 的 pd-data 监听器入口。
- * @param {unknown} payload
+ * @param {PdEntry|PdDivider} entry
  */
-export function ingestPdData(payload) {
-  if (followRecordingEnabled() && !state.isRecording) return;
+function rememberSeq(entry) {
+  if (!isDivider(entry) && Number.isFinite(entry.seq) && /** @type {number} */ (entry.seq) > lastIngestedSeq) {
+    lastIngestedSeq = /** @type {number} */ (entry.seq);
+  }
+}
+
+/**
+ * @param {unknown} payload
+ * @param {boolean} [live=true] 实时事件才走跟随记录门控；补洞 / 导入回放关掉。
+ * @returns {boolean} 是否写入了一条日志
+ */
+function ingestOne(payload, live = true) {
+  if (live && followRecordingEnabled() && !state.isRecording) return false;
   const entry = normalizePdPayload(payload);
-  if (!entry) return;
+  if (!entry) return false;
+  if (!isDivider(entry)) {
+    const seq = entry.seq;
+    if (seq !== undefined && Number.isFinite(seq) && seq <= lastIngestedSeq) return false;
+  }
+  rememberSeq(entry);
   log.push(entry);
   if (log.length === PD_SOFT_CAP && !softCapWarned) {
     softCapWarned = true;
@@ -151,15 +168,61 @@ export function ingestPdData(payload) {
   }
   if (paused) {
     bufferedWhilePaused++;
-    updateCounter();
-    return;
+    return true;
   }
-  if (viewHidden()) return;
+  if (viewHidden()) return true;
   if (matchesFilter(entry, currentFilterText(), currentHideGoodCrc())) {
     filtered.push(log.length - 1);
     appendRowOffset(entry);
   }
+  return true;
+}
+
+/**
+ * app.js 的 pd-data / 单条路径入口（测试与导入回放也走这里）。
+ * @param {unknown} payload
+ */
+export function ingestPdData(payload) {
+  if (!ingestOne(payload)) return;
+  if (paused) {
+    updateCounter();
+    return;
+  }
+  if (viewHidden()) return;
   scheduleWindowSync(true);
+}
+
+/**
+ * 后端按帧合并后的 `pd-data-batch`：先全部入库，再只排一次窗口同步。
+ * @param {unknown} payloads
+ * @param {boolean} [live=true]
+ */
+export function ingestPdBatch(payloads, live = true) {
+  if (!Array.isArray(payloads) || payloads.length === 0) return;
+  let added = 0;
+  for (const payload of payloads) {
+    if (ingestOne(payload, live)) added += 1;
+  }
+  if (!added) return;
+  if (paused) {
+    updateCounter();
+    return;
+  }
+  if (viewHidden()) return;
+  scheduleWindowSync(true);
+}
+
+/**
+ * 切回 PD 视图时按 seq 向后端补齐可能漏掉的报文。
+ */
+async function fillPdGap() {
+  const afterSeq = lastIngestedSeq >= 0 ? lastIngestedSeq : null;
+  try {
+    const extra = await invokeCmd('pd_log_after', { afterSeq });
+    if (Array.isArray(extra) && extra.length) ingestPdBatch(extra, false);
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 /** 当前 PD 日志中的条目数（用于诊断与测试）。 */
@@ -270,14 +333,7 @@ function syncWindow(followTail = false) {
   listWindow.style.transform = `translateY(${rowOffsets[start] ?? 0}px)`;
 
   const origin = sessionOrigin(log);
-  const fragment = document.createDocumentFragment();
-  for (let i = start; i < end; i++) {
-    const logIndex = filtered[i];
-    const entry = log[logIndex];
-    if (!entry) continue;
-    fragment.appendChild(buildRow(entry, logIndex, i + 1, origin));
-  }
-  listWindow.replaceChildren(fragment);
+  patchWindow(start, end, origin);
 
   updateEmptyState();
   updateCounter();
@@ -328,6 +384,48 @@ function rebuildRowOffsets() {
   rowOffsets = buildRowOffsets(log, filtered, noteColWidth, monoAdvance);
 }
 
+/**
+ * 视口行就地补丁：同类行改文字，类型变了才换节点。
+ * @param {number} start
+ * @param {number} end
+ * @param {number} origin
+ */
+function patchWindow(start, end, origin) {
+  if (!listWindow) return;
+  let node = listWindow.firstChild;
+  for (let i = start; i < end; i++) {
+    const logIndex = filtered[i];
+    const entry = log[logIndex];
+    if (!entry) continue;
+    const wantDivider = isDivider(entry);
+    const reusable =
+      node instanceof HTMLElement &&
+      (wantDivider ? node.classList.contains('pd-divider-row') : node.classList.contains('pd-row'));
+    if (reusable && node instanceof HTMLElement) {
+      if (wantDivider) {
+        const text = `── ${formatTime(entry.t)} 设备断开 ──`;
+        if (node.textContent !== text) node.textContent = text;
+      } else {
+        updateMessageRow(node, /** @type {PdEntry} */ (entry), logIndex, i + 1, origin);
+      }
+      node = node.nextSibling;
+      continue;
+    }
+    const next = buildRow(entry, logIndex, i + 1, origin);
+    if (node instanceof HTMLElement) {
+      node.replaceWith(next);
+      node = next.nextSibling;
+    } else {
+      listWindow.appendChild(next);
+    }
+  }
+  while (node) {
+    const dead = node;
+    node = node.nextSibling;
+    dead.remove();
+  }
+}
+
 /** @param {PdEntry|PdDivider} entry */
 function appendRowOffset(entry) {
   if (rowOffsets.length !== filtered.length) {
@@ -373,18 +471,40 @@ function buildRow(entry, logIndex, visibleN, origin) {
     cell('pd-col-vi', vi, vi ? VI_SAMPLE_TITLE : undefined),
     cell('pd-col-note', msg.summary, msg.summary),
   );
-
-  row.addEventListener('click', () => void selectIndex(logIndex, row));
-  row.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      void selectIndex(logIndex, row);
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveSelection(e.key === 'ArrowDown' ? 1 : -1);
-    }
-  });
   return row;
+}
+
+/**
+ * @param {HTMLElement} row
+ * @param {PdEntry} msg
+ * @param {number} logIndex
+ * @param {number} visibleN
+ * @param {number} origin
+ */
+function updateMessageRow(row, msg, logIndex, visibleN, origin) {
+  row.dataset.index = String(logIndex);
+  row.classList.toggle('selected', selectedIndex === logIndex);
+  row.classList.toggle('pd-row-wrap', noteUsesTwoLines(msg.summary, noteColWidth, monoAdvance));
+  const vi = formatBusVI(msg.vbus, msg.ibus);
+  const kids = row.children;
+  setCellText(kids[0], String(visibleN));
+  setCellText(kids[1], formatElapsed(msg.t, origin), formatTime(msg.t));
+  setCellText(kids[2], msg.sop);
+  if (kids[3]) {
+    kids[3].className = `pd-col-msg ${msgTypeClass(msg.type)}`;
+    setCellText(kids[3], displayType(msg.type));
+  }
+  setCellText(kids[4], msg.id ?? '');
+  if (kids[5] instanceof HTMLElement) {
+    const tone = directionClass(msg.direction ?? '');
+    kids[5].className = tone ? `pd-col-dir ${tone}` : 'pd-col-dir';
+    kids[5].textContent = msg.direction ? formatDirectionDisplay(msg.direction) : '';
+    kids[5].title = msg.direction || '';
+  }
+  setCellText(kids[6], msg.obj ?? '');
+  setCellText(kids[7], msg.rev ?? '');
+  setCellText(kids[8], vi, vi ? VI_SAMPLE_TITLE : '');
+  setCellText(kids[9], msg.summary, msg.summary);
 }
 
 /**
@@ -398,6 +518,17 @@ function cell(className, text, title) {
   span.textContent = text;
   if (title) span.title = title;
   return span;
+}
+
+/**
+ * @param {Element|undefined} el
+ * @param {string} text
+ * @param {string} [title]
+ */
+function setCellText(el, text, title) {
+  if (!(el instanceof HTMLElement)) return;
+  if (el.textContent !== text) el.textContent = text;
+  if (title !== undefined && el.title !== title) el.title = title;
 }
 
 /** @param {string} direction */
@@ -612,6 +743,7 @@ export function clearPdEntries() {
   rowOffsets = [0];
   bufferedWhilePaused = 0;
   softCapWarned = false;
+  lastIngestedSeq = -1;
   metaCache.clear();
   clearSelection();
   void invokeCmd('pd_log_clear');
@@ -710,9 +842,13 @@ async function importPdCapture() {
     filtered = [];
     bufferedWhilePaused = 0;
     softCapWarned = false;
+    lastIngestedSeq = -1;
     metaCache.clear();
     clearSelection();
-    for (const entry of nextEntries) log.push(entry);
+    for (const entry of nextEntries) {
+      log.push(entry);
+      rememberSeq(entry);
+    }
 
     rebuildFilterAndWindow();
     toast.success(`成功导入 ${log.length} 条报文`);
@@ -800,6 +936,24 @@ export function initPdView() {
   if (list) {
     ensureListStructure();
     list.addEventListener('scroll', () => scheduleWindowSync(false), { passive: true });
+    list.addEventListener('click', (e) => {
+      const hit = e.target instanceof Element ? e.target.closest('.pd-row') : null;
+      if (!(hit instanceof HTMLElement) || !list.contains(hit)) return;
+      const idx = Number(hit.dataset.index);
+      if (Number.isInteger(idx)) void selectIndex(idx, hit);
+    });
+    list.addEventListener('keydown', (e) => {
+      const row = e.target instanceof HTMLElement && e.target.classList.contains('pd-row') ? e.target : null;
+      if (!row) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const idx = Number(row.dataset.index);
+        if (Number.isInteger(idx)) void selectIndex(idx, row);
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveSelection(e.key === 'ArrowDown' ? 1 : -1);
+      }
+    });
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => scheduleWindowSync(false)).observe(list);
     }
@@ -885,7 +1039,7 @@ export function initPdView() {
   syncPdUi();
 }
 
-/** 每次切到 PD 视图：补齐隐藏期间收到的报文。 */
+/** 每次切到 PD 视图：先补 seq 缺口，再重建过滤窗口。 */
 export function syncPdView() {
-  rebuildFilterAndWindow();
+  void fillPdGap().then(() => rebuildFilterAndWindow());
 }

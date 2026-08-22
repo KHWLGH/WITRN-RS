@@ -9,6 +9,7 @@ use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -214,15 +215,62 @@ struct DeviceData {
 
 struct BackgroundTask {
     running: Arc<AtomicBool>,
-    join: JoinHandle<()>,
+    /// 先停生产者再停消费者：HID 读线程必须排在发射线程前面。
+    joins: Vec<JoinHandle<()>>,
 }
 
 impl BackgroundTask {
     fn stop(self) {
         self.running.store(false, Ordering::Relaxed);
-        if self.join.join().is_err() {
-            eprintln!("后台任务线程异常退出");
+        for join in self.joins {
+            if join.join().is_err() {
+                eprintln!("后台任务线程异常退出");
+            }
         }
+    }
+}
+
+/// HID 读线程 → 发射线程。采样已按间隔节流，发射侧原样送出、不合并。
+enum DeviceOutgoing {
+    Sample(DeviceData),
+    Pd(Box<PdEvent>),
+    Disconnected,
+}
+
+fn drain_device_outgoing(
+    first: DeviceOutgoing,
+    rest: impl IntoIterator<Item = DeviceOutgoing>,
+) -> (Vec<DeviceData>, Vec<PdEvent>, bool) {
+    let mut samples = Vec::new();
+    let mut pds = Vec::new();
+    let mut disconnected = false;
+    let mut take = |msg: DeviceOutgoing| match msg {
+        DeviceOutgoing::Sample(sample) => samples.push(sample),
+        DeviceOutgoing::Pd(event) => pds.push(*event),
+        DeviceOutgoing::Disconnected => disconnected = true,
+    };
+    take(first);
+    for msg in rest {
+        take(msg);
+    }
+    (samples, pds, disconnected)
+}
+
+fn emit_device_outgoing(
+    app: &AppHandle,
+    first: DeviceOutgoing,
+    rx: &mpsc::Receiver<DeviceOutgoing>,
+) {
+    let rest = std::iter::from_fn(|| rx.try_recv().ok());
+    let (samples, pds, disconnected) = drain_device_outgoing(first, rest);
+    for sample in samples {
+        let _ = app.emit("device-data", sample);
+    }
+    if !pds.is_empty() {
+        let _ = app.emit("pd-data-batch", pds);
+    }
+    if disconnected {
+        let _ = app.emit("device-disconnected", ());
     }
 }
 
@@ -234,7 +282,7 @@ fn stop_task(slot: &mut Option<BackgroundTask>) {
 
 struct AppState {
     device_task: Mutex<Option<BackgroundTask>>,
-    sample_rate: Arc<Mutex<u64>>,
+    sample_rate: Arc<AtomicU64>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
     temp_task: Mutex<Option<BackgroundTask>>,
     pd_log: Arc<Mutex<PdLog>>,
@@ -246,7 +294,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             device_task: Mutex::new(None),
-            sample_rate: Arc::new(Mutex::new(250)),
+            sample_rate: Arc::new(AtomicU64::new(250)),
             current_device_info: Arc::new(Mutex::new(None)),
             temp_task: Mutex::new(None),
             pd_log: Arc::new(Mutex::new(PdLog::default())),
@@ -386,9 +434,18 @@ fn connect_device_by_path(
     let pd_capture_arc = Arc::clone(&state.pd_capture_enabled);
     let device_info_arc = Arc::clone(&state.current_device_info);
 
-    // Start reading thread
-    let join = thread::spawn(move || {
-        // device is owned exclusively by this thread; no shared mutex during reads
+    let (tx, rx) = mpsc::channel();
+    let emit_app = app.clone();
+    let emit_join = thread::spawn(move || loop {
+        match rx.recv_timeout(Duration::from_millis(8)) {
+            Ok(first) => emit_device_outgoing(&emit_app, first, &rx),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    });
+
+    // 读线程只读 HID / 解码 / 入日志 / 入通道，不在这里 emit。
+    let read_join = thread::spawn(move || {
         let mut buf = [0u8; 64];
         let mut last_emit: Option<Instant> = None;
         let mut pending: Option<DeviceData> = None;
@@ -398,16 +455,11 @@ fn connect_device_by_path(
         let mut pd_parser = Parser::new();
 
         loop {
-            // Check if still running
             if !running_for_thread.load(Ordering::Relaxed) {
                 break;
             }
 
-            // Get sample rate (ms). This is the desired *emit* interval.
-            let rate_ms = {
-                let rate = sample_rate_arc.lock().unwrap();
-                (*rate).max(1)
-            };
+            let rate_ms = sample_rate_arc.load(Ordering::Relaxed).max(1);
 
             // Read from device. We read frequently and *throttle emits* so the UI sample rate works
             // even if the device reports faster.
@@ -422,15 +474,23 @@ fn connect_device_by_path(
                             match decode_pd_report(&mut pd_parser, report) {
                                 Ok(metadata) => {
                                     if pd_capture_arc.load(Ordering::Relaxed) {
-                                        let mut event = {
-                                            let mut log = pd_log_arc.lock().unwrap();
-                                            log.push_message(now_ms(), report.to_vec(), metadata)
+                                        let (vbus, ibus) = match last_bus {
+                                            Some((v, i)) => (Some(v), Some(i)),
+                                            None => (None, None),
                                         };
-                                        if let Some((vbus, ibus)) = last_bus {
-                                            event.vbus = Some(vbus);
-                                            event.ibus = Some(ibus);
+                                        let event = {
+                                            let mut log = pd_log_arc.lock().unwrap();
+                                            log.push_message(
+                                                now_ms(),
+                                                report.to_vec(),
+                                                metadata,
+                                                vbus,
+                                                ibus,
+                                            )
+                                        };
+                                        if tx.send(DeviceOutgoing::Pd(Box::new(event))).is_err() {
+                                            break;
                                         }
-                                        let _ = app.emit("pd-data", event);
                                     }
                                 }
                                 Err(error) => {
@@ -447,7 +507,7 @@ fn connect_device_by_path(
                         if let Ok(mut info) = device_info_arc.lock() {
                             *info = None;
                         }
-                        let _ = app.emit("device-disconnected", ());
+                        let _ = tx.send(DeviceOutgoing::Disconnected);
                     }
                     break;
                 }
@@ -468,7 +528,9 @@ fn connect_device_by_path(
                 .unwrap_or(true);
             if pending.is_some() && due {
                 let sample = pending.take().unwrap();
-                let _ = app.emit("device-data", sample);
+                if tx.send(DeviceOutgoing::Sample(sample)).is_err() {
+                    break;
+                }
                 last_emit = Some(Instant::now());
             }
         }
@@ -478,7 +540,7 @@ fn connect_device_by_path(
 
     task_slot.replace(BackgroundTask {
         running: Arc::clone(&running_arc),
-        join,
+        joins: vec![read_join, emit_join],
     });
 
     Ok(format!("已连接: {}", display_name))
@@ -564,9 +626,20 @@ fn set_sample_rate(rate: u64, state: State<'_, AppState>) -> Result<(), String> 
     if !(10..=60_000).contains(&rate) {
         return Err("采样间隔必须在 10 到 60000 毫秒之间".to_string());
     }
-    let mut sample_rate = state.sample_rate.lock().unwrap();
-    *sample_rate = rate;
+    state.sample_rate.store(rate, Ordering::Relaxed);
     Ok(())
+}
+
+#[tauri::command]
+fn pd_log_after(
+    after_seq: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PdEvent>, String> {
+    state
+        .pd_log
+        .lock()
+        .map_err(|_| "PD 日志状态已损坏".to_string())
+        .map(|log| log.events_after(after_seq))
 }
 
 /// 退出流程的唯一入口：先停后台任务，再强制销毁主窗口。
@@ -699,7 +772,10 @@ fn connect_temp_service(
         }
         running_for_thread.store(false, Ordering::Relaxed);
     });
-    task_slot.replace(BackgroundTask { running, join });
+    task_slot.replace(BackgroundTask {
+        running,
+        joins: vec![join],
+    });
 
     Ok(format!("已连接到温度服务 {}", addr))
 }
@@ -776,6 +852,7 @@ pub fn run() {
             set_pd_capture_enabled,
             pd_log_clear,
             decode_pd_at,
+            pd_log_after,
             pd_log_replace
         ])
         .run(tauri::generate_context!())
@@ -815,6 +892,37 @@ mod tests {
             interface_number,
             usage_page,
         }
+    }
+
+    #[test]
+    fn drain_keeps_every_sample_and_pd_event() {
+        let sample = |voltage: f32| DeviceData {
+            voltage,
+            current: 1.0,
+            power: voltage,
+            dp: None,
+            dn: None,
+            cc1: 0.0,
+            cc2: 0.0,
+            temperature: None,
+            ah: 0.0,
+            wh: 0.0,
+        };
+        let pd = |t: u64| PdEvent::divider(t);
+        let (samples, pds, disconnected) = drain_device_outgoing(
+            DeviceOutgoing::Sample(sample(5.0)),
+            [
+                DeviceOutgoing::Pd(Box::new(pd(1))),
+                DeviceOutgoing::Sample(sample(9.0)),
+                DeviceOutgoing::Pd(Box::new(pd(2))),
+                DeviceOutgoing::Disconnected,
+            ],
+        );
+        assert_eq!(samples.len(), 2);
+        assert_eq!(samples[0].voltage, 5.0);
+        assert_eq!(samples[1].voltage, 9.0);
+        assert_eq!(pds.len(), 2);
+        assert!(disconnected);
     }
 
     #[test]

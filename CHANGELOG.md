@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **高频记录 + PD 同时开时图表跟手**：HID 读线程与 IPC 发射线程拆开，`pd-data` 改为按帧合并的 `pd-data-batch`（报文一条不丢）；采样率改为 `AtomicU64`，读循环不再每圈抢锁。主图在可见窗口超过 2×宽度后改送增量 min/max 像素桶（全量仍在 `F64Col`，悬停二分回原始点），绘制预算最多让一帧。记录中侧栏数字并入 rAF。PD 列表按行补丁复用，切回时用 `pd_log_after` 按 seq 补洞。Windows WebView2 打开 GPU 栅格，图表 canvas 提到合成层。
 - **Y 轴标题改到轴顶横向放置**：电压 / 电流 / 功率 / 温度不再竖排贴在轴侧；贴边轴的标题从竖脊朝图内伸出，外侧轴贴画布外沿，避免同侧双轴在 30px 轴沟里叠字；左右不再为竖排字预留 `labelSize`，绘图区变宽
 - **监控通道色改走鲜艳阶**：电压/电流等曲线与侧栏读数从 `Foreground2`（tint40 / shade30）改到官方 shared 色板的 tint20 / primary（lightBlue、seafoam、orange 等），选区与状态点同步提高饱和度；壳层与 PD 徽章仍用上一轮的 alias。
 - **配色对齐 Fluent UI Theme Colors**：`tokens.css` 原始色换成官方 grey / brand / shared 色阶，语义层按 webDark / webLight alias 重赋（表面、文本、不透明填充与描边、品牌实心钮与复合强调、cranberry/green/orange 状态色）。通道与 PD 徽章改走 `colorPalette*` Background2/Foreground2，浅色主题不再沿用暗色曲线色。图表网格改为中性描边令牌。

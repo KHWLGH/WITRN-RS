@@ -146,8 +146,9 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
   - HID 设备通信 (使用 `hidapi` 库)
   - 温度服务网络连接
   - 后台任务生命周期管理（每个 HID/温度连接持有独立停止标志与 `JoinHandle`，重连和退出前等待旧任务结束）
+  - HID 读线程与 IPC 发射线程分离：读循环只解码并写入通道，发射线程按约 8ms 一帧合并 `pd-data-batch`、原样转发已节流的 `device-data`
   - 退出流程（`shutdown` 命令：停止后台任务后 `destroy` 主窗口）
-  - 线程安全的共享配置与设备信息管理 (`Arc<Mutex<...>>`)
+  - 线程安全的共享配置与设备信息管理（采样率为 `AtomicU64`，其余共享状态 `Arc<Mutex<...>>`）
   - 事件系统（向前端发送实时数据）
 
 ### 前端 (Vanilla JavaScript)
@@ -158,7 +159,7 @@ Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需�
   - `shell.js` - 视图注册表（多 Tab 工作区切换、活动视图持久化）
   - `state.js` - 共享应用状态与类型定义
   - `theme.js` - 主题桥（把 CSS 设计令牌暴露给 uPlot 等 canvas 侧消费者）
-  - `chart.js` - uPlot 图表初始化、渲染调度、tooltip/图例交互
+  - `chart.js` / `chart-buckets.js` - uPlot 图表初始化、渲染调度、可见窗口像素桶、tooltip/图例交互
   - `data.js` - 数据采集、统计计算、录制逻辑
   - `measurement.js` - 相对时间解析、能量/容量积分、导出行构造（不依赖 DOM 与 Tauri 的纯函数，供单元测试直接调用）
   - `pd-model.js` - PD 报文摘要提取、环形缓冲、过滤（纯函数，供单元测试直接调用）

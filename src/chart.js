@@ -11,11 +11,13 @@
  * - scheduleChartUpdate() rAF 节流刷新（流式追加数据用）
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
+ * 可见窗口超过 2×绘图宽度时 setData 送增量 min/max 桶，全量仍在 chartSeries。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
  * - setSeriesVisible()    显示 / 隐藏某条曲线（对应 Y 轴自动跟随显隐）
  * - setSeriesFill()       设置某条曲线的填充不透明度（0 = 关闭填充）
  */
 
+import { bucketCap, firstIndexAfter, firstIndexAtOrAfter, nearestIndex, SeriesBuckets } from './chart-buckets.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
@@ -86,6 +88,10 @@ let seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infini
 let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
 /** 已扫描过最大值的数据长度（增量扫描游标）。 */
 let scannedLen = 0;
+
+/** 主图显示桶：可见窗口点数超过 2×宽度后启用，存储仍走全量列。 */
+const displayBuckets = new SeriesBuckets();
+let usingDisplayBuckets = false;
 
 /** 数据代数 — 序列数组被整体替换（清空 / 导入）时递增，用于跳过导航图不必要的重建。 */
 let dataGen = 0;
@@ -244,6 +250,8 @@ function bindMainViews() {
 
 export function syncChartSeries() {
   bindMainViews();
+  displayBuckets.reset(0);
+  usingDisplayBuckets = false;
   resetNavBuckets();
   bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
@@ -258,16 +266,18 @@ export function syncChartSeries() {
  * @returns {boolean} 是否有任一通道极值变化（决定 setData 要不要重算 Y 轴）
  */
 function trackNewPoints() {
-  const len = mainData[0].length;
+  const cs = state.chartSeries;
+  const len = cs.x.length;
   if (len <= scannedLen) {
     scannedLen = len;
     return false;
   }
+  const cols = [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
   let changed = false;
-  for (let si = 1; si < mainData.length; si++) {
-    const arr = mainData[si];
-    let max = seriesMax[si];
-    let min = seriesMin[si];
+  for (let si = 0; si < cols.length; si++) {
+    const arr = cols[si].buf;
+    let max = seriesMax[si + 1];
+    let min = seriesMin[si + 1];
     for (let i = scannedLen; i < len; i++) {
       const v = arr[i];
       if (Number.isFinite(v)) {
@@ -281,11 +291,57 @@ function trackNewPoints() {
         }
       }
     }
-    seriesMax[si] = max;
-    seriesMin[si] = min;
+    seriesMax[si + 1] = max;
+    seriesMin[si + 1] = min;
   }
   scannedLen = len;
   return changed;
+}
+
+function sourceRange() {
+  const xs = state.chartSeries.x;
+  const n = xs.length;
+  if (n === 0) return { start: 0, end: 0 };
+  if (xWindow.min == null || xWindow.max == null) return { start: 0, end: n };
+  const start = firstIndexAtOrAfter(xs.buf, n, xWindow.min);
+  let end = firstIndexAfter(xs.buf, n, xWindow.max);
+  if (end <= start) end = Math.min(n, start + 1);
+  return { start, end };
+}
+
+function plotCssWidth() {
+  const chart = state.mainChart;
+  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  const pxRatio = typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr;
+  if (chart?.bbox?.width) return chart.bbox.width / pxRatio;
+  return document.getElementById('main-chart')?.clientWidth || 600;
+}
+
+function channelBufs() {
+  const cs = state.chartSeries;
+  return [cs.voltage.buf, cs.current.buf, cs.power.buf, cs.temp.buf, cs.dp.buf, cs.dn.buf, cs.cc1.buf, cs.cc2.buf];
+}
+
+/** 可见窗口超过 2×宽度时改送像素桶；否则继续零拷贝全量视图。 */
+function bindDisplayData() {
+  const cs = state.chartSeries;
+  const { start, end } = sourceRange();
+  const cap = bucketCap(plotCssWidth());
+  if (end - start <= cap) {
+    usingDisplayBuckets = false;
+    displayBuckets.reset(0);
+    bindMainViews();
+    return;
+  }
+  usingDisplayBuckets = true;
+  const series = channelBufs();
+  if (displayBuckets.cap !== cap || !displayBuckets.canAppend(start, end)) {
+    displayBuckets.rebuild(cs.x.buf, series, start, end, cap);
+  } else {
+    displayBuckets.appendThrough(cs.x.buf, series, end);
+  }
+  const flat = displayBuckets.flatten();
+  mainData = [flat.x, ...flat.ys];
 }
 
 function clearPaintSkip() {
@@ -304,12 +360,12 @@ function applyData() {
   }
 
   const t0 = performance.now();
-  bindMainViews();
-  const appended = mainData[0].length > scannedLen;
+  const appended = state.chartSeries.x.length > scannedLen;
   const yChanged = trackNewPoints();
+  bindDisplayData();
   if (state.mainChart) {
-    // 仅流式追加且 Y 极值未破时跳过四轴量化；导入 / 改窗口 / 改余量仍走完整 setData。
-    if (appended && !yChanged && xWindow.min != null && xWindow.max != null) {
+    // 仅全量视图上流式追加且 Y 极值未破时跳过四轴量化；桶显示每帧顶点会变。
+    if (!usingDisplayBuckets && appended && !yChanged && xWindow.min != null && xWindow.max != null) {
       state.mainChart.setData(/** @type {any} */ (mainData), false);
       const [min, max] = xRange();
       state.mainChart.setScale('x', { min, max });
@@ -328,7 +384,8 @@ function applyData() {
   }
 
   const dt = performance.now() - t0;
-  skipUntil = dt > PAINT_BUDGET_MS ? performance.now() + dt : 0;
+  // 预算耗尽最多让一帧；再拉长 skipUntil 曲线会停住、指针不跟手。
+  skipUntil = dt > PAINT_BUDGET_MS ? performance.now() + Math.min(dt, 16) : 0;
   chartDirty = false;
 }
 
@@ -480,10 +537,10 @@ function xRange() {
     min = xWindow.min;
     max = xWindow.max;
   } else {
-    const xs = mainData[0];
+    const xs = state.chartSeries.x;
     if (!xs.length) return [0, 60];
-    min = xs[0];
-    max = xs[xs.length - 1];
+    min = xs.at(0);
+    max = xs.at(-1);
   }
   // 单点 / 零跨度保护（uPlot 不接受 min == max）
   if (!(max - min > 0)) return [min - 0.3, min + 0.3];
@@ -952,10 +1009,27 @@ function renderLegend() {
  * @param {number|null} hoveredIdx
  * @returns {number|null}
  */
+/**
+ * 桶显示时 uPlot 的 idx 是顶点下标，用 X 二分回全量列。
+ * @param {any} u
+ * @param {number|null} hoveredIdx
+ * @returns {number|null}
+ */
+function realIndexFromCursor(u, hoveredIdx) {
+  if (hoveredIdx == null) return null;
+  const xVal = u.data[0]?.[hoveredIdx];
+  if (xVal == null || !Number.isFinite(xVal)) return null;
+  if (!usingDisplayBuckets) return hoveredIdx;
+  return nearestIndex(state.chartSeries.x.buf, state.chartSeries.x.length, Number(xVal));
+}
+
 function cursorDataIdx(u, seriesIdx, hoveredIdx) {
   if (hoveredIdx == null) return null;
+  const realIdx = realIndexFromCursor(u, hoveredIdx);
+  if (realIdx == null) return null;
   if (seriesIdx === 0) return hoveredIdx;
-  const y = u.data[seriesIdx]?.[hoveredIdx];
+  const field = FIELDS[seriesIdx - 1];
+  const y = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.buf[realIdx];
   return Number.isFinite(y) ? hoveredIdx : null;
 }
 
@@ -983,8 +1057,13 @@ function tooltipPlugin() {
           tt.style.display = 'none';
           return;
         }
-        const xVal = u.data[0][idx];
-        if (xVal == null) {
+        const realIdx = realIndexFromCursor(u, idx);
+        if (realIdx == null) {
+          tt.style.display = 'none';
+          return;
+        }
+        const xVal = state.chartSeries.x.buf[realIdx];
+        if (xVal == null || !Number.isFinite(xVal)) {
           tt.style.display = 'none';
           return;
         }
@@ -998,7 +1077,8 @@ function tooltipPlugin() {
         let rows = 0;
         for (let si = 1; si < u.series.length; si++) {
           if (!u.series[si].show) continue;
-          const yVal = u.data[si][idx];
+          const field = FIELDS[si - 1];
+          const yVal = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.buf[realIdx];
           if (yVal == null || !Number.isFinite(yVal)) continue;
           const row = document.createElement('div');
           row.className = 'chart-tooltip-row';
@@ -1163,7 +1243,10 @@ export function initChart() {
   };
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
-  observeResize(host, state.mainChart);
+  observeResize(host, state.mainChart, () => {
+    displayBuckets.reset(0);
+    applyData();
+  });
   renderLegend();
   onThemeChange(applyChartTheme);
 
