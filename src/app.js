@@ -8,6 +8,7 @@ import {
   initChart,
   refreshChartScales,
   scheduleChartUpdate,
+  setRangeDragging,
   setSeriesFill,
   setSeriesVisible,
   updateCharts,
@@ -196,8 +197,9 @@ function setupControls() {
    * @param {number|string} nextStart
    * @param {number|string} nextEnd
    * @param {'start'|'end'} leader
+   * @param {boolean} [preview=false] 手柄拖动中：只改 X 窗，不刷范围统计、不强制重建显示桶
    */
-  function applyRangeValues(nextStart, nextEnd, leader) {
+  function applyRangeValues(nextStart, nextEnd, leader, preview = false) {
     if (state.isRecording) return;
     let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
     let end = clamp(Number.parseInt(String(nextEnd), 10), 0, 1000);
@@ -214,9 +216,12 @@ function setupControls() {
 
     updateSliderFill();
     updateChartRange();
-    // 拖动期间逐事件同步重建大数据量图表会卡顿，统一用 rAF 合并到每帧一次
+    if (preview) {
+      scheduleChartUpdate();
+      return;
+    }
     if (state.settings.statsRange) scheduleStatsUpdate();
-    scheduleChartUpdate();
+    updateCharts();
   }
 
   /** @param {'start'|'end'} leader */
@@ -242,24 +247,44 @@ function setupControls() {
   function setupHandleInteractions(handle, which) {
     if (!handle) return;
 
+    let handleDragActive = false;
+    const beginHandleDrag = () => {
+      handleDragActive = true;
+      setRangeDragging(true);
+    };
+    const endHandleDrag = () => {
+      if (!handleDragActive) return;
+      handleDragActive = false;
+      setRangeDragging(false);
+      if (state.settings.statsRange) {
+        updateStatsDisplay();
+        updateEnergyDisplay();
+      }
+      updateCharts();
+    };
+
     handle.addEventListener('pointerdown', (event) => {
       if (state.isRecording) return;
       event.preventDefault();
       handle.focus();
       handle.setPointerCapture(event.pointerId);
+      beginHandleDrag();
 
       const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start');
-      else applyRangeValues(rangeStart.value, newValue, 'end');
+      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
+      else applyRangeValues(rangeStart.value, newValue, 'end', true);
     });
 
     handle.addEventListener('pointermove', (event) => {
       if (state.isRecording) return;
       if (!handle.hasPointerCapture(event.pointerId)) return;
       const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start');
-      else applyRangeValues(rangeStart.value, newValue, 'end');
+      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
+      else applyRangeValues(rangeStart.value, newValue, 'end', true);
     });
+
+    handle.addEventListener('pointerup', endHandleDrag);
+    handle.addEventListener('lostpointercapture', endHandleDrag);
 
     handle.addEventListener('keydown', (event) => {
       if (state.isRecording) return;

@@ -107,6 +107,15 @@ export class SeriesBuckets {
   }
 
   /**
+   * 当前桶是否覆盖 [start, end)（拖动缩进时可只改 X 窗、不必重建）。
+   * @param {number} start
+   * @param {number} end
+   */
+  covers(start, end) {
+    return end >= start && this.srcStart <= start && this.srcEnd >= end && (this.list.length > 0 || end === start);
+  }
+
+  /**
    * @param {number} x
    * @param {number[]} values
    */
@@ -143,6 +152,7 @@ export class SeriesBuckets {
   }
 
   /**
+   * 单遍按条带折叠，不给每个样本分配中间数组。
    * @param {ArrayLike<number>} xs
    * @param {ArrayLike<number>[]} series
    * @param {number} start
@@ -152,8 +162,17 @@ export class SeriesBuckets {
   rebuild(xs, series, start, end, cap) {
     this.reset(start);
     this.cap = Math.max(BUCKET_MIN, cap | 0);
-    const scratch = sampleScratch(xs, series, start, end);
-    for (const pair of scratch) this.pushSample(pair[0], pair[1]);
+    if (end <= start) return;
+    const n = end - start;
+    const ppb = Math.max(1, Math.ceil(n / this.cap));
+    this.ppb = ppb;
+    for (let i = start; i < end; i += ppb) {
+      const stripeEnd = i + ppb < end ? i + ppb : end;
+      const bucket = makeBucketFromIndex(xs, series, i);
+      for (let j = i + 1; j < stripeEnd; j++) foldIndex(bucket, xs, series, j);
+      this.list.push(bucket);
+    }
+    this.srcEnd = end;
   }
 
   /**
@@ -162,8 +181,14 @@ export class SeriesBuckets {
    * @param {number} end
    */
   appendThrough(xs, series, end) {
-    const scratch = sampleScratch(xs, series, this.srcEnd, end);
-    for (const pair of scratch) this.pushSample(pair[0], pair[1]);
+    const values = new Array(DISPLAY_SERIES);
+    for (let i = this.srcEnd; i < end; i++) {
+      for (let s = 0; s < DISPLAY_SERIES; s++) {
+        const col = series[s];
+        values[s] = col ? Number(col[i]) : Number.NaN;
+      }
+      this.pushSample(Number(xs[i]), values);
+    }
   }
 
   /** @returns {{ x: number[], ys: number[][] }} */
@@ -186,23 +211,36 @@ export class SeriesBuckets {
 /**
  * @param {ArrayLike<number>} xs
  * @param {ArrayLike<number>[]} series
- * @param {number} start
- * @param {number} end
- * @returns {[number, number[]][]}
+ * @param {number} i
  */
-function sampleScratch(xs, series, start, end) {
-  /** @type {[number, number[]][]} */
-  const out = [];
-  for (let i = start; i < end; i++) {
-    /** @type {number[]} */
-    const values = new Array(DISPLAY_SERIES);
-    for (let s = 0; s < DISPLAY_SERIES; s++) {
-      const col = series[s];
-      values[s] = col ? Number(col[i]) : Number.NaN;
-    }
-    out.push([Number(xs[i]), values]);
+function makeBucketFromIndex(xs, series, i) {
+  /** @type {number[]} */
+  const values = new Array(DISPLAY_SERIES);
+  for (let s = 0; s < DISPLAY_SERIES; s++) {
+    const col = series[s];
+    values[s] = col ? Number(col[i]) : Number.NaN;
   }
-  return out;
+  return makeBucket(Number(xs[i]), values);
+}
+
+/**
+ * @param {DisplayBucket} bucket
+ * @param {ArrayLike<number>} xs
+ * @param {ArrayLike<number>[]} series
+ * @param {number} i
+ */
+function foldIndex(bucket, xs, series, i) {
+  bucket.x1 = Number(xs[i]);
+  bucket.n += 1;
+  for (let s = 0; s < DISPLAY_SERIES; s++) {
+    const col = series[s];
+    const v = col ? Number(col[i]) : Number.NaN;
+    if (!Number.isFinite(v)) continue;
+    const curMin = bucket.min[s];
+    const curMax = bucket.max[s];
+    if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
+    if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
+  }
 }
 
 /** @param {number} x @param {number[]} values */

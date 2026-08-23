@@ -77,6 +77,63 @@ test('rebuild then appendThrough only folds new tail samples', () => {
   assert.ok(buckets.list.length >= before);
 });
 
+test('covers reports whether a rebuilt window contains a range', () => {
+  const buckets = new SeriesBuckets();
+  assert.equal(buckets.covers(0, 0), true);
+  assert.equal(buckets.covers(0, 1), false);
+
+  const xs = Float64Array.from({ length: 20 }, (_, i) => i);
+  const ys = Float64Array.from({ length: 20 }, (_, i) => i);
+  buckets.rebuild(xs, channels(xs, ys), 4, 16, 32);
+  assert.equal(buckets.covers(4, 16), true);
+  assert.equal(buckets.covers(6, 12), true);
+  assert.equal(buckets.covers(0, 16), false);
+  assert.equal(buckets.covers(4, 20), false);
+});
+
+test('rebuild folds a window in one pass and stays within cap', () => {
+  const n = 1000;
+  const xs = Float64Array.from({ length: n }, (_, i) => i);
+  const ys = Float64Array.from({ length: n }, (_, i) => i * 2);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, ys), 100, 900, 64);
+  assert.equal(buckets.srcStart, 100);
+  assert.equal(buckets.srcEnd, 900);
+  assert.ok(buckets.list.length <= 64);
+  assert.ok(buckets.list.length > 0);
+  assert.equal(buckets.ppb, Math.ceil(800 / 64));
+
+  let min = Infinity;
+  let max = -Infinity;
+  let counted = 0;
+  for (const b of buckets.list) {
+    min = Math.min(min, b.min[0]);
+    max = Math.max(max, b.max[0]);
+    counted += b.n;
+  }
+  assert.equal(counted, 800);
+  assert.equal(min, 200);
+  assert.equal(max, 1798);
+});
+
+test('rebuild of a large window does not exceed cap', () => {
+  const n = 20000;
+  const xs = Float64Array.from({ length: n }, (_, i) => i);
+  const ys = Float64Array.from({ length: n }, (_, i) => (i % 17) - 8);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, ys), 0, n, 128);
+  assert.ok(buckets.list.length <= 128);
+  assert.equal(buckets.srcEnd, n);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const b of buckets.list) {
+    min = Math.min(min, b.min[0]);
+    max = Math.max(max, b.max[0]);
+  }
+  assert.equal(min, -8);
+  assert.equal(max, 8);
+});
+
 test('flatten emits two vertices per bucket at the midpoint', () => {
   const buckets = new SeriesBuckets();
   buckets.cap = 64;

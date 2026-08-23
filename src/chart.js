@@ -12,7 +12,9 @@
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
  * 可见窗口超过 2×绘图宽度时 setData 送增量 min/max 桶，全量仍在 chartSeries。
+ * 拖动导航条只改 X 窗（setScale）；松手后再按窗口单遍重建显示桶。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
+ * - setRangeDragging()    手柄拖动期间走窗口快路径，推迟窗口级重建
  * - setSeriesVisible()    显示 / 隐藏某条曲线（对应 Y 轴自动跟随显隐）
  * - setSeriesFill()       设置某条曲线的填充不透明度（0 = 关闭填充）
  */
@@ -89,9 +91,19 @@ let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, I
 /** 已扫描过最大值的数据长度（增量扫描游标）。 */
 let scannedLen = 0;
 
-/** 主图显示桶：可见窗口点数超过 2×宽度后启用，存储仍走全量列。 */
+/** 主图窗口级显示桶：可见窗口点数超过 2×宽度后启用，存储仍走全量列。 */
 const displayBuckets = new SeriesBuckets();
+/** 全历史概览桶：不随 X 窗口重置，拖动扩大窗口时作 O(宽度) 兜底。 */
+const overviewBuckets = new SeriesBuckets();
 let usingDisplayBuckets = false;
+/** @typedef {'raw'|'window'|'overview'} BoundKind */
+/** @type {BoundKind} */
+let boundKind = 'raw';
+/** 范围手柄是否正在拖动（只改 X 窗，不重建窗口级桶）。 */
+let rangeDragging = false;
+/** 上次完整 apply 时的数据代数 / 绘图宽度桶上限。 */
+let appliedMainGen = -1;
+let appliedCap = -1;
 
 /** 数据代数 — 序列数组被整体替换（清空 / 导入）时递增，用于跳过导航图不必要的重建。 */
 let dataGen = 0;
@@ -251,7 +263,11 @@ function bindMainViews() {
 export function syncChartSeries() {
   bindMainViews();
   displayBuckets.reset(0);
+  overviewBuckets.reset(0);
   usingDisplayBuckets = false;
+  boundKind = 'raw';
+  appliedMainGen = -1;
+  appliedCap = -1;
   resetNavBuckets();
   bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
@@ -259,6 +275,11 @@ export function syncChartSeries() {
   scannedLen = 0;
   dataGen++;
   trackNewPoints();
+}
+
+/** @param {boolean} dragging */
+export function setRangeDragging(dragging) {
+  rangeDragging = !!dragging;
 }
 
 /**
@@ -322,26 +343,92 @@ function channelBufs() {
   return [cs.voltage.buf, cs.current.buf, cs.power.buf, cs.temp.buf, cs.dp.buf, cs.dn.buf, cs.cc1.buf, cs.cc2.buf];
 }
 
-/** 可见窗口超过 2×宽度时改送像素桶；否则继续零拷贝全量视图。 */
-function bindDisplayData() {
+/** @param {SeriesBuckets} buckets @param {BoundKind} kind */
+function bindFlattenedBuckets(buckets, kind) {
+  const flat = buckets.flatten();
+  mainData = [flat.x, ...flat.ys];
+  boundKind = kind;
+  usingDisplayBuckets = true;
+}
+
+/** @param {number} cap */
+function syncOverviewBuckets(cap) {
   const cs = state.chartSeries;
-  const { start, end } = sourceRange();
-  const cap = bucketCap(plotCssWidth());
-  if (end - start <= cap) {
+  const n = cs.x.length;
+  const series = channelBufs();
+  if (n === 0) {
+    overviewBuckets.reset(0);
+    overviewBuckets.cap = cap;
+    return;
+  }
+  if (overviewBuckets.cap !== cap || overviewBuckets.srcStart !== 0 || overviewBuckets.srcEnd > n) {
+    overviewBuckets.rebuild(cs.x.buf, series, 0, n, cap);
+    return;
+  }
+  if (overviewBuckets.srcEnd < n) {
+    overviewBuckets.appendThrough(cs.x.buf, series, n);
+  }
+}
+
+/**
+ * 当前绑定的顶点是否覆盖新窗口，因而只需 setScale。
+ * @param {number} start @param {number} end @param {number} windowCount @param {number} cap
+ */
+function bindingCovers(start, end, windowCount, cap) {
+  if (windowCount <= cap) return boundKind === 'raw' && !usingDisplayBuckets;
+  if (boundKind === 'raw' || !usingDisplayBuckets) return false;
+  if (boundKind === 'overview') return overviewBuckets.covers(start, end) && overviewBuckets.cap === cap;
+  return displayBuckets.covers(start, end) && displayBuckets.cap === cap;
+}
+
+function applyXScale() {
+  if (!state.mainChart) return;
+  const [min, max] = xRange();
+  state.mainChart.setScale('x', { min, max });
+}
+
+/**
+ * 可见窗口超过 2×宽度时改送像素桶；否则继续零拷贝全量视图。
+ * 缩进时不扔掉已有窗口桶，扩大时由调用方改绑概览桶。
+ * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
+ */
+function bindDisplayData(args) {
+  const { cap, start, end, windowCount, force } = args;
+  const cs = state.chartSeries;
+  syncOverviewBuckets(cap);
+
+  if (windowCount <= cap) {
     usingDisplayBuckets = false;
-    displayBuckets.reset(0);
+    boundKind = 'raw';
     bindMainViews();
     return;
   }
-  usingDisplayBuckets = true;
+
   const series = channelBufs();
-  if (displayBuckets.cap !== cap || !displayBuckets.canAppend(start, end)) {
-    displayBuckets.rebuild(cs.x.buf, series, start, end, cap);
-  } else {
-    displayBuckets.appendThrough(cs.x.buf, series, end);
+  const exact =
+    displayBuckets.cap === cap &&
+    displayBuckets.srcStart === start &&
+    displayBuckets.srcEnd === end &&
+    displayBuckets.list.length > 0;
+
+  if (exact) {
+    if (boundKind !== 'window') bindFlattenedBuckets(displayBuckets, 'window');
+    return;
   }
-  const flat = displayBuckets.flatten();
-  mainData = [flat.x, ...flat.ys];
+
+  if (
+    !force &&
+    displayBuckets.canAppend(start, end) &&
+    displayBuckets.cap === cap &&
+    displayBuckets.srcEnd > displayBuckets.srcStart
+  ) {
+    displayBuckets.appendThrough(cs.x.buf, series, end);
+    bindFlattenedBuckets(displayBuckets, 'window');
+    return;
+  }
+
+  displayBuckets.rebuild(cs.x.buf, series, start, end, cap);
+  bindFlattenedBuckets(displayBuckets, 'window');
 }
 
 function clearPaintSkip() {
@@ -352,47 +439,88 @@ function clearPaintSkip() {
   }
 }
 
-/** 将当前数据应用到两个图表（范围由各 scale 的 range 函数自动计算）。 */
-function applyData() {
+/** @param {number} t0 @param {boolean} preview */
+function finishPaint(t0, preview) {
+  const dt = performance.now() - t0;
+  // 拖动预览必须跟手；其余路径预算耗尽最多让一帧。
+  skipUntil = !preview && dt > PAINT_BUDGET_MS ? performance.now() + Math.min(dt, 16) : 0;
+  chartDirty = false;
+}
+
+/**
+ * 将当前数据应用到两个图表（范围由各 scale 的 range 函数自动计算）。
+ * @param {{ force?: boolean }} [opts]
+ */
+function applyData(opts = {}) {
   if (!monitorVisible()) {
     chartDirty = true;
     return;
   }
 
   const t0 = performance.now();
-  const appended = state.chartSeries.x.length > scannedLen;
+  const srcLen = state.chartSeries.x.length;
+  const appended = srcLen > scannedLen;
   const yChanged = trackNewPoints();
-  bindDisplayData();
+  const force = !!opts.force;
+  const dataChanged = appended || appliedMainGen !== dataGen;
+  const { start, end } = sourceRange();
+  const cap = bucketCap(plotCssWidth());
+  const windowCount = end - start;
+  const preview = rangeDragging && !force;
+
+  if (!dataChanged && !force && appliedCap === cap && bindingCovers(start, end, windowCount, cap)) {
+    applyXScale();
+    finishPaint(t0, preview);
+    return;
+  }
+
+  if (preview && windowCount > cap) {
+    syncOverviewBuckets(cap);
+    if (bindingCovers(start, end, windowCount, cap)) {
+      applyXScale();
+      finishPaint(t0, true);
+      return;
+    }
+    bindFlattenedBuckets(overviewBuckets, 'overview');
+    if (state.mainChart) {
+      state.mainChart.setData(/** @type {any} */ (mainData), false);
+      applyXScale();
+    }
+    appliedCap = cap;
+    finishPaint(t0, true);
+    return;
+  }
+
+  bindDisplayData({ cap, start, end, windowCount, force });
   if (state.mainChart) {
     // 仅全量视图上流式追加且 Y 极值未破时跳过四轴量化；桶显示每帧顶点会变。
-    if (!usingDisplayBuckets && appended && !yChanged && xWindow.min != null && xWindow.max != null) {
+    if (!usingDisplayBuckets && appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
       state.mainChart.setData(/** @type {any} */ (mainData), false);
-      const [min, max] = xRange();
-      state.mainChart.setScale('x', { min, max });
+      applyXScale();
     } else {
       state.mainChart.setData(/** @type {any} */ (mainData));
     }
   }
 
-  bindNavData();
-  const nav = state.navigatorChart;
-  const srcLen = state.chartSeries.x.length;
-  if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
-    nav.setData(/** @type {any} */ (navData));
-    appliedNavGen = dataGen;
-    appliedNavLen = srcLen;
+  if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
+    bindNavData();
+    const nav = state.navigatorChart;
+    if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
+      nav.setData(/** @type {any} */ (navData));
+      appliedNavGen = dataGen;
+      appliedNavLen = srcLen;
+    }
   }
 
-  const dt = performance.now() - t0;
-  // 预算耗尽最多让一帧；再拉长 skipUntil 曲线会停住、指针不跟手。
-  skipUntil = dt > PAINT_BUDGET_MS ? performance.now() + Math.min(dt, 16) : 0;
-  chartDirty = false;
+  appliedMainGen = dataGen;
+  appliedCap = cap;
+  finishPaint(t0, preview);
 }
 
 /** 立即刷新两个图表（忽略绘制预算，隐藏时只打脏标记）。 */
 export function updateCharts() {
   clearPaintSkip();
-  applyData();
+  applyData({ force: true });
 }
 
 /**
@@ -435,7 +563,7 @@ function flushChart() {
     return;
   }
   const now = performance.now();
-  if (now < skipUntil) {
+  if (!rangeDragging && now < skipUntil) {
     chartDirty = true;
     if (skipWakeTimer == null) {
       skipWakeTimer = setTimeout(
@@ -1245,7 +1373,7 @@ export function initChart() {
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
   observeResize(host, state.mainChart, () => {
     displayBuckets.reset(0);
-    applyData();
+    applyData({ force: true });
   });
   renderLegend();
   onThemeChange(applyChartTheme);
