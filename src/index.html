@@ -329,148 +329,183 @@
           </div>
         </section>
 
-        <!-- ── 设置（含设备信息，右栏） ── -->
+        <!-- ── 设置（主栏选项 + 宽屏设备/关于侧栏） ── -->
         <section class="view" id="view-settings" role="tabpanel" aria-labelledby="btn-settings-tab" hidden>
-          <div class="page">
+          <div class="page settings-page">
             <h1 class="page-title">设置</h1>
-            <div class="settings-columns">
-              <div class="settings-col">
-                <h2 class="page-subtitle">应用</h2>
-                <div class="card">
-                  <div class="card-title">外观</div>
-                  <div class="field-row">
-                    <label>主题</label>
-                    <label class="radio-label">
-                      <input type="radio" name="theme-choice" id="theme-choice-dark" checked /> 深色
-                    </label>
-                    <label class="radio-label">
-                      <input type="radio" name="theme-choice" id="theme-choice-light" /> 浅色
-                    </label>
-                    <label class="radio-label">
-                      <input type="radio" name="theme-choice" id="theme-choice-system" /> 跟随系统
-                    </label>
+            <div class="settings-layout">
+              <div class="settings-main">
+                <section class="settings-section">
+                  <h2 class="settings-section-title">外观</h2>
+                  <div class="settings-group">
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">主题</div>
+                        <div class="settings-row-desc">深色、浅色，或跟随操作系统外观。</div>
+                      </div>
+                      <div class="settings-row-control" role="radiogroup" aria-label="主题">
+                        <div class="seg">
+                          <label class="seg-item">
+                            <input type="radio" name="theme-choice" id="theme-choice-dark" checked />
+                            <span>深色</span>
+                          </label>
+                          <label class="seg-item">
+                            <input type="radio" name="theme-choice" id="theme-choice-light" />
+                            <span>浅色</span>
+                          </label>
+                          <label class="seg-item">
+                            <input type="radio" name="theme-choice" id="theme-choice-system" />
+                            <span>跟随系统</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="ui-scale">界面缩放</label>
+                        <div class="settings-row-desc" id="ui-scale-hint">
+                          等比缩放整个界面（含图表与标题栏）。系统缩放偏大导致窗口拥挤时可调低；默认 100% 跟随系统。
+                        </div>
+                      </div>
+                      <div class="settings-row-control settings-scale">
+                        <input
+                          type="range"
+                          id="ui-scale"
+                          min="50"
+                          max="200"
+                          step="5"
+                          value="100"
+                          class="scale-slider"
+                          title="界面缩放比例"
+                        />
+                        <span id="ui-scale-value" class="scale-value">100%</span>
+                      </div>
+                    </div>
                   </div>
-                  <div class="field-row">
-                    <label for="ui-scale">界面缩放</label>
-                    <input
-                      type="range"
-                      id="ui-scale"
-                      min="50"
-                      max="200"
-                      step="5"
-                      value="100"
-                      class="scale-slider"
-                      title="界面缩放比例"
-                    />
-                    <span id="ui-scale-value" class="scale-value">100%</span>
+                </section>
+                <section class="settings-section">
+                  <h2 class="settings-section-title">图表与记录</h2>
+                  <div class="settings-group">
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">图表纵向余量</div>
+                        <div class="settings-row-desc">曲线顶部预留的空白比例；自动约为 25%，让曲线保持中高位置。</div>
+                      </div>
+                      <div class="settings-row-control" role="radiogroup" aria-label="图表纵向余量">
+                        <div class="seg">
+                          <label class="seg-item">
+                            <input type="radio" name="headroom-mode" id="headroom-mode-auto" checked />
+                            <span>自动</span>
+                          </label>
+                          <label class="seg-item">
+                            <input type="radio" name="headroom-mode" id="headroom-mode-custom" />
+                            <span>自定义</span>
+                          </label>
+                        </div>
+                        <span class="opacity-wrap">
+                          <input
+                            type="number"
+                            id="headroom-percent"
+                            value="25"
+                            min="0"
+                            max="100"
+                            class="ribbon-input no-spin"
+                            disabled
+                          />
+                          <span class="opacity-suffix">%</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">记录电流方向</div>
+                        <div class="settings-row-desc">
+                          开启后新记录/导入的数据保留电流符号（正向为正、反向为负），侧栏以箭头指示方向；关闭时记录绝对值。不改写已有数据，导出跟随当前记录值。
+                        </div>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="ribbon-checkbox">
+                          <input type="checkbox" id="signed-current" />
+                          <span class="checkmark"></span>
+                          启用
+                        </label>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">重置所有配置</div>
+                        <div class="settings-row-desc">
+                          恢复采样率、显示通道、界面缩放、自动暂停、温度服务等全部设置的默认值。
+                        </div>
+                      </div>
+                      <div class="settings-row-control">
+                        <button type="button" class="btn" id="btn-reset-settings">重置所有配置</button>
+                      </div>
+                    </div>
                   </div>
-                  <div class="card-hint" id="ui-scale-hint">
-                    等比缩放整个界面（含图表与标题栏）。系统缩放偏大导致窗口拥挤时可调低；默认 100% 跟随系统。
-                  </div>
-                </div>
-                <div class="card">
-                  <div class="card-title">配置</div>
-                  <div class="field-row">
-                    <label>图表纵向余量</label>
-                    <label class="radio-label">
-                      <input type="radio" name="headroom-mode" id="headroom-mode-auto" checked /> 自动
-                    </label>
-                    <label class="radio-label">
-                      <input type="radio" name="headroom-mode" id="headroom-mode-custom" /> 自定义
-                    </label>
-                    <span class="opacity-wrap">
-                      <input
-                        type="number"
-                        id="headroom-percent"
-                        value="25"
-                        min="0"
-                        max="100"
-                        class="ribbon-input no-spin"
-                        disabled
-                      />
-                      <span class="opacity-suffix">%</span>
-                    </span>
-                  </div>
-                  <div class="card-hint">曲线顶部预留的空白比例；自动约为 25%，让曲线保持中高位置。</div>
-                  <div class="field-row">
-                    <label>记录电流方向</label>
-                    <label class="ribbon-checkbox">
-                      <input type="checkbox" id="signed-current" />
-                      <span class="checkmark"></span>
-                      启用
-                    </label>
-                  </div>
-                  <div class="card-hint">
-                    开启后新记录/导入的数据保留电流符号（正向为正、反向为负），侧栏以箭头指示方向；关闭时记录绝对值。不改写已有数据，导出跟随当前记录值。
-                  </div>
-                  <div class="field-row">
-                    <button type="button" class="btn" id="btn-reset-settings">重置所有配置</button>
-                  </div>
-                  <div class="card-hint">恢复采样率、显示通道、界面缩放、自动暂停、温度服务等全部设置的默认值。</div>
-                </div>
-                <div class="card">
-                  <div class="card-title">关于</div>
-                  <div class="field-row">
-                    <label>版本</label>
-                    <span>WITRN-RS <span id="about-version">--</span></span>
-                  </div>
-                  <div class="field-row">
-                    <label>许可证</label>
-                    <span>GPL-3.0-only</span>
-                  </div>
-                  <div class="field-row">
-                    <label>仓库</label>
-                    <span class="selectable">https://github.com/KHWLGH/WITRN-RS</span>
-                  </div>
-                  <div class="card-hint">第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0) · Maple Mono NF CN (OFL-1.1)</div>
-                </div>
+                </section>
               </div>
-              <div class="settings-col">
-                <h2 class="page-subtitle">设备</h2>
-                <div class="card">
-                  <div class="card-title">连接信息</div>
-                  <div class="field-row">
-                    <label for="device-vid">VID</label>
-                    <input type="text" id="device-vid" value="--" class="ribbon-input" readonly />
-                  </div>
-                  <div class="field-row">
-                    <label for="device-pid">PID</label>
-                    <input type="text" id="device-pid" value="--" class="ribbon-input" readonly />
-                  </div>
-                  <div class="field-row">
-                    <label for="device-sn">SN</label>
-                    <input
-                      type="text"
-                      id="device-sn"
-                      value="--"
-                      class="ribbon-input device-sn-input"
-                      readonly
-                      title="设备序列号"
-                    />
-                  </div>
-                </div>
-                <div class="card">
-                  <div class="card-title">设备身份</div>
-                  <div class="card-hint">读取产品名与批次序列号并计算稳定指纹。读取期间数据流会暂停约 2 秒，录制中不可用。</div>
-                  <div class="field-row">
+              <aside class="settings-aside">
+                <section class="settings-section">
+                  <h2 class="settings-section-title">设备</h2>
+                  <div class="settings-group settings-group-stack">
+                    <div class="settings-kv">
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">VID</span>
+                        <span class="identity-value" id="device-vid">--</span>
+                      </div>
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">PID</span>
+                        <span class="identity-value" id="device-pid">--</span>
+                      </div>
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">SN</span>
+                        <span class="identity-value" id="device-sn" title="设备序列号">--</span>
+                      </div>
+                    </div>
+                    <p class="settings-row-desc">
+                      读取产品名与批次序列号并计算稳定指纹。读取期间数据流会暂停约 2 秒，录制中不可用。
+                    </p>
                     <button type="button" class="btn" id="btn-identify" disabled>读取设备身份</button>
+                    <div id="identity-result" hidden>
+                      <div class="settings-kv">
+                        <div class="settings-kv-row">
+                          <span class="settings-kv-label">产品</span>
+                          <span class="identity-value" id="identity-product">--</span>
+                        </div>
+                        <div class="settings-kv-row">
+                          <span class="settings-kv-label">序列号</span>
+                          <span class="identity-value" id="identity-serial">--</span>
+                        </div>
+                        <div class="settings-kv-row">
+                          <span class="settings-kv-label">指纹</span>
+                          <span class="identity-value" id="identity-fingerprint">--</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div id="identity-result" hidden>
-                    <div class="field-row">
-                      <label>产品</label>
-                      <span class="identity-value" id="identity-product">--</span>
+                </section>
+                <section class="settings-section">
+                  <h2 class="settings-section-title">关于</h2>
+                  <div class="settings-group settings-group-stack">
+                    <div class="settings-kv">
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">版本</span>
+                        <span>WITRN-RS <span id="about-version">--</span></span>
+                      </div>
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">许可证</span>
+                        <span>GPL-3.0-only</span>
+                      </div>
+                      <div class="settings-kv-row">
+                        <span class="settings-kv-label">仓库</span>
+                        <span class="identity-value selectable">github.com/KHWLGH/WITRN-RS</span>
+                      </div>
                     </div>
-                    <div class="field-row">
-                      <label>序列号</label>
-                      <span class="identity-value" id="identity-serial">--</span>
-                    </div>
-                    <div class="field-row">
-                      <label>指纹</label>
-                      <span class="identity-value" id="identity-fingerprint">--</span>
-                    </div>
+                    <p class="settings-row-desc">第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0) · Maple Mono NF CN (OFL-1.1)</p>
                   </div>
-                </div>
-              </div>
+                </section>
+              </aside>
             </div>
           </div>
         </section>

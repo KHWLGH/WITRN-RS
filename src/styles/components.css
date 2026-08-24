@@ -16,7 +16,6 @@
   color: var(--text-primary);
   background: var(--fill-control);
   border: 1px solid var(--stroke-control);
-  border-top-color: var(--stroke-control-strong);
   border-radius: var(--radius-control);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-standard);
@@ -38,31 +37,35 @@
 
 .btn-accent {
   background: var(--accent-fill);
-  border-color: transparent;
+  border-color: var(--accent-fill);
   color: var(--text-on-accent);
 }
 
 .btn-accent:hover:not(:disabled) {
   background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 
 .btn-accent:active:not(:disabled) {
   background: var(--accent-fill-pressed);
+  border-color: var(--accent-fill-pressed);
   color: var(--text-on-accent);
 }
 
 .btn-danger {
   background: var(--danger-fill);
-  border-color: transparent;
+  border-color: var(--danger-fill);
   color: var(--text-on-danger);
 }
 
 .btn-danger:hover:not(:disabled) {
   background: var(--danger-fill-hover);
+  border-color: var(--danger-fill-hover);
 }
 
 .btn-danger:active:not(:disabled) {
   background: var(--danger-fill-pressed);
+  border-color: var(--danger-fill-pressed);
   color: var(--text-on-danger);
 }
 

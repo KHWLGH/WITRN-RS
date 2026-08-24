@@ -819,6 +819,8 @@ input[type="number"]::-webkit-outer-spin-button {
    looks identical; only the arrow spacing needs undoing (it is a real element
    here, not a background-image). */
 .cs-button {
+  -webkit-appearance: none;
+  appearance: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;

@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-23
+
 ### Added
 - **U3 识别 PID 0x5044**：实测到另一款 U3 固件变体上报 `0716:5044`，原先只认 `0x5063`，设备页会显示「未知 WITRN 设备」。现与 C5 一样按双 PID 识别为 WITRN U3
 
 ### Changed
+- **设置页改成主栏列表 + 侧栏**：外观 / 图表与记录用「标题 + 说明 | 控件」行排进分组卡片，主题与纵向余量改成分段选择；宽屏右侧放设备信息与关于，窄屏收成单列。VID/PID/SN 改为只读定义列表，不再用只读输入框。
 - **高频记录 + PD 同时开时图表跟手**：HID 读线程与 IPC 发射线程拆开，`pd-data` 改为按帧合并的 `pd-data-batch`（报文一条不丢）；采样率改为 `AtomicU64`，读循环不再每圈抢锁。主图在可见窗口超过 2×宽度后改送增量 min/max 像素桶（全量仍在 `F64Col`，悬停二分回原始点），绘制预算最多让一帧。记录中侧栏数字并入 rAF。PD 列表按行补丁复用，切回时用 `pd_log_after` 按 seq 补洞。Windows WebView2 打开 GPU 栅格，图表 canvas 提到合成层。
 - **Y 轴标题改到轴顶横向放置**：电压 / 电流 / 功率 / 温度不再竖排贴在轴侧；贴边轴的标题从竖脊朝图内伸出，外侧轴贴画布外沿，避免同侧双轴在 30px 轴沟里叠字；左右不再为竖排字预留 `labelSize`，绘图区变宽
 - **监控通道色改走鲜艳阶**：电压/电流等曲线与侧栏读数从 `Foreground2`（tint40 / shade30）改到官方 shared 色板的 tint20 / primary（lightBlue、seafoam、orange 等），选区与状态点同步提高饱和度；壳层与 PD 徽章仍用上一轮的 alias。
@@ -48,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **摄入与捕获测试**：`test/ingest.test.js`（有符号电流开/关的存储与统计、信号线列对齐、能量恒正）、`test/pd-capture-state.test.js`（采集状态机与 ingest 门控一致性）、`test/pd-capture-file.test.js`（捕获文件往返、摘要重算、畸形输入与深度上限拒绝）、`test/pd-clear-linkage.test.js`（跟随记录开/关时清空的级联与确认文案，走真实的 `ask` 回退路径）、`test/measurement.test.js` 扩展（CSV 表头列映射四种格式）
 
 ### Fixed
+- **设置页分段选择点选后的黑框**：主题 / 纵向余量的 radio 点选后 `:focus-within` 会在浅色主题画出 2px 黑描边。改为仅键盘 `:focus-visible` 显示焦点环，鼠标点选不再留框
+- **部分按钮顶边的黑线 / 白线**：通用 `.btn` 去掉顶边单独加亮；全局 `button { appearance: none; background-image: none }` 去掉 WebView2 原生高光；实心钮（记录 / 强调 / 危险）边框改跟填充同色，避免透明描边在圆角上抗锯齿出浅顶边
 - **休眠 / NTP 不再把能量算爆**：相对时间轴遇到超过约 2 秒的空档只前进一个采样间隔，后续积分按夹过的 x 走
 - **点开始后立刻插充电器不再丢 PD 握手**：先等后端 `set_pd_capture_enabled` 打开再置本地记录标志，并在记录开始时按 seq 补洞
 - **不完整的 EPR Source Capabilities 不再覆盖 last_pdo**：只有拼完 PDO 列表的报文才作为后续 Request 的上下文

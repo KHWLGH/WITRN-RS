@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * @file 设备信息面板（设置页右栏）— 连接信息（VID/PID/SN 由 device.js 维护）与设备身份读取。
+ * @file 设备信息面板（设置页侧栏）— 连接信息（VID/PID/SN 由 device.js 维护）与设备身份读取。
  *
  * identify_current_device 会停掉 HID 读线程、读取约 2 秒再重连，
  * 因此录制中禁用（避免数据流出现缺口）。

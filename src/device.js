@@ -10,6 +10,12 @@ import { refreshDeviceIdentifyState } from './views/device.js';
 
 const { invoke } = window.__TAURI__.core;
 
+/** @param {string} id @param {string} value */
+function setDeviceField(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 // ─── Device enumeration ──────────────────────────────────────────────────────
 
 /**
@@ -70,20 +76,14 @@ export function onDeviceSelect() {
     const pid = selectedOption.dataset.pid || '0';
     const sn = selectedOption.dataset.sn || '--';
 
-    const vidEl = /** @type {HTMLInputElement} */ (document.getElementById('device-vid'));
-    const pidEl = /** @type {HTMLInputElement} */ (document.getElementById('device-pid'));
-    const snEl = /** @type {HTMLInputElement} */ (document.getElementById('device-sn'));
-    vidEl.value = `0x${Number(vid).toString(16).toUpperCase().padStart(4, '0')}`;
-    pidEl.value = `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`;
-    snEl.value = sn || '--';
+    setDeviceField('device-vid', `0x${Number(vid).toString(16).toUpperCase().padStart(4, '0')}`);
+    setDeviceField('device-pid', `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`);
+    setDeviceField('device-sn', sn || '--');
   } else {
     state.selectedDevicePath = null;
-    const vidEl = /** @type {HTMLInputElement} */ (document.getElementById('device-vid'));
-    const pidEl = /** @type {HTMLInputElement} */ (document.getElementById('device-pid'));
-    const snEl = /** @type {HTMLInputElement} */ (document.getElementById('device-sn'));
-    vidEl.value = '--';
-    pidEl.value = '--';
-    snEl.value = '--';
+    setDeviceField('device-vid', '--');
+    setDeviceField('device-pid', '--');
+    setDeviceField('device-sn', '--');
   }
 }
 
@@ -95,8 +95,8 @@ export async function connectDevice() {
     if (state.selectedDevicePath) {
       await invoke('connect_device_by_path', { path: state.selectedDevicePath });
     } else {
-      const vidStr = /** @type {HTMLInputElement} */ (document.getElementById('device-vid')).value;
-      const pidStr = /** @type {HTMLInputElement} */ (document.getElementById('device-pid')).value;
+      const vidStr = document.getElementById('device-vid')?.textContent ?? '';
+      const pidStr = document.getElementById('device-pid')?.textContent ?? '';
       const vid = Number(vidStr.trim());
       const pid = Number(pidStr.trim());
 
@@ -112,11 +112,9 @@ export async function connectDevice() {
     const deviceInfo = await invoke('get_current_device_info');
     if (deviceInfo) {
       const di = /** @type {import('./state.js').DeviceInfo} */ (deviceInfo);
-      /** @type {HTMLInputElement} */ (document.getElementById('device-vid')).value =
-        `0x${di.vid.toString(16).toUpperCase().padStart(4, '0')}`;
-      /** @type {HTMLInputElement} */ (document.getElementById('device-pid')).value =
-        `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`;
-      /** @type {HTMLInputElement} */ (document.getElementById('device-sn')).value = di.serial_number || '--';
+      setDeviceField('device-vid', `0x${di.vid.toString(16).toUpperCase().padStart(4, '0')}`);
+      setDeviceField('device-pid', `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`);
+      setDeviceField('device-sn', di.serial_number || '--');
     }
 
     setConnected(true);

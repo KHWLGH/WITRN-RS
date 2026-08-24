@@ -8,6 +8,14 @@
   display: none !important;
 }
 
+/* WebView2 / Chromium 原生 <button> 会在自绘底色上再叠一层顶边高光，
+   暗色看起来像白边、浅色像黑边。清掉 appearance 与 UA 渐变，组件自己写边框。 */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+
 /* Fluent 焦点环：仅键盘焦点显示（:focus-visible），2px 亮描边 + 1px 间隙 */
 :focus-visible {
   outline: 2px solid var(--stroke-focus-outer);
