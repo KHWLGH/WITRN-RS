@@ -1,281 +1,153 @@
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="120" alt="WITRN-RS" />
 
 # WITRN-RS
 
-WITRN-RS 是一个跨平台的桌面应用程序，用于连接和监控维简 (WITRN) USB 电压电流表。该项目基于 **Tauri v2** 构建，后端使用 **Rust**，前端使用原生 **JavaScript/HTML/CSS**。
+**维简 (WITRN) USB 电压电流表的桌面上位机 —— 实时监控 · USB-PD 协议分析 · 数据记录**
 
-**注意：本软件大部分使用Claude Code、Grok Build、Codex等VibeCoding工具制作，可能存在未知问题**
+[![Release](https://img.shields.io/github/v/release/KHWLGH/WITRN-RS?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/WITRN-RS/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/WITRN-RS/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/WITRN-RS/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/KHWLGH/WITRN-RS?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/KHWLGH/WITRN-RS/total?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/releases)
+[![Last commit](https://img.shields.io/github/last-commit/KHWLGH/WITRN-RS?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/commits/main)
 
-## 致谢
-感谢 WITRN 提供的 USB-PD 采集硬件支持
+[![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES%20Modules-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
+[![uPlot](https://img.shields.io/badge/charts-uPlot-6E7B8B?style=flat-square)](https://github.com/leeoniya/uPlot)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square&logo=windows&logoColor=white)](#-下载与安装)
 
-感谢所有开源项目贡献者
+</div>
 
-感谢[JohnScotttt](https://github.com/JohnScotttt)的HID实现
+## 📖 项目简介
+
+WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。它通过 USB HID 直接读取仪表的测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，全程不需要网络。
+
+技术上基于 **Tauri v2**：后端是 **Rust**（HID 通信、USB-PD 解析、后台线程生命周期），前端是**不经打包器的原生 JavaScript ES Modules**，图表用 uPlot。所有前端依赖都已 vendor 进仓库，运行时不从 CDN 加载任何资源。
+
+除了常规的电压 / 电流 / 功率 / 温度，WITRN-RS 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**——这是它和一般图表软件的主要区别：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
+
+> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；Linux 可自行编译，但未经持续验证，详见 [开发与构建](docs/DEVELOPMENT.md#-linux-自行编译)。
+
+> **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/WITRN-RS/issues) 反馈。
+
+## 📸 界面预览
+
+| 深色主题 | 浅色主题 |
+| :---: | :---: |
+| <img src="docs/screenshots/dark-record.png" alt="监控工作区（深色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/light-record.png" alt="监控工作区（浅色）" /><br><sub>**监控** · 浅色主题</sub> |
+| <img src="docs/screenshots/dark-pd.png" alt="PD 分析工作区（深色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/light-pd.png" alt="PD 分析工作区（浅色）" /><br><sub>**PD 分析** · 浅色主题</sub> |
+| <img src="docs/screenshots/dark-settings.png" alt="设置页（深色）：外观、图表与记录、设备、关于" /><br><sub>**设置** · 外观 / 图表与记录 / 设备身份 / 关于</sub> | <img src="docs/screenshots/light-settings.png" alt="设置页（浅色）" /><br><sub>**设置** · 浅色主题</sub> |
 
 ## ✨ 功能特性
 
-### 核心功能
-*   **实时监控**：实时读取并显示电压、电流、功率和温度；容量 (mAh) 与能量 (Wh) 由软件按录制区间积分
-*   **USB-PD 协议分析**：实时捕获并解码 USB-PD 报文（Source_Capabilities / Request / PPS 等），报文列表带角色徽章与 PDO/RDO 速览，可逐字段展开解码树
-*   **图表显示**：支持实时数据图表显示和历史数据导航
-*   **数据导出**：支持 CSV 格式数据导出（可选择是否包含温度数据）
-*   **统计信息**：显示最小值、最大值、平均值等统计数据
-*   **多设备支持**：支持多种 WITRN 设备型号的自动识别和连接；设备页可读取产品名、批次序列号与稳定指纹
+### 实时监控
 
-### 高级功能
-*   **多 Tab 工作区**：监控 / PD 分析 各占一个 Tab，功能与其设置同页（设备信息在设置页右栏）；设备连接常驻标题栏，任何页面可快速连断
-*   **Fluent UI 深/浅色界面**：设计令牌对齐 Fluent UI webDark / webLight，自定义标题栏（Windows 保留 Win11 贴靠布局浮窗）
-*   **密集网格显示**：主图支持细分网格线绘制，提升读取趋势和局部变化时的参考精度
-*   **平滑退出机制**：退出确认后由后端统一停止后台线程并 `destroy` 主窗口，避免 `close` 重新派发关闭事件造成的回环
-*   **填充控制简化**：曲线填充改为由透明度直接控制（0 = 关闭填充，1-100 = 开启填充）
-*   **外部温度服务**：支持通过网络连接外部温度传感器数据
-*   **跨平台**：支持 Windows、macOS 和 Linux 系统
-*   **轻量级**：基于 Tauri 构建，安装包体积小，运行资源占用低
-*   **自定义采样率**：可调节数据采样频率以适应不同使用场景
+- 电压 / 电流 / 功率 / 温度读数卡，每项附最小值、最大值与平均值。
+- **累计能量 (Wh) 与累计容量 (mAh)** 由软件对采样点积分得出。睡眠、时钟回拨或 NTP 前跳造成的时间跳变（超过采样间隔的 8 倍，且至少 2 秒）只按一个采样周期推进，不会污染积分结果。
+- **信号线电压** D+ / D− / CC1 / CC2（设备分辨率 0.01 V），可叠加到图表上，也随 CSV 一起导出。
+- 可选**记录电流方向**：开启后保留电流符号（正向为正、反向为负，K2 原生支持 ±10 A），侧栏用箭头指示方向。
+- **自动暂停**：当电压 / 电流 / 功率低于阈值并持续指定秒数后自动停止记录，适合无人值守的充放电测试。
 
-## 📸 屏幕截图
+### USB-PD 协议分析
 
-### Windows
+- 解码 SOP / SOP′ 的控制报文、数据报文、扩展报文，以及 Hard Reset / Cable Reset。
+- 报文列表带角色方向徽章（`SRC → SNK`、`SRC|SNK → Plug`）和 **PDO / RDO 速览**，例如
+  `Fixed: 5.0V 9.0V 12.0V 15.0V 20.0V SPR AVS: 9-15V@3.0A PPS: 5.0-21.0V` 或 `Position:7 PPS:8.0V,3.45A`。
+- 详情面板把当前帧**逐字拆开**：原始 Data Object 十六进制 → 报文头字段表（Extended / Objects / Msg ID / Power Role / Spec Rev / Data Role / Msg Type）→ 每个 PDO 的完整位域表。
+- 可过滤消息类型、隐藏 GoodCRC（链路层确认帧，通常占报文总量一半以上）。
+- **跟随记录**模式让 PD 抓包与主监控完全联动：只在记录时采集、开始/暂停同步、清空互相联动。
+- 报文日志可增长，配合虚拟列表在数十万条量级仍可流畅滚动。
 
-![WITRN-RS 在 Windows 上的界面](docs/screenshots/windows-screenshot.png)
+### 高性能图表
 
-### Linux
+- uPlot 绘制，**8 条曲线 / 4 条 Y 轴**（电流 A、电压 V、功率 W、温度 °C，四轴严格共线），另有两级密集子网格提升读数精度。
+- 数据超过 2 倍视口宽度后自动切换为增量 min/max 像素桶渲染，**百万点仍可拖动**；完整数据保留在列式存储中，悬停时二分回查原始采样点。
+- tooltip 同时显示全部 8 个通道，图例可逐通道开关，底部时间线导航器支持范围选取。
+- 每条曲线的填充由不透明度直接控制（0 = 关闭填充，1–100 = 开启）。
 
-![WITRN-RS 在 Linux 上的界面](docs/screenshots/linux-screenshot.png)
+### 数据记录与互通
+
+- **CSV 导出**（可选是否含温度列）与**导入**；导入按表头名匹配列，兼容不含信号线列的旧文件。
+- **PD 捕获导出 / 导入**，使用带版本号的 JSON 信封，旧版本格式仍可读取。
+- 采样率 0.1 – 10 次/秒可选（后端接受 10 – 60000 ms）。
+
+### 界面
+
+- 多 Tab 工作区（监控 / PD 分析 / 设置），设备连接常驻标题栏，任何页面都能快速连断。
+- **深色 / 浅色 / 跟随系统**三种主题，设计令牌对齐 Fluent UI webDark / webLight。
+- **界面缩放 50 – 200%**，系统缩放偏大导致窗口拥挤时可整体调低。
+- 自定义无边框标题栏；Windows 上保留 Win11 贴靠布局浮窗。
 
 ## 📱 支持的设备
 
-目前支持以下 WITRN 设备：
+| 型号 | VID | PID |
+| --- | --- | --- |
+| WITRN K2 | `0x0716` | `0x5060` |
+| WITRN U3 | `0x0716` | `0x5063`、`0x5044` |
+| WITRN C5 | `0x0716` | `0x5053`、`0x5064` |
 
-*   **WITRN K2** (VID: 0x0716, PID: 0x5060)
-*   **WITRN U3** (VID: 0x0716, PID: 0x5063 / 0x5044)
-*   **WITRN C5** (VID: 0x0716, PID: 0x5053 / 0x5064)
+设备列表按厂商 VID `0x0716` 枚举，因此**不在上表中的型号或固件变体同样会出现在下拉框里**（显示为「未知 WITRN 设备 (0716:XXXX)」）。它们能否正常读数取决于固件是否使用相同的报告布局。
 
-设备列表按厂商 VID (0x0716) 枚举，因此不在上表中的型号或固件变体同样会出现在下拉框里（显示为「未知 WITRN 设备」）。它们能否正常读数取决于固件是否使用相同的报告布局。
+同一物理设备存在多个 HID 接口时，后端优先选择厂商自定义 Usage Page。设备名会附带 USB 拓扑端口，如 `WITRN K2 (USB 4-4)`。
 
-## 🛠️ 开发指南
+## 📦 下载与安装
 
-### 环境要求
+**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/WITRN-RS/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。仪表走标准 USB HID，**不需要安装驱动**。
 
-*   [Rust](https://www.rust-lang.org/tools/install) (推荐最新稳定版)
-*   Tauri CLI v2（建议：`cargo install tauri-cli --version ^2`）
-*   操作系统支持的 HID API
+**Linux** —— 不提供预构建包，但可以自行编译。请参考 [开发与构建 · Linux 自行编译](docs/DEVELOPMENT.md#-linux-自行编译)，其中包含必需的系统依赖和访问 `hidraw` 所需的 udev 规则（缺少规则会导致扫不到任何设备）。
 
-Node.js 20+ 仅在运行 JavaScript 测试、类型检查或格式检查时需要，不参与应用运行或 Tauri 构建。
+## 🚀 快速上手
 
-前端质量工具版本由 `package-lock.json` 锁定：Biome 2.4.4 负责 JavaScript、JSON、CSS 和 HTML 的 lint、格式检查及导入整理；TypeScript 负责带 `// @ts-check` 的 JavaScript 类型检查。`npm run lint` 会将警告视为失败，`npm run format` 可应用 Biome 的安全格式化。`.editorconfig`、Biome 和 `.gitattributes` 共同约束文本文件使用 LF。
+1. **连接设备** —— 插入仪表，点击标题栏设备下拉框旁的刷新按钮扫描，选中目标设备后点击 `连接`。
+2. **开始记录** —— 在「监控」Tab 点击 `开始记录`。读数卡与图表立即开始更新，累计能量与容量同步积分（暂停期间不计入）。
+3. **抓 PD 报文** —— 切到「PD 分析」Tab。默认开启 `跟随记录`，与主监控同步启停；**插拔充电器时的握手过程信息量最大**。
+4. **导出数据** —— 回到「监控」Tab，`导出CSV` 选择 `带温度` 或 `不带温度`；PD 报文在「PD 分析」Tab 用 `导出` 单独保存为 JSON。
 
-### 快速开始
+完整的界面说明、每一项设置的含义与文件格式，见 [使用指南](docs/USAGE.md)。
 
-1. **克隆仓库**：
-   ```bash
-   git clone https://github.com/KHWLGH/WITRN-RS.git
-   cd WITRN-RS
-   ```
+## 📚 文档
 
-2. **安装构建工具**：
-   ```bash
-   cargo install tauri-cli --version ^2
-   ```
+| 文档 | 内容 |
+| --- | --- |
+| [使用指南](docs/USAGE.md) | 界面逐项说明、全部设置项、CSV 与 PD 捕获文件格式、常见问题 |
+| [技术架构](docs/ARCHITECTURE.md) | 线程模型、Tauri 命令、数据流、HID 报文布局、测试与安全边界 |
+| [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux 自行编译、参与贡献 |
+| [外部温度服务](docs/TEMPERATURE.md) | TCP 温度源协议、应用内配置、Python 示例服务器 |
+| [更新日志](CHANGELOG.md) | 完整版本历史 |
 
-3. **运行开发环境**：
-   ```bash
-   cargo tauri dev
-   ```
+## 🙏 致谢与相关项目
 
-4. **构建生产版本**：
-   ```bash
-   cargo tauri build
-   ```
+- 感谢 WITRN 提供的 USB-PD 采集硬件支持。
+- 感谢 [JohnScotttt](https://github.com/JohnScotttt) 的 HID 实现。
+- 感谢所有开源项目贡献者。
 
-5. **运行与 CI 相同的质量检查（可选）**：
-   ```bash
-   npm ci
-   npm test
-   npm run typecheck
-   npm run lint
-   cargo fmt --check --manifest-path src-tauri/Cargo.toml
-   cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-   cargo test --manifest-path src-tauri/Cargo.toml
-   ```
+### 与 Python 原版的差异
 
-仓库中的 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 会在 push 和 Pull Request 时执行上述检查。`npm ci` 使用已提交的 `package-lock.json` 安装固定版本的前端质量工具。
+本仓库的两个协议 crate 是 JohnScotttt 的 Python 实现的 Rust 移植，主要差异：
 
-### 构建说明
-
-- 首次运行可能需要较长时间下载依赖
-- Windows 用户可能需要安装 Microsoft C++ Build Tools
-- Linux 用户可能需要安装相关的 WebView 和 HID 库
-
-## 🌡️ 温度服务功能
-
-### 概述
-应用支持通过网络连接外部温度传感器，实现温度数据的实时监控和记录。
-
-### 使用方法
-
-1. **启动温度服务器**：
-   ```bash
-   python temperature-example/network_server.py
-   ```
-
-2. **在应用中连接**：
-   - 设置 IP 地址（默认：127.0.0.1）
-   - 设置端口号（默认：1573）
-   - 点击"连接"按钮
-
-3. **数据格式**：
-    - 服务器通过 TCP 发送纯数字温度值
-    - 每行一个数值，以换行符结束
-    - 发送间隔可以超过 10 秒，服务会在空闲期间保持连接
-    - 示例：`25.125\n`
-
-### 示例文件
-- [`temperature-example/network_server.py`](temperature-example/network_server.py) - 温度服务器示例（发送随机温度数据）
-- [`temperature-example/network_client.py`](temperature-example/network_client.py) - 温度客户端示例（测试用）
-
-## 🏗️ 项目架构
-
-### 后端 (Rust)
-- **位置**：`src-tauri/src/`
-- **核心文件**：
-  - `lib.rs` - 主要应用逻辑、状态管理、Tauri 命令
-  - `main.rs` - 应用入口点
-- **功能模块**：
-  - HID 设备通信 (使用 `hidapi` 库)
-  - 温度服务网络连接
-  - 后台任务生命周期管理（每个 HID/温度连接持有独立停止标志与 `JoinHandle`，重连和退出前等待旧任务结束）
-  - HID 读线程与 IPC 发射线程分离：读循环只解码并写入通道，发射线程按约 8ms 一帧合并 `pd-data-batch`、原样转发已节流的 `device-data`
-  - 退出流程（`shutdown` 命令：停止后台任务后 `destroy` 主窗口）
-  - 线程安全的共享配置与设备信息管理（采样率为 `AtomicU64`，其余共享状态 `Arc<Mutex<...>>`）
-  - 事件系统（向前端发送实时数据）
-
-### 前端 (Vanilla JavaScript)
-- **位置**：`src/`
-- **界面外壳**：多 Tab 工作区（监控 / PD 分析 / 设置·设备），Fluent 2 风格暗色主题，自定义标题栏（Windows 经 `tauri-plugin-decorum` 保留贴靠布局，Linux 自绘窗口按钮与边缘调整热区）
-- **模块结构**（ES Modules，启用 `// @ts-check` 类型检查）：
-  - `app.js` - 应用入口、Tauri API 导入、窗口关闭、UI 事件绑定、外壳装配
-  - `shell.js` - 视图注册表（多 Tab 工作区切换、活动视图持久化）
-  - `state.js` - 共享应用状态与类型定义
-  - `theme.js` - 主题桥（把 CSS 设计令牌暴露给 uPlot 等 canvas 侧消费者）
-  - `chart.js` / `chart-buckets.js` - uPlot 图表初始化、渲染调度、可见窗口像素桶、tooltip/图例交互
-  - `data.js` - 数据采集、统计计算、录制逻辑
-  - `measurement.js` - 相对时间解析、能量/容量积分、导出行构造（不依赖 DOM 与 Tauri 的纯函数，供单元测试直接调用）
-  - `pd-model.js` - PD 报文摘要提取、环形缓冲、过滤（纯函数，供单元测试直接调用）
-  - `device.js` - HID 设备连接管理
-  - `csv.js` - CSV 导入/导出
-  - `settings.js` - 设置加载/保存（防抖持久化）
-  - `temperature.js` - 温度服务网络连接
-  - `dropdown.js` - 自定义下拉组件（WebKitGTK 原生弹层不可主题化的替代方案）
-  - `utils.js` - 通用工具函数
-  - `ui/` - 界面原语：`dialog.js`（应用内确认/消息框）、`toast.js`（非阻塞通知）、`menu.js`（菜单）、`flyout.js`（浮出面板）、`tabbar.js`（Tab 条）、`windowcontrols.js`（窗口控制）
-  - `views/` - 工作区视图：`pd.js`（PD 协议分析）、`device.js`（设备身份）、`settings-view.js`（设置页）
-  - `global.d.ts` - Tauri 全局 API 类型声明
-- **其他文件**：
-  - `index.html` - 应用界面结构
-  - `styles/` - 设计令牌（`tokens.css`）、全局配方（`base.css`）、弹层原语（`components.css`）、外壳布局（`app.css`）、视图样式（`views.css`）
-  - `styles.css` - 组件皮肤（下拉/输入框/读数卡片/图表容器/时间线）
-- **前端运行时依赖**（均已 vendor 到 `src/vendor/`，本地运行无网络依赖）：
-  - uPlot - 图表绘制（轻量高性能，替代原 Chart.js）
-  - Tauri Plugin Store - 设置持久化
-- **开发质量工具**：Biome 2.4.4、TypeScript 5.x（仅由 `npm ci` 安装，用于质量检查）
-
-### 测试 (`test/`)
-
-前端测试使用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑：
-
-- `measurement.test.js` - 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分、导出行构造
-- `recording.test.js` - 录制会话边界重置积分基线、导入后续录从最后一个相对时间点继续
-- `pd-model.test.js` - PD 报文摘要提取（SOP/角色/速览）、GoodCRC 过滤、环形缓冲回绕
-- `ids.test.js` - HTML↔JS 的 DOM id 契约（JS 引用的每个 id 在 index.html 恰好出现一次）
-
-Rust 侧测试以 `#[cfg(test)]` 内联在 `src-tauri/src/lib.rs`，覆盖 HID 帧解析校验与多接口筛选。硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
-
-### 数据流
-1. 前端扫描 WITRN 厂商 VID 下的设备；同一物理设备有多个 HID 接口时，后端优先选择厂商自定义 Usage Page
-2. 前端调用 `connect_device_by_path` 连接选中的接口
-3. 后端启动该连接独享的数据读取任务，解析并校验 HID 报告
-4. 合法数据通过事件系统推送到前端 (`device-data` 事件)
-5. 前端更新 UI、uPlot 图表、统计及录制区间内的 Wh/mAh 积分
-
-### HID 协议规范
-- **报告大小**：64 字节
-- **协议头**：第 0 字节必须为 `0xFF`
-- **数据字段**（小端序）：
-   - 电压：字节 46-49 (`f32`)
-   - 电流：字节 50-53 (`f32`)
-   - 温度：字节 42-45 (`f32`)
-   - D+/D- 电压：字节 30-33 / 34-37 (`f32`)
-
-解析器会拒绝长度或帧头错误的报告，以及电压、电流明显超出物理范围的报告；温度越界只按「无温度」处理，不会因此丢弃整帧（该偏移只在部分型号上验证过）。目前未实现协议校验和验证；新增设备型号或固件前应先用实机样本确认字节布局与量程。
-
-### 安全边界
-
-- Tauri WebView 启用了基础内容安全策略 (CSP)
-- 文件系统能力只保留 CSV 导出所需的文本文件写入，不授予主目录递归写权限
-- 前端运行依赖均保存在 `src/vendor/`，应用运行时不从 CDN 加载脚本或样式
-
-
-## 🚀 使用说明
-
-### 基本操作
-1. **连接设备**：
-   - 插入 WITRN 设备到 USB 端口
-   - 点击设备选择下拉框旁的刷新按钮扫描设备
-   - 选择目标设备后点击"连接"
-
-2. **数据监控**：
-   - 连接成功后可以开始实时数据采集
-   - 查看实时数值卡片显示的当前数据
-   - 观察图表中的历史数据趋势
-
-3. **设置调整**：
-   - 调节采样率以控制数据更新频率
-   - 选择要显示的数据类型（电压、电流、功率等）
-   - 在“配置”卡调整图表纵向余量和记录电流方向
-   - 配置温度服务连接参数
-
-### 数据导出
-- 支持 CSV 格式导出历史数据
-- 可选择导出完整数据或排除温度数据
-- 导出文件包含时间戳和所有采集的参数
-
-## 📋 常见问题
-
-### 设备连接问题
-- **设备未被识别**：确保设备驱动正确安装，尝试重新插拔
-- **连接失败**：检查设备是否被其他程序占用，重启应用程序
-- **数据显示异常**：确认设备型号是否在支持列表中
-
-### 温度服务问题
-- **连接超时**：检查 IP 地址和端口号是否正确
-- **数据格式错误**：确保温度服务器发送的是纯数字格式
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 开启 Pull Request
+- **`crates/witrn-hid`** —— HID 设备封装。移植后帧解析带范围校验（拒绝越界的电压 / 电流帧），并额外解出 D+ / D− / CC1 / CC2 信号线电压。
+- **`crates/usbpd-parser`** —— USB-PD 报文解码。以强类型枚举重写了报文头、PDO / RDO / VDO 与扩展报文，可选 `vendor-ids` feature 内嵌 USB-IF 厂商表。
+- 两个 crate 都是**独立的库**（`publish = false`，仅在本工作区内使用），不依赖 Tauri，可被其他 Rust 项目直接引用。
 
 ## 📄 许可证
 
-本项目采用 GNU 通用公共许可证 第3版 (GPLv3)。详情见仓库根目录的 [`LICENSE`](LICENSE) 文件。
+本项目采用分层许可：
 
-## 📝 更新日志
+| 组件 | 许可证 |
+| --- | --- |
+| 应用本体（`src-tauri`、`src`） | [GPL-3.0-only](LICENSE) |
+| 协议库 `crates/usbpd-parser`、`crates/witrn-hid` | LGPL-3.0-or-later |
 
-查看完整的版本历史和更新记录，请访问 [`CHANGELOG.md`](CHANGELOG.md)。
+两个协议 crate 采用 LGPL 是为了与其 Python 原版的许可保持兼容，便于被其他项目复用。仓库根目录的 [`LICENSE`](LICENSE) 是 GPLv3 全文；LGPL-3.0 的完整文本请参阅 [GNU 官方页面](https://www.gnu.org/licenses/lgpl-3.0)。
 
----
+第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0) · Maple Mono NF CN (OFL-1.1)
 
 ## 🔗 相关链接
 
+- [提交 Issue 或建议](https://github.com/KHWLGH/WITRN-RS/issues)
+- [维简 (WITRN) 官方网站](https://www.witrn.com/)
 - [Tauri 官方文档](https://tauri.app/)
-- [维简官方网站](https://www.witrn.com/)
 - [Rust 官方网站](https://www.rust-lang.org/)
-
-**如有问题或建议，欢迎提交 Issue：https://github.com/KHWLGH/WITRN-RS/issues**

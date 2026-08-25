@@ -27,6 +27,20 @@ jobs:
       - name: Test JavaScript pure logic
         run: npm test
 
+      # 三处版本号的一致性由 test/version-sync.test.js 断言（上一步）。
+      # 这里补上另一半：打 tag 时确认 tag 名和清单里的版本号对得上。
+      - name: Verify tag matches manifest version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          manifest=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与清单版本 ${manifest} 不一致"
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} 与清单版本 ${manifest} 一致"
+
       - name: Type check JavaScript
         run: npm run typecheck
 
@@ -37,14 +51,16 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Check Rust formatting
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+        run: cargo fmt --check --all
 
-      - name: Lint Rust backend
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test Rust backend
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Test Rust workspace
+        run: cargo test --workspace
 
   backend-other-platforms:
     strategy:
@@ -60,10 +76,48 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Test Rust backend
-        if: matrix.run_tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Check Rust backend
+      - name: Test Rust workspace
+        if: matrix.run_tests
+        run: cargo test --workspace
+
+      - name: Check Rust workspace
         if: ${{ !matrix.run_tests }}
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+        run: cargo check --workspace --all-targets
+
+  crate-features:
+    name: Crate feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 只有 witrn-hid 需要 HID 依赖；两个 crate 都不依赖 WebView。
+      - name: Install HID dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 默认特性组合已由 validate 覆盖，这里只跑非默认组合：
+      # 漏标的 #[cfg(feature = ...)] 只在关掉某个特性时才会暴露。
+      - name: Lint and test non-default feature combinations
+        run: |
+          set -euo pipefail
+          combos=(
+            "-p usbpd-parser --no-default-features"
+            "-p usbpd-parser --no-default-features --features serde"
+            "-p usbpd-parser --no-default-features --features vendor-ids"
+            "-p usbpd-parser --all-features"
+            "-p witrn-hid --no-default-features"
+            "-p witrn-hid --all-features"
+          )
+          for combo in "${combos[@]}"; do
+            echo "::group::cargo $combo"
+            cargo clippy $combo --all-targets -- -D warnings
+            cargo test $combo
+            echo "::endgroup::"
+          done
