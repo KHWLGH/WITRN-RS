@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 状态栏「设备: 型号」一项（与标题栏设备下拉重复）
 - Ribbon 时代死代码：旧 `.status-bar` / `.auto-pause-card` / 导出菜单内联实现及其样式、未引用的模板资产（`tauri.svg` / `javascript.svg`）；`index.html` 不再含任何内联 `style=""`（图例/tooltip 生成代码同步改为 CSSOM 赋值，为后续收紧 CSP 铺路）
 
-### Security（待 Linux 冒烟验证后收紧）
+### Security
 - capability 计划从 `dialog:default` 收窄为 `dialog:allow-open` + `dialog:allow-save`；CSP 计划去除 `script-src`/`style-src` 的 `'unsafe-inline'`。两项均需先在 WebKitGTK 上冒烟验证，本次未合入
 
 ## [0.1.5] - 2026-08-10
