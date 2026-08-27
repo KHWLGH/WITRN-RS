@@ -143,7 +143,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 
 两个协议 crate 采用 LGPL 是为了与其 Python 原版的许可保持兼容，便于被其他项目复用。仓库根目录的 [`LICENSE`](LICENSE) 是 GPLv3 全文；LGPL-3.0 的完整文本请参阅 [GNU 官方页面](https://www.gnu.org/licenses/lgpl-3.0)。
 
-第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0) · Maple Mono NF CN (OFL-1.1)
+第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0)
 
 ## 🔗 相关链接
 

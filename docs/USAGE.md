@@ -204,7 +204,7 @@ Position:7 PPS:8.0V,3.45A
 
 ### 关于
 
-`版本` / `许可证` / `仓库` 三行，以及第三方组件声明：uPlot (MIT) · Codicons (CC-BY-4.0) · Maple Mono NF CN (OFL-1.1)。
+`版本` / `许可证` / `仓库` 三行，以及第三方组件声明：uPlot (MIT) · Codicons (CC-BY-4.0)。
 
 ## 文件格式
 

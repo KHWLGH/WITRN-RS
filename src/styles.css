@@ -3,13 +3,6 @@
  * 图表容器 / 时间线滑块 / 状态指示点。
  * 设计令牌见 styles/tokens.css；外壳布局见 styles/app.css；弹层原语见 styles/components.css。
  */
-@font-face {
-  font-family: "Maple Mono NF CN";
-  src: url("assets/fonts/MapleMono-NF-CN-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
 * {
   margin: 0;
   padding: 0;

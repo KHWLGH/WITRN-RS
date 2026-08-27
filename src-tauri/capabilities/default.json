@@ -17,7 +17,8 @@
     "core:window:allow-toggle-maximize",
     "core:webview:allow-set-webview-zoom",
     "decorum:allow-show-snap-overlay",
-    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
     "fs:default",
     "fs:allow-write-text-file",
     "store:default"

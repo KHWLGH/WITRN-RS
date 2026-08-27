@@ -232,11 +232,15 @@
   --ease-accel: cubic-bezier(0.7, 0, 1, 0.5); /* 出场 */
   --ease-standard: cubic-bezier(0.33, 0, 0.67, 1);
 
-  /* 字体 */
+  /* 字体：:root 为跨平台默认栈；[data-os] 覆盖为该平台原生等宽英数 + 中文黑体。
+     按字符回退，读数里的 12.34 走等宽、旁边的「电压」走中文。 */
   --font-ui:
-    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, "Noto Sans CJK SC",
-    "Noto Sans SC", sans-serif;
-  --font-mono: "Maple Mono NF CN", "Cascadia Mono", "Consolas", monospace;
+    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, "Microsoft YaHei UI",
+    "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
+    sans-serif;
+  --font-mono:
+    ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, "Noto Sans Mono", "DejaVu Sans Mono",
+    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", monospace;
 
   /* 字阶（仪表类高密度 UI：正文基准 13px，刻意小于 Fluent 默认 14px） */
   --type-caption: 400 12px / 16px var(--font-ui);
@@ -313,6 +317,23 @@
   --pd-header-table-fg: var(--blue-tint40);
   --pd-object-table-bg: var(--green-shade30);
   --pd-object-table-fg: var(--green-tint40);
+}
+
+:root[data-os="windows"] {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+}
+
+:root[data-os="macos"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, "PingFang SC", "Hiragino Sans GB", monospace;
+}
+
+:root[data-os="linux"] {
+  --font-ui: system-ui, "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif;
+  --font-mono:
+    ui-monospace, "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", "Noto Sans CJK SC",
+    "Noto Sans SC", "Source Han Sans SC", monospace;
 }
 
 /* 亮色：只重赋语义层。通道 / PD 徽章改走 Foreground2 / Background2 浅色侧。 */

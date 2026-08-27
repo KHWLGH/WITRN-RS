@@ -1,6 +1,7 @@
 /**
- * 首屏主题引导：在样式表之前同步写入 <html data-theme>，避免 LazyStore
- * 异步读完之前闪暗色。键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致。
+ * 首屏引导：在样式表之前同步写入 <html data-theme> 与 <html data-os>。
+ * data-theme 避免 LazyStore 异步读完之前闪暗色（键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致）。
+ * data-os 让 tokens.css 在首帧就选对平台原生字体。
  */
 (() => {
   let pref = 'dark';
@@ -18,4 +19,10 @@
   }
   const resolved = pref === 'light' || (pref === 'system' && !systemDark) ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', resolved);
+
+  const ua = navigator.userAgent;
+  document.documentElement.setAttribute(
+    'data-os',
+    ua.includes('Windows') ? 'windows' : ua.includes('Mac OS') ? 'macos' : 'linux',
+  );
 })();

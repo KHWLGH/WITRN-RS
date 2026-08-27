@@ -51,16 +51,13 @@ class Dropdown {
     /** @type {ReturnType<typeof setTimeout>|undefined} */
     this.typeTimer = undefined;
 
-    // 包装层继承 select 的行内尺寸样式，保证在父级 flex/grid 里占位不变。
     this.wrapper = document.createElement('div');
     this.wrapper.className = 'cs';
-    this.wrapper.style.cssText = select.style.cssText;
 
     this.button = document.createElement('button');
     this.button.type = 'button';
     // 沿用 select 原有的外观类（.ribbon-select 等），关闭态视觉完全一致。
     this.button.className = `cs-button ${select.className}`.trim();
-    this.button.style.cssText = select.style.cssText;
     this.button.id = `${this.id}-button`;
     this.button.setAttribute('role', 'combobox');
     this.button.setAttribute('aria-haspopup', 'listbox');
@@ -83,7 +80,6 @@ class Dropdown {
     select.parentNode?.insertBefore(this.wrapper, select);
     this.wrapper.append(select, this.button);
     select.classList.add('cs-native');
-    select.style.cssText = '';
     select.setAttribute('aria-hidden', 'true');
     select.tabIndex = -1;
 

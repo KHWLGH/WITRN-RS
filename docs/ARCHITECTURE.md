@@ -194,7 +194,7 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 
 ## 测试
 
-### 前端 —— `test/`，16 个文件 / 95 个用例
+### 前端 —— `test/`，17 个文件 / 97 个用例
 
 用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑，以及跨文件的契约断言：
 
@@ -202,13 +202,15 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 chart-buckets  chart-columns  ids       ingest      measurement
 pd-batch       pd-capture-file          pd-capture-state
 pd-clear-linkage         pd-model       pd-recording
-recording      theme      ui-scale      utils        version-sync
+recording      security-csp   theme     ui-scale    utils
+version-sync
 ```
 
-其中有三个是**契约测试** —— 它们不测某个函数的行为，而是断言分散在多个文件里的事实必须彼此一致：
+其中有四个是**契约测试** —— 它们不测某个函数的行为，而是断言分散在多个文件里的事实必须彼此一致：
 
 - **`ids.test.js`** —— DOM 契约。从 JS 里提取每一个 `getElementById` 的字面量，断言该 id 在 `index.html` 中**恰好出现一次**。布局重构时丢掉某个控件会立刻被它抓住。
 - **`version-sync.test.js`** —— 版本契约。断言 `package.json`、`Cargo.toml` 的 `[workspace.package]`、`src-tauri/tauri.conf.json` 三处版本号一致，格式为 `X.Y.Z`，且三个成员 crate 仍是 `version.workspace = true`（否则会冒出第四、第五个真相来源）。
+- **`security-csp.test.js`** —— 安全契约。断言 dialog 能力只有 `allow-open` / `allow-save`，CSP 的 `script-src` / `style-src` 不含 `'unsafe-inline'`。
 - **`pd-capture-file.test.js`** —— PD 捕获文件的版本信封与 v1 兼容路径。
 
 其余是纯逻辑测试，例如：
@@ -232,9 +234,8 @@ CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），三个包
 
 ## 安全边界
 
-- **CSP** —— WebView 启用内容安全策略，`img-src` 只允许 `self`、`asset:` 与 `blob:`，`connect-src` 只允许 `self` 与 IPC。`script-src` / `style-src` 目前仍需 `'unsafe-inline'`（待移除，见下）。
-- **文件系统能力最小化** —— `capabilities/default.json` 只授予 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。文件选择器保留 Tauri 原生实现，因为 v2 通过对话框选择才会在运行时授予所选路径的 fs scope；换成应用内实现会直接让 `writeTextFile` / `readTextFile` 失去权限。
+- **CSP** —— WebView 启用内容安全策略，`img-src` 只允许 `self`、`asset:` 与 `blob:`，`connect-src` 只允许 `self` 与 IPC。`script-src` / `style-src` 均为 `'self'`，不含 `'unsafe-inline'`（Tauri 编译期会给本地脚本补 hash、给样式补 nonce）。
+- **对话框能力最小化** —— `capabilities/default.json` 只授予 `dialog:allow-open` 与 `dialog:allow-save`。应用内确认框走 `<dialog>`，不授权原生 message/ask。
+- **文件系统能力最小化** —— 只授予 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。文件选择器保留 Tauri 原生实现，因为 v2 通过对话框选择才会在运行时授予所选路径的 fs scope；换成应用内实现会直接让 `writeTextFile` / `readTextFile` 失去权限。
 - **窗口能力** —— 因为使用无边框自定义标题栏，需要一组 `core:window:allow-*` 权限（拖动、缩放、最大化等）。
 - **无网络依赖** —— 前端运行依赖全部 vendor 到 `src/vendor/`，运行时不从 CDN 加载脚本或样式。唯一的网络行为是用户主动配置的外部温度服务（出站 TCP）。
-
-两项已写好但**尚未合入**的收紧，都在等 Linux / WebKitGTK 冒烟验证：把 `dialog:default` 缩小到 `dialog:allow-open` + `dialog:allow-save`，以及从 `script-src` / `style-src` 移除 `'unsafe-inline'`（`index.html` 里的内联 `style=""` 已在 0.2.0 全部清除，为此铺路）。

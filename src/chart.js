@@ -37,8 +37,9 @@ const UNITS = [' V', ' A', ' W', ' °C', ' V', ' V', ' V', ' V'];
 const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
 const CHART_FONT_FALLBACK =
-  "'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
-const MONO_FONT_FALLBACK = "'Maple Mono NF CN', 'Cascadia Mono', 'Consolas', monospace";
+  "'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', sans-serif";
+const MONO_FONT_FALLBACK =
+  "ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, 'Noto Sans Mono', 'DejaVu Sans Mono', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', monospace";
 let CHART_FONT = CHART_FONT_FALLBACK;
 let MONO_FONT = MONO_FONT_FALLBACK;
 
@@ -1380,7 +1381,7 @@ export function initChart() {
 
   initNavigatorChart();
 
-  // 本地字体较大，首次 canvas 绘制可能发生在字体下载完成前；完成后重绘一次。
+  // Canvas 不解析 CSS var()；与令牌对齐后再 load 一次，避免首帧用了回退栈。系统字体通常立刻 resolve。
   if (document.fonts?.load) {
     Promise.all([document.fonts.load(`12px ${CHART_FONT}`), document.fonts.load(`12px ${MONO_FONT}`)])
       .then(() => {
