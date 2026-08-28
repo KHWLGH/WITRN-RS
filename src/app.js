@@ -13,9 +13,11 @@ import {
   setSeriesVisible,
   updateCharts,
 } from './chart.js';
+import { panPermilleWindow } from './chart-window.js';
 import { exportCSV, importCSV } from './csv.js';
 import {
   addDataPoint,
+  adoptWindowFromPermille,
   clearAndResetStats,
   refreshRecordButton,
   scheduleStatsUpdate,
@@ -218,7 +220,6 @@ function setupControls() {
    * @param {boolean} [preview=false] 手柄拖动中：只改 X 窗，不刷范围统计、不强制重建显示桶
    */
   function applyRangeValues(nextStart, nextEnd, leader, preview = false) {
-    if (state.isRecording) return;
     let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
     let end = clamp(Number.parseInt(String(nextEnd), 10), 0, 1000);
 
@@ -231,6 +232,7 @@ function setupControls() {
     rangeEnd.value = String(end);
     state.settings.rangeStart = start;
     state.settings.rangeEnd = end;
+    adoptWindowFromPermille();
 
     updateSliderFill();
     updateChartRange();
@@ -282,7 +284,6 @@ function setupControls() {
     };
 
     handle.addEventListener('pointerdown', (event) => {
-      if (state.isRecording) return;
       event.preventDefault();
       handle.focus();
       handle.setPointerCapture(event.pointerId);
@@ -294,7 +295,6 @@ function setupControls() {
     });
 
     handle.addEventListener('pointermove', (event) => {
-      if (state.isRecording) return;
       if (!handle.hasPointerCapture(event.pointerId)) return;
       const newValue = valueFromPointerEvent(event);
       if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
@@ -305,7 +305,6 @@ function setupControls() {
     handle.addEventListener('lostpointercapture', endHandleDrag);
 
     handle.addEventListener('keydown', (event) => {
-      if (state.isRecording) return;
       const key = event.key;
       const isLeft = key === 'ArrowLeft';
       const isRight = key === 'ArrowRight';
@@ -333,9 +332,52 @@ function setupControls() {
   setupHandleInteractions(handleStart, 'start');
   setupHandleInteractions(handleEnd, 'end');
 
+  const sliderFill = /** @type {HTMLElement|null} */ (document.getElementById('slider-fill'));
+  if (sliderFill && sliderContainer) {
+    let panActive = false;
+    let panOriginX = 0;
+    let panOriginStart = 0;
+    let panOriginEnd = 0;
+
+    const endFillPan = () => {
+      if (!panActive) return;
+      panActive = false;
+      sliderFill.classList.remove('is-panning');
+      setRangeDragging(false);
+      if (state.settings.statsRange) {
+        updateStatsDisplay();
+        updateEnergyDisplay();
+      }
+      updateCharts();
+    };
+
+    sliderFill.addEventListener('pointerdown', (event) => {
+      if (state.settings.rangeEnd - state.settings.rangeStart >= 1000) return;
+      event.preventDefault();
+      sliderFill.setPointerCapture(event.pointerId);
+      panActive = true;
+      panOriginX = event.clientX;
+      panOriginStart = Number.parseInt(rangeStart.value, 10);
+      panOriginEnd = Number.parseInt(rangeEnd.value, 10);
+      sliderFill.classList.add('is-panning');
+      setRangeDragging(true);
+    });
+
+    sliderFill.addEventListener('pointermove', (event) => {
+      if (!panActive || !sliderFill.hasPointerCapture(event.pointerId)) return;
+      const width = sliderContainer.getBoundingClientRect().width;
+      const delta = width > 0 ? ((event.clientX - panOriginX) / width) * 1000 : 0;
+      const next = panPermilleWindow(panOriginStart, panOriginEnd, delta);
+      applyRangeValues(next.start, next.end, 'start', true);
+    });
+
+    sliderFill.addEventListener('pointerup', endFillPan);
+    sliderFill.addEventListener('lostpointercapture', endFillPan);
+  }
+
   updateSliderFill();
 
-  state.__setRangeControlsEnabled?.(!state.isRecording);
+  state.__setRangeControlsEnabled?.(true);
 
   // Sample rate
   const sampleRateEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));

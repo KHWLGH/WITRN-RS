@@ -11,7 +11,7 @@ import {
 
 test('bucketCap is at least 64 and scales with width', () => {
   assert.equal(bucketCap(10), BUCKET_MIN);
-  assert.equal(bucketCap(400), 800);
+  assert.equal(bucketCap(400), 400);
 });
 
 test('nearestIndex finds the closest sample', () => {

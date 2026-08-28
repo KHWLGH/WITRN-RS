@@ -244,6 +244,11 @@ export const state = {
   /** @type {((enabled: boolean) => void)|null} */
   __setRangeControlsEnabled: null,
   /**
+   * 滚轮缩放：由 data.js 注入，避免 chart.js ↔ data.js 循环 import。
+   * @type {((pivotSec: number, factor: number) => void)|null}
+   */
+  __applyChartXZoom: null,
+  /**
    * 由 app.js 注入的两个跨视图动作，供 views/pd.js 在「跟随记录」联动时调用。
    * 用注入而非直接 import：pd.js → data.js 会把 chart.js / temperature.js
    * （顶层解构 window.__TAURI__）拖进 test/pd-*.test.js 的最小 stub 环境。
@@ -256,6 +261,8 @@ export const state = {
   __markPdDisconnect: null,
   /** @type {boolean} 读数栏分栏拖动中：图表的 ResizeObserver 跳过，松手再定尺 */
   __layoutResizing: false,
+  /** @type {boolean} 范围手柄或滚轮缩放跟手中：录制 tick 不改写选区 */
+  __rangeDragging: false,
 
   // ── Raw data storage（chartData / chartSeries 同一份列）──
   /** @type {ChartSeriesColumns} */
@@ -274,6 +281,13 @@ export const state = {
 
   /** @type {Energy} */
   energy: { wh: 0, mah: 0, lastX: null },
+
+  /**
+   * 主图 X 窗会话态（不持久化）。
+   * full = 全历史；follow = 右沿贴最新、保 duration；frozen = 定住秒值。
+   * @type {{ mode: 'full'|'follow'|'frozen', duration: number, min: number, max: number }}
+   */
+  chartWindow: { mode: 'full', duration: 0, min: 0, max: 0 },
 
   // ── Recording ──
   /** @type {boolean} */

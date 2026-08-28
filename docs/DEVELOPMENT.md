@@ -87,7 +87,7 @@ cargo tauri build
 
 ```bash
 npm ci
-npm test                    # node --test，17 个文件 / 97 个用例
+npm test                    # node --test，18 个文件 / 110 个用例
 npm run typecheck           # tsc --noEmit -p jsconfig.json
 npm run lint                # biome check --error-on-warnings .
 cargo fmt --check --all

@@ -4,6 +4,14 @@
  */
 
 import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
+import { firstIndexAfter, firstIndexAtOrAfter } from './chart-buckets.js';
+import {
+  classifyChartWindow,
+  emptyChartWindow,
+  minZoomSpan,
+  resolveChartWindow,
+  zoomTimeWindow,
+} from './chart-window.js';
 import { nextRecordingX, niceCeiling } from './measurement.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
@@ -231,6 +239,11 @@ export function addDataPoint(data) {
 
 /** 更新滑块填充条的位置和宽度。 */
 export function updateSliderFill() {
+  const startEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-start'));
+  const endEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-end'));
+  if (startEl) startEl.value = String(state.settings.rangeStart);
+  if (endEl) endEl.value = String(state.settings.rangeEnd);
+
   const start = state.settings.rangeStart / 10;
   const end = state.settings.rangeEnd / 10;
   const fill = document.getElementById('slider-fill');
@@ -238,6 +251,7 @@ export function updateSliderFill() {
     fill.style.left = `${start}%`;
     fill.style.width = `${end - start}%`;
   }
+  fill?.classList?.toggle('is-pannable', state.settings.rangeEnd - state.settings.rangeStart < 1000);
 
   const handleStart = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-start'));
   const handleEnd = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-end'));
@@ -251,30 +265,143 @@ export function updateSliderFill() {
   }
 }
 
-/** 根据滑块值更新主图表的可见范围。 */
-export function updateChartRange() {
-  const totalPoints = state.chartData.timestamps.length;
-  if (totalPoints === 0) {
-    const el1 = document.getElementById('range-start-time');
-    const el2 = document.getElementById('range-end-time');
-    const el3 = document.getElementById('range-duration');
-    if (el1) el1.textContent = '--';
-    if (el2) el2.textContent = '--';
-    if (el3) el3.textContent = '无数据';
+function sampleEdgeEps() {
+  return Math.max(state.settings.sampleRate / 1000, 0.001);
+}
+
+/** @param {number} start @param {number} end */
+function writePermille(start, end) {
+  const s = Math.max(0, Math.min(1000, start | 0));
+  const e = Math.max(s, Math.min(1000, end | 0));
+  state.settings.rangeStart = s;
+  state.settings.rangeEnd = e;
+}
+
+/**
+ * 把已判定的时间窗反推成滑块千分比（follow 右柄钉在 1000）。
+ * @param {{ mode: string, min: number, max: number }} win
+ * @param {number} n
+ * @param {Float64Array} xs
+ */
+function writePermilleFromWindow(win, n, xs) {
+  if (win.mode === 'full' || n <= 1) {
+    writePermille(0, 1000);
     return;
   }
+  const startIndex = firstIndexAtOrAfter(xs, n, win.min);
+  const startP = Math.max(0, Math.min(1000, Math.round((startIndex * 1000) / n)));
+  if (win.mode === 'follow') {
+    writePermille(startP, 1000);
+    return;
+  }
+  const endIndex = Math.max(startIndex, firstIndexAfter(xs, n, win.max) - 1);
+  const endP = Math.max(startP, Math.min(1000, Math.round(((endIndex + 1) * 1000) / n)));
+  writePermille(startP, endP);
+}
 
-  const { startIndex, endIndex } = getVisibleDataRange();
+function permilleIndices(totalPoints) {
+  let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
+  let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
+  if (endIndex >= totalPoints) endIndex = totalPoints - 1;
+  if (startIndex > endIndex) startIndex = endIndex;
+  if (startIndex < 0) startIndex = 0;
+  return { startIndex, endIndex };
+}
 
-  // 直接取序列的 x 坐标（与图表同一坐标系）。
-  // 不能用时间戳差值换算——差值恒从 0 起，而导入的 CSV 序列可能从非零时刻开始，
-  // 错位会让窗口大于数据范围，在图表前部凭空出现空白。
-  const xs = state.chartSeries.x.buf;
-  const startSeconds = Number.isFinite(xs[startIndex]) ? xs[startIndex] : 0;
-  const endSeconds = Number.isFinite(xs[endIndex]) ? xs[endIndex] : 0;
+/** 滑块改了千分比之后，把当前选区收成时间窗会话态。 */
+export function adoptWindowFromPermille() {
+  const xs = state.chartSeries.x;
+  const n = xs.length;
+  if (n === 0) {
+    state.chartWindow = emptyChartWindow();
+    return;
+  }
+  const { startIndex, endIndex } = permilleIndices(n);
+  const min = xs.buf[startIndex];
+  const max = xs.buf[endIndex];
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    state.chartWindow = emptyChartWindow();
+    return;
+  }
+  state.chartWindow = classifyChartWindow(min, max, xs.at(0), xs.at(-1), sampleEdgeEps());
+}
 
-  // 窗口与数据齐平，不加人为留白（零跨度情况由 chart.js 的 range 函数保护）
+/**
+ * 滚轮横向缩放：绕 pivot 缩放当前时间窗，写回滑块与 xWindow。
+ * @param {number} pivotSec
+ * @param {number} factor
+ */
+export function applyChartXZoom(pivotSec, factor) {
+  const xs = state.chartSeries.x;
+  const n = xs.length;
+  if (n === 0) return;
+  const dataMin = xs.at(0);
+  const dataMax = xs.at(-1);
+  const current = resolveChartWindow(state.chartWindow, dataMin, dataMax);
+  const zoomed = zoomTimeWindow({
+    min: current.min,
+    max: current.max,
+    pivot: pivotSec,
+    factor,
+    dataMin,
+    dataMax,
+    minSpan: minZoomSpan(state.settings.sampleRate),
+  });
+  state.chartWindow = classifyChartWindow(zoomed.min, zoomed.max, dataMin, dataMax, sampleEdgeEps());
+  paintFromWindow(xs, n, dataMin, dataMax);
+  writeRangeLabels(xs);
+  scheduleChartUpdate();
+  if (state.settings.statsRange) scheduleStatsUpdate();
+}
+
+state.__applyChartXZoom = applyChartXZoom;
+
+function paintEmptyRangeLabels() {
+  const el1 = document.getElementById('range-start-time');
+  const el2 = document.getElementById('range-end-time');
+  const el3 = document.getElementById('range-duration');
+  if (el1) el1.textContent = '--';
+  if (el2) el2.textContent = '--';
+  if (el3) el3.textContent = '无数据';
+}
+
+/**
+ * @param {import('./state.js').ChartSeriesColumns['x']} xs
+ * @param {number} n
+ * @param {number} dataMin
+ * @param {number} dataMax
+ */
+function paintFromWindow(xs, n, dataMin, dataMax) {
+  const resolved = resolveChartWindow(state.chartWindow, dataMin, dataMax);
+  state.chartWindow = resolved;
+  setChartXWindow(resolved.min, resolved.max);
+  writePermilleFromWindow(resolved, n, xs.buf);
+  updateSliderFill();
+}
+
+/**
+ * @param {import('./state.js').ChartSeriesColumns['x']} xs
+ * @param {number} n
+ * @param {number} dataMin
+ * @param {number} dataMax
+ */
+function paintFromPermille(xs, n, dataMin, dataMax) {
+  const { startIndex, endIndex } = permilleIndices(n);
+  const startSeconds = Number.isFinite(xs.buf[startIndex]) ? xs.buf[startIndex] : dataMin;
+  const endSeconds = Number.isFinite(xs.buf[endIndex]) ? xs.buf[endIndex] : dataMax;
   setChartXWindow(startSeconds, endSeconds);
+  state.chartWindow = classifyChartWindow(startSeconds, endSeconds, dataMin, dataMax, sampleEdgeEps());
+  if (state.chartWindow.mode !== 'full') {
+    writePermilleFromWindow(state.chartWindow, n, xs.buf);
+    updateSliderFill();
+  }
+}
+
+/** @param {import('./state.js').ChartSeriesColumns['x']} xs */
+function writeRangeLabels(xs) {
+  const { startIndex, endIndex } = getVisibleDataRange();
+  const startSeconds = Number.isFinite(xs.buf[startIndex]) ? xs.buf[startIndex] : 0;
+  const endSeconds = Number.isFinite(xs.buf[endIndex]) ? xs.buf[endIndex] : 0;
 
   const el1 = document.getElementById('range-start-time');
   const el2 = document.getElementById('range-end-time');
@@ -283,9 +410,29 @@ export function updateChartRange() {
 
   const points = endIndex - startIndex + 1;
   const durationSec = Math.max(0, endSeconds - startSeconds);
-  const durationText = formatRelativeHMS(durationSec);
   const el3 = document.getElementById('range-duration');
-  if (el3) el3.textContent = `时长: ${durationText} (${points}点)`;
+  if (el3) el3.textContent = `时长: ${formatRelativeHMS(durationSec)} (${points}点)`;
+}
+
+/** 根据滑块值 / 时间窗更新主图表的可见范围。 */
+export function updateChartRange() {
+  const xs = state.chartSeries.x;
+  const n = xs.length;
+  if (n === 0) {
+    setChartXWindow(null, null);
+    paintEmptyRangeLabels();
+    return;
+  }
+
+  const dataMin = xs.at(0);
+  const dataMax = xs.at(-1);
+  const mode = state.chartWindow?.mode ?? 'full';
+  if (!state.__rangeDragging && (mode === 'follow' || mode === 'frozen')) {
+    paintFromWindow(xs, n, dataMin, dataMax);
+  } else {
+    paintFromPermille(xs, n, dataMin, dataMax);
+  }
+  writeRangeLabels(xs);
 }
 
 // ─── Statistics ──────────────────────────────────────────────────────────────
@@ -368,14 +515,21 @@ export function getVisibleDataRange() {
   const totalPoints = state.chartData.timestamps.length;
   if (totalPoints === 0) return { startIndex: 0, endIndex: 0 };
 
-  // rangeStart/rangeEnd 已限定在 0..1000，只需处理上界取到末尾以及首尾交叉的情况。
-  let startIndex = Math.floor((totalPoints * state.settings.rangeStart) / 1000);
-  let endIndex = Math.floor((totalPoints * state.settings.rangeEnd) / 1000);
+  const mode = state.chartWindow?.mode ?? 'full';
+  if (mode === 'follow' || mode === 'frozen') {
+    const xs = state.chartSeries.x.buf;
+    const min = state.chartWindow.min;
+    const max = state.chartWindow.max;
+    let startIndex = firstIndexAtOrAfter(xs, totalPoints, min);
+    let endIndex = firstIndexAfter(xs, totalPoints, max) - 1;
+    if (endIndex >= totalPoints) endIndex = totalPoints - 1;
+    if (endIndex < 0) endIndex = 0;
+    if (startIndex > endIndex) startIndex = endIndex;
+    if (startIndex < 0) startIndex = 0;
+    return { startIndex, endIndex };
+  }
 
-  if (endIndex >= totalPoints) endIndex = totalPoints - 1;
-  if (startIndex > endIndex) startIndex = endIndex;
-
-  return { startIndex, endIndex };
+  return permilleIndices(totalPoints);
 }
 
 /**
@@ -585,7 +739,7 @@ export function scheduleRangeUi() {
   requestAnimationFrame(() => {
     __rangeUiPending = false;
     if (lastRealtime) updateRealtimeDisplay(lastRealtime);
-    updateChartRange();
+    if (!state.__rangeDragging) updateChartRange();
     updateChartEmptyState();
     updateDurationDisplay();
     const el = document.getElementById('data-count');
@@ -654,6 +808,9 @@ export function clearChart() {
   rangeStatsCache = null;
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
+  state.chartWindow = emptyChartWindow();
+  writePermille(0, 1000);
+  updateSliderFill();
   resetRealtimeCards();
   updateChartEmptyState();
   updateDurationDisplay();
@@ -707,12 +864,6 @@ export async function startRecording() {
   state.energy.lastX = null;
   state.autoPauseSettings.triggerStartTime = null;
 
-  // 录制跟最新数据走：先前缩放过的选区百分比会随着点数增长漂到错误窗口。
-  state.settings.rangeStart = 0;
-  state.settings.rangeEnd = 1000;
-  updateSliderFill();
-  updateChartRange();
-
   const el = document.getElementById('record-status');
   if (el) el.textContent = '记录中...';
 
@@ -723,7 +874,6 @@ export async function startRecording() {
   const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
   if (btnClear) btnClear.disabled = true;
 
-  state.__setRangeControlsEnabled?.(false);
   // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }

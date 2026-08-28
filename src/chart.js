@@ -11,7 +11,7 @@
  * - scheduleChartUpdate() rAF 节流刷新（流式追加数据用）
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
- * 可见窗口超过 2×绘图宽度时 setData 送增量 min/max 桶，全量仍在 chartSeries。
+ * 可见窗口超过 1×绘图宽度时 setData 送增量 min/max 桶，全量仍在 chartSeries。
  * 拖动导航条只改 X 窗（setScale）；松手后再按窗口单遍重建显示桶。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
  * - setRangeDragging()    手柄拖动期间走窗口快路径，推迟窗口级重建
@@ -20,6 +20,7 @@
  */
 
 import { bucketCap, firstIndexAfter, firstIndexAtOrAfter, nearestIndex, SeriesBuckets } from './chart-buckets.js';
+import { wheelZoomFactor } from './chart-window.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
@@ -92,7 +93,7 @@ let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, I
 /** 已扫描过最大值的数据长度（增量扫描游标）。 */
 let scannedLen = 0;
 
-/** 主图窗口级显示桶：可见窗口点数超过 2×宽度后启用，存储仍走全量列。 */
+/** 主图窗口级显示桶：可见窗口点数超过 1×宽度后启用，存储仍走全量列。 */
 const displayBuckets = new SeriesBuckets();
 /** 全历史概览桶：不随 X 窗口重置，拖动扩大窗口时作 O(宽度) 兜底。 */
 const overviewBuckets = new SeriesBuckets();
@@ -114,6 +115,8 @@ let appliedNavLen = -1;
 
 /** 上一帧绘制超过该预算则暂缓下一张图，数据照收。点数少时绘制远低于此值，行为与逐点刷新相同。 */
 const PAINT_BUDGET_MS = 10;
+/** 录制中超预算时按约 30fps 让帧，避免大画布连续掉帧。 */
+const LIVE_PAINT_GAP_MS = 33;
 let skipUntil = 0;
 /** @type {ReturnType<typeof setTimeout>|null} */
 let skipWakeTimer = null;
@@ -132,10 +135,17 @@ function monitorVisible() {
 let navBucketList = [];
 let navPpb = 1;
 let navSrcLen = 0;
-/** @type {number[]} */
+/** @type {ChartColView} */
 let navX = [];
-/** @type {number[]} */
+/** @type {ChartColView} */
 let navY = [];
+/** @type {Float64Array|null} */
+let navFlatX = null;
+/** @type {Float64Array|null} */
+let navFlatY = null;
+let navFlatCap = 0;
+let lastNavPaint = 0;
+const NAV_PAINT_MIN_MS = 100;
 
 function navMaxBuckets() {
   const host = document.getElementById('navigator-chart');
@@ -189,23 +199,38 @@ function pushNavSample(x, p) {
 }
 
 function flattenNavBuckets() {
-  navX = [];
-  navY = [];
-  for (const b of navBucketList) {
-    navX.push(b.x0, b.x1);
-    navY.push(b.min, b.max);
+  const n = navBucketList.length * 2;
+  if (n === 0) {
+    const empty = new Float64Array(0);
+    navX = empty;
+    navY = empty;
+    return;
   }
+  if (!navFlatX || !navFlatY || navFlatCap < n) {
+    navFlatCap = Math.max(n, navFlatCap * 2 || 64);
+    navFlatX = new Float64Array(navFlatCap);
+    navFlatY = new Float64Array(navFlatCap);
+  }
+  let k = 0;
+  for (const b of navBucketList) {
+    navFlatX[k] = b.x0;
+    navFlatX[k + 1] = b.x1;
+    navFlatY[k] = b.min;
+    navFlatY[k + 1] = b.max;
+    k += 2;
+  }
+  navX = navFlatX.subarray(0, n);
+  navY = navFlatY.subarray(0, n);
 }
 
-/** 把导航图数据指到全量功率列，或宽度级 minmax 桶。 */
-function bindNavData() {
+/** 把新样本折进导航桶；不 flatten、不 setData。 */
+function syncNavBuckets() {
   const cs = state.chartSeries;
   const n = cs.x.length;
   const cap = navMaxBuckets();
   const xs = cs.x.buf;
   const ps = cs.power.buf;
   if (n <= cap) {
-    navData = [cs.x.view(), cs.power.view()];
     if (navSrcLen > n) resetNavBuckets();
     return;
   }
@@ -214,6 +239,18 @@ function bindNavData() {
     for (let i = 0; i < n; i++) pushNavSample(xs[i], ps[i]);
   } else if (navSrcLen < n) {
     for (let i = navSrcLen; i < n; i++) pushNavSample(xs[i], ps[i]);
+  }
+}
+
+/** 把导航图数据指到全量功率列，或宽度级 minmax 桶。 */
+function bindNavData() {
+  const cs = state.chartSeries;
+  const n = cs.x.length;
+  const cap = navMaxBuckets();
+  syncNavBuckets();
+  if (n <= cap) {
+    navData = [cs.x.view(), cs.power.view()];
+    return;
   }
   flattenNavBuckets();
   navData = [navX, navY];
@@ -281,6 +318,7 @@ export function syncChartSeries() {
 /** @param {boolean} dragging */
 export function setRangeDragging(dragging) {
   rangeDragging = !!dragging;
+  state.__rangeDragging = rangeDragging;
 }
 
 /**
@@ -389,14 +427,13 @@ function applyXScale() {
 }
 
 /**
- * 可见窗口超过 2×宽度时改送像素桶；否则继续零拷贝全量视图。
+ * 可见窗口超过 1×宽度时改送像素桶；否则继续零拷贝全量视图。
  * 缩进时不扔掉已有窗口桶，扩大时由调用方改绑概览桶。
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
   const { cap, start, end, windowCount, force } = args;
   const cs = state.chartSeries;
-  syncOverviewBuckets(cap);
 
   if (windowCount <= cap) {
     usingDisplayBuckets = false;
@@ -443,8 +480,15 @@ function clearPaintSkip() {
 /** @param {number} t0 @param {boolean} preview */
 function finishPaint(t0, preview) {
   const dt = performance.now() - t0;
-  // 拖动预览必须跟手；其余路径预算耗尽最多让一帧。
-  skipUntil = !preview && dt > PAINT_BUDGET_MS ? performance.now() + Math.min(dt, 16) : 0;
+  if (preview) {
+    skipUntil = 0;
+  } else if (dt > PAINT_BUDGET_MS && state.isRecording) {
+    skipUntil = performance.now() + LIVE_PAINT_GAP_MS;
+  } else if (dt > PAINT_BUDGET_MS) {
+    skipUntil = performance.now() + Math.min(dt, 16);
+  } else {
+    skipUntil = 0;
+  }
   chartDirty = false;
 }
 
@@ -494,8 +538,8 @@ function applyData(opts = {}) {
 
   bindDisplayData({ cap, start, end, windowCount, force });
   if (state.mainChart) {
-    // 仅全量视图上流式追加且 Y 极值未破时跳过四轴量化；桶显示每帧顶点会变。
-    if (!usingDisplayBuckets && appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
+    // Y 量程来自全量 seriesMax，与是否分桶无关；极值未破时跳过四轴量化。
+    if (appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
       state.mainChart.setData(/** @type {any} */ (mainData), false);
       applyXScale();
     } else {
@@ -504,12 +548,18 @@ function applyData(opts = {}) {
   }
 
   if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
-    bindNavData();
+    syncNavBuckets();
     const nav = state.navigatorChart;
-    if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
+    const now = performance.now();
+    const cap = navMaxBuckets();
+    const live = state.isRecording && !force && !preview && srcLen > cap;
+    const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
+    if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
+      bindNavData();
       nav.setData(/** @type {any} */ (navData));
       appliedNavGen = dataGen;
       appliedNavLen = srcLen;
+      lastNavPaint = now;
     }
   }
 
@@ -1248,11 +1298,37 @@ function tooltipPlugin() {
 // ─── Sizing ──────────────────────────────────────────────────────────────────
 
 /**
- * 监听宿主元素尺寸变化并同步图表大小。
- * @param {HTMLElement} host
- * @param {any} chart
+ * 绘图区滚轮横向缩放。预览走手柄快路径，松手后补一帧全质量图。
+ * @param {any} u
  */
+function bindChartWheel(u) {
+  const over = u?.over;
+  if (!over) return;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let wheelEndTimer = null;
+  over.addEventListener(
+    'wheel',
+    (event) => {
+      event.preventDefault();
+      if (state.chartSeries.x.length === 0) return;
+      const rect = over.getBoundingClientRect();
+      const pivot = u.posToVal(event.clientX - rect.left, 'x');
+      const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+      setRangeDragging(true);
+      state.__applyChartXZoom?.(pivot, factor);
+      if (wheelEndTimer != null) clearTimeout(wheelEndTimer);
+      wheelEndTimer = setTimeout(() => {
+        wheelEndTimer = null;
+        setRangeDragging(false);
+        updateCharts();
+      }, 80);
+    },
+    { passive: false },
+  );
+}
+
 /**
+ * 监听宿主元素尺寸变化并同步图表大小。
  * @param {HTMLElement} host
  * @param {any} chart
  * @param {(() => void)|null} [onSize]
@@ -1378,6 +1454,7 @@ export function initChart() {
   };
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
+  bindChartWheel(state.mainChart);
   observeResize(host, state.mainChart, () => {
     displayBuckets.reset(0);
     applyData({ force: true });

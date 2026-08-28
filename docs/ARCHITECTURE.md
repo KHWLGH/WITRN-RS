@@ -143,7 +143,7 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 | 分组 | 模块 | 职责 |
 | --- | --- | --- |
 | 装配 | `app.js`、`shell.js`、`state.js` | 入口与事件绑定、视图注册表与 Tab 切换、共享状态与类型定义 |
-| 图表 | `chart.js`、`chart-buckets.js`、`theme.js` | uPlot 初始化与渲染调度、可见窗口像素桶、把 CSS 设计令牌桥接给 canvas |
+| 图表 | `chart.js`、`chart-buckets.js`、`chart-window.js`、`theme.js` | uPlot 初始化与渲染调度、可见窗口像素桶、时间窗缩放纯函数、把 CSS 设计令牌桥接给 canvas |
 | 数据 | `data.js`、`measurement.js`、`csv.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
 | 设备 | `device.js`、`views/device.js`、`temperature.js` | 连接管理、设备身份面板、TCP 温度源 |
@@ -152,11 +152,11 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 | 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
 | 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
 
-`measurement.js` 与 `pd-model.js` 是刻意抽出来的**纯函数模块** —— 不接触 DOM 也不接触 Tauri，因此可以在 Node 里直接单元测试。
+`measurement.js`、`pd-model.js` 与 `chart-window.js` 是刻意抽出来的**纯函数模块** —— 不接触 DOM 也不接触 Tauri，因此可以在 Node 里直接单元测试。
 
 ### 图表渲染
 
-数据以列式数组存储（`F64Col`），不是 `{x, y}` 对象数组。可见数据量超过 2 倍视口宽度后切换为增量 min/max 像素桶：每个像素列只保留极值，但**完整数据仍在列里**，悬停时二分回查原始采样点，读到的是真实值。uPlot 侧设 `series auto: false`，避免它每帧全量扫描 min/max。
+数据以列式数组存储（`F64Col`），不是 `{x, y}` 对象数组。可见数据量超过 1 倍视口宽度后切换为增量 min/max 像素桶：每个像素列只保留极值，但**完整数据仍在列里**，悬停时二分回查原始采样点，读到的是真实值。主图 X 窗是会话态的时间窗口（`full` / `follow` / `frozen`），录制中右沿可贴着最新数据滑动。uPlot 侧设 `series auto: false`，避免它每帧全量扫描 min/max。
 
 ## 数据流
 
@@ -194,12 +194,12 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 
 ## 测试
 
-### 前端 —— `test/`，17 个文件 / 97 个用例
+### 前端 —— `test/`，18 个文件 / 110 个用例
 
 用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑，以及跨文件的契约断言：
 
 ```
-chart-buckets  chart-columns  ids       ingest      measurement
+chart-buckets  chart-columns  chart-window  ids       ingest      measurement
 pd-batch       pd-capture-file          pd-capture-state
 pd-clear-linkage         pd-model       pd-recording
 recording      security-csp   theme     ui-scale    utils
@@ -215,6 +215,7 @@ version-sync
 
 其余是纯逻辑测试，例如：
 
+- **`chart-window.test.js`** —— 滚轮缩放钳位、follow 保 duration、frozen 窗口不随 `lastX` 漂移。
 - **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分、导出行构造。
 - **`pd-model.test.js`** —— 报文摘要提取（SOP / 角色 / 速览）、GoodCRC 过滤、缓冲回绕。
 

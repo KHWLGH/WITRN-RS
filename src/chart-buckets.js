@@ -9,7 +9,7 @@ export const DISPLAY_SERIES = 8;
 /** @param {number} width */
 export function bucketCap(width) {
   const w = Number.isFinite(width) && width > 0 ? width : 600;
-  return Math.max(BUCKET_MIN, Math.floor(w * 2));
+  return Math.max(BUCKET_MIN, Math.floor(w));
 }
 
 /**
@@ -83,6 +83,11 @@ export class SeriesBuckets {
   srcStart = 0;
   srcEnd = 0;
   cap = BUCKET_MIN;
+  /** @type {Float64Array|null} */
+  _flatX = null;
+  /** @type {Float64Array[]|null} */
+  _flatYs = null;
+  _flatCap = 0;
 
   constructor() {
     this.reset(0);
@@ -191,20 +196,37 @@ export class SeriesBuckets {
     }
   }
 
-  /** @returns {{ x: number[], ys: number[][] }} */
+  /** @returns {{ x: Float64Array, ys: Float64Array[] }} */
   flatten() {
-    /** @type {number[]} */
-    const x = [];
-    const ys = Array.from({ length: DISPLAY_SERIES }, () => /** @type {number[]} */ ([]));
+    const n = this.list.length * 2;
+    if (n === 0) {
+      const empty = new Float64Array(0);
+      return { x: empty, ys: Array.from({ length: DISPLAY_SERIES }, () => empty) };
+    }
+    if (!this._flatX || !this._flatYs || this._flatCap < n) {
+      this._flatCap = Math.max(n, this._flatCap * 2 || 64);
+      this._flatX = new Float64Array(this._flatCap);
+      this._flatYs = Array.from({ length: DISPLAY_SERIES }, () => new Float64Array(this._flatCap));
+    }
+    const x = this._flatX;
+    const ys = this._flatYs;
+    let k = 0;
     for (const b of this.list) {
       const xm = (b.x0 + b.x1) / 2;
-      x.push(xm, xm);
+      x[k] = xm;
+      x[k + 1] = xm;
       for (let s = 0; s < DISPLAY_SERIES; s++) {
         const col = ys[s];
-        if (col) col.push(b.min[s], b.max[s]);
+        if (!col) continue;
+        col[k] = Number(b.min[s]);
+        col[k + 1] = Number(b.max[s]);
       }
+      k += 2;
     }
-    return { x, ys };
+    return {
+      x: x.subarray(0, n),
+      ys: ys.map((col) => col.subarray(0, n)),
+    };
   }
 }
 
