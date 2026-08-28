@@ -40,21 +40,6 @@
 //! own message history — for scrubbing back through a capture, say — pass the
 //! context explicitly and the device's own state is left alone.
 //!
-//! # Device identity
-//!
-//! A few bytes of every general report hold still for a given meter — enough to
-//! tell two meters apart without ever writing to one. The firmware version is
-//! *not* among them; see [`info`] for what the stream does and does not carry.
-//!
-//! ```no_run
-//! # use witrn_hid::WitrnDev;
-//! # let mut dev = WitrnDev::new();
-//! # dev.open()?;
-//! let id = dev.identity(2000)?;
-//! println!("{id}  {}", id.fingerprint());
-//! # Ok::<_, witrn_hid::Error>(())
-//! ```
-//!
 //! # Features
 //!
 //! - `serde` *(default)* — `Serialize` for the parsed tree, for handing it to a UI.
@@ -65,12 +50,10 @@
 mod device;
 mod error;
 mod general;
-pub mod info;
 
 pub use device::{decode_pd_report, ReportKind, Unpacked, WitrnDev, K2_PID, WITRN_VID};
 pub use error::{Error, Result};
 pub use general::{decode_general_sample, fields, general_msg, GeneralSample, REPORT_LEN};
-pub use info::Identity;
 
 // Re-exported so callers need not depend on the parser crate directly.
 pub use usbpd_parser;

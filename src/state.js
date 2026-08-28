@@ -133,7 +133,7 @@ export class F64Col {
 /**
  * 图表列式存储（唯一数据源）。
  * x 为相对秒，timestamps 为墙钟毫秒，其余通道与 x 等长对齐。
- * `state.chartData` 与 `state.chartSeries` 指向同一对象。
+ * `state.chartSeries` 是图表列式存储的唯一引用。
  * @typedef {Object} ChartSeriesColumns
  * @property {F64Col} x
  * @property {F64Col} timestamps
@@ -163,9 +163,8 @@ export function emptyChartColumns(capacity = 4096) {
   };
 }
 
-/** 让 chartData / chartSeries 指向同一份列。清空、导入后必须调用。 */
+/** 替换图表列。清空、导入后必须调用。 */
 export function setChartColumns(cols) {
-  state.chartData = cols;
   state.chartSeries = cols;
 }
 
@@ -264,9 +263,7 @@ export const state = {
   /** @type {boolean} 范围手柄或滚轮缩放跟手中：录制 tick 不改写选区 */
   __rangeDragging: false,
 
-  // ── Raw data storage（chartData / chartSeries 同一份列）──
-  /** @type {ChartSeriesColumns} */
-  chartData: chartColumns,
+  // ── Raw data storage ──
   /** @type {ChartSeriesColumns} */
   chartSeries: chartColumns,
 

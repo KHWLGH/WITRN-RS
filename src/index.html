@@ -73,7 +73,7 @@
             <button type="button" class="cmd-btn" id="btn-flyout-display" title="显示通道设置"><i class="fi fi-eye" aria-hidden="true"></i>显示</button>
             <div class="cmd-action-group" id="auto-pause-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
-                <i class="fi fi-pause" id="auto-pause-command-icon" aria-hidden="true"></i>
+                <i class="fi fi-pause" aria-hidden="true"></i>
                 <span>自动暂停</span>
               </button>
               <button
@@ -509,37 +509,20 @@
                     <div class="settings-kv">
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">VID</span>
-                        <span class="identity-value" id="device-vid">--</span>
+                        <span class="settings-kv-value" id="device-vid">--</span>
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">PID</span>
-                        <span class="identity-value" id="device-pid">--</span>
+                        <span class="settings-kv-value" id="device-pid">--</span>
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">SN</span>
-                        <span class="identity-value" id="device-sn" title="设备序列号">--</span>
+                        <span class="settings-kv-value" id="device-sn" title="设备序列号">--</span>
                       </div>
                     </div>
                     <p class="settings-row-desc">
-                      读取产品名与批次序列号并计算稳定指纹。读取期间数据流会暂停约 2 秒，录制中不可用。
+                      HID 枚举得到的厂商 ID、产品 ID 与 USB 序列号。维简硬件的序列号通常是生产批次日期，不是单机编号。
                     </p>
-                    <button type="button" class="btn" id="btn-identify" disabled>读取设备身份</button>
-                    <div id="identity-result" hidden>
-                      <div class="settings-kv">
-                        <div class="settings-kv-row">
-                          <span class="settings-kv-label">产品</span>
-                          <span class="identity-value" id="identity-product">--</span>
-                        </div>
-                        <div class="settings-kv-row">
-                          <span class="settings-kv-label">序列号</span>
-                          <span class="identity-value" id="identity-serial">--</span>
-                        </div>
-                        <div class="settings-kv-row">
-                          <span class="settings-kv-label">指纹</span>
-                          <span class="identity-value" id="identity-fingerprint">--</span>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </section>
                 <section class="settings-section">
@@ -556,7 +539,7 @@
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">仓库</span>
-                        <span class="identity-value selectable">github.com/KHWLGH/WITRN-RS</span>
+                        <span class="settings-kv-value selectable">github.com/KHWLGH/WITRN-RS</span>
                       </div>
                     </div>
                     <p class="settings-row-desc">第三方组件：uPlot (MIT) · Fluent System Icons (MIT)</p>

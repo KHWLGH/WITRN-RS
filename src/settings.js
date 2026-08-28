@@ -40,6 +40,11 @@ function normalizeSettings(saved) {
   // rangeStart/rangeEnd 参与可见区间的下标换算，sampleRate 会下发到后端命令。
   merged.rangeStart = clamp(merged.rangeStart, 0, 1000, defaultSettings.rangeStart);
   merged.rangeEnd = clamp(merged.rangeEnd, 0, 1000, defaultSettings.rangeEnd);
+  if (merged.rangeStart > merged.rangeEnd) {
+    const swap = merged.rangeStart;
+    merged.rangeStart = merged.rangeEnd;
+    merged.rangeEnd = swap;
+  }
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 10, 60_000, defaultSettings.sampleRate));
   // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
   if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
@@ -94,6 +99,70 @@ function echoRangeUI() {
   if (start) start.value = String(state.settings.rangeStart);
   if (end) end.value = String(state.settings.rangeEnd);
   updateSliderFill();
+}
+
+/** 回显自动暂停阈值单位（loadSettings / resetSettings / 控件变更共用）。 */
+export function echoApUnit() {
+  const basis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
+  const apUnit = document.getElementById('ap-unit');
+  if (!apUnit) return;
+  const value = basis?.value ?? state.autoPauseSettings.basis;
+  if (value === 'voltage') apUnit.textContent = 'V';
+  else if (value === 'current') apUnit.textContent = 'A';
+  else if (value === 'power') apUnit.textContent = 'W';
+  else apUnit.textContent = '';
+}
+
+/** 把当前 settings / autoPause 写回控件（loadSettings / resetSettings 共用）。 */
+function echoSettingsUI() {
+  const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
+  if (rateSelect) setSampleRateOption(rateSelect, state.settings.sampleRate);
+
+  /** @param {string} id @param {boolean} val */
+  const setChecked = (id, val) => {
+    const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+    if (el) el.checked = val;
+  };
+  setChecked('show-voltage', state.settings.showVoltage);
+  setChecked('show-current', state.settings.showCurrent);
+  setChecked('show-power', state.settings.showPower);
+  setChecked('show-temp', state.settings.showTemp);
+  setChecked('show-dpdn', state.settings.showDpDn);
+  setChecked('show-cc', state.settings.showCc);
+  setChecked('signed-current', state.settings.signedCurrent);
+  setChecked('pd-follow-recording', state.settings.pdFollowRecording);
+  echoHeadroomUI();
+
+  const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
+  if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';
+  const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
+  if (tempPort) tempPort.value = String(state.settings.tempPort || 1573);
+  syncTempSourceUI();
+  echoRangeUI();
+
+  /** @param {string} id @param {number} val */
+  const setOp = (id, val) => {
+    const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+    if (el) el.value = String(val);
+  };
+  setOp('opacity-voltage', state.settings.opacityVoltage);
+  setOp('opacity-current', state.settings.opacityCurrent);
+  setOp('opacity-power', state.settings.opacityPower);
+  setOp('opacity-temp', state.settings.opacityTemp);
+
+  const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
+  if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
+
+  syncAutoPauseUI(state.autoPauseSettings.enabled);
+  const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
+  if (apBasis) apBasis.value = state.autoPauseSettings.basis;
+  const apCondition = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-condition'));
+  if (apCondition) apCondition.value = String(state.autoPauseSettings.condition);
+  const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
+  if (apDuration) apDuration.value = String(state.autoPauseSettings.duration);
+  echoApUnit();
+
+  document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
 
 /** 回显图表纵向余量控件（loadSettings / resetSettings 共用）。 */
@@ -177,74 +246,11 @@ export async function loadSettings() {
 
     if (savedSettings) {
       state.settings = normalizeSettings(savedSettings);
-
-      // 基本控件
-      const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
-      if (rateSelect) {
-        setSampleRateOption(rateSelect, state.settings.sampleRate);
-      }
-
-      /** @param {string} id @param {boolean} val */
-      const setChecked = (id, val) => {
-        const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-        if (el) el.checked = val;
-      };
-      setChecked('show-voltage', state.settings.showVoltage);
-      setChecked('show-current', state.settings.showCurrent);
-      setChecked('show-power', state.settings.showPower);
-      setChecked('show-temp', state.settings.showTemp);
-      setChecked('show-dpdn', state.settings.showDpDn);
-      setChecked('show-cc', state.settings.showCc);
-      setChecked('signed-current', state.settings.signedCurrent);
-      setChecked('pd-follow-recording', state.settings.pdFollowRecording);
-      echoHeadroomUI();
-      // 跟随记录设置可能与默认不同，PD 暂停按钮状态需要重新镜像
-      document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
-
-      // Temperature service settings
-      const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
-      if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';
-      const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
-      if (tempPort) tempPort.value = String(state.settings.tempPort || 1573);
-      syncTempSourceUI();
-      echoRangeUI();
-
-      // Fill settings are derived directly from opacity.
-      /** @param {string} id @param {number|undefined} val */
-      const setOp = (id, val) => {
-        const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-        if (el) el.value = String(val ?? 15);
-      };
-
-      setOp('opacity-voltage', state.settings.opacityVoltage);
-      setOp('opacity-current', state.settings.opacityCurrent);
-      setOp('opacity-power', state.settings.opacityPower);
-      setOp('opacity-temp', state.settings.opacityTemp);
-
-      const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
-      if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
-
-      // Auto Pause
       if (savedSettings.autoPause) {
         state.autoPauseSettings = normalizeAutoPause(savedSettings.autoPause);
-        syncAutoPauseUI(state.autoPauseSettings.enabled);
-
-        const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
-        if (apBasis) {
-          apBasis.value = state.autoPauseSettings.basis;
-        }
-
-        const apCondition = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-condition'));
-        if (apCondition) {
-          apCondition.value = String(state.autoPauseSettings.condition);
-        }
-
-        const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
-        if (apDuration) {
-          apDuration.value = String(state.autoPauseSettings.duration);
-        }
       }
     }
+    echoSettingsUI();
   } catch (e) {
     console.error('Failed to load settings:', e);
   } finally {
@@ -315,24 +321,7 @@ export async function resetSettings() {
     state.settings = { ...defaultSettings };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
 
-    // Apply to UI
-    const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
-    if (rateSelect) setSampleRateOption(rateSelect, state.settings.sampleRate);
-
-    /** @param {string} id @param {boolean} val */
-    const setChecked = (id, val) => {
-      const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-      if (el) el.checked = val;
-    };
-    setChecked('show-voltage', state.settings.showVoltage);
-    setChecked('show-current', state.settings.showCurrent);
-    setChecked('show-power', state.settings.showPower);
-    setChecked('show-temp', state.settings.showTemp);
-    setChecked('show-dpdn', state.settings.showDpDn);
-    setChecked('show-cc', state.settings.showCc);
-    setChecked('signed-current', state.settings.signedCurrent);
-    setChecked('pd-follow-recording', state.settings.pdFollowRecording);
-    echoHeadroomUI();
+    echoSettingsUI();
     echoUiScaleUI();
     echoThemeUI();
     echoWindowMaterialUI();
@@ -345,41 +334,7 @@ export async function resetSettings() {
     const dirEl = document.getElementById('rt-current-dir');
     if (dirEl) dirEl.hidden = true;
 
-    // 跟随记录设置已回落默认值，PD 暂停按钮状态需要重新镜像
-    document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
-
-    const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
-    if (tempIp) tempIp.value = state.settings.tempIp;
-    const tempPort = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-port'));
-    if (tempPort) tempPort.value = String(state.settings.tempPort);
-    syncTempSourceUI();
-    echoRangeUI();
     await applySampleRate(state.settings.sampleRate);
-
-    // Opacity inputs
-    /** @param {string} id @param {number} val */
-    const setOp2 = (id, val) => {
-      const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-      if (el) el.value = String(val);
-    };
-    setOp2('opacity-voltage', state.settings.opacityVoltage);
-    setOp2('opacity-current', state.settings.opacityCurrent);
-    setOp2('opacity-power', state.settings.opacityPower);
-    setOp2('opacity-temp', state.settings.opacityTemp);
-
-    const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
-    if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
-
-    syncAutoPauseUI(state.autoPauseSettings.enabled);
-
-    const apBasis = /** @type {HTMLSelectElement|null} */ (document.getElementById('ap-basis'));
-    if (apBasis) apBasis.value = state.autoPauseSettings.basis;
-
-    const apCondition = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-condition'));
-    if (apCondition) apCondition.value = String(state.autoPauseSettings.condition);
-
-    const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
-    if (apDuration) apDuration.value = String(state.autoPauseSettings.duration);
 
     // Update chart visibility & fill (temp is handled by updateTempUIVisibility below)
     setSeriesVisible(0, state.settings.showVoltage);

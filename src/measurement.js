@@ -58,7 +58,7 @@ export function nextRecordingX(prevX, relSeconds, sampleRateMs) {
 
 /**
  * 按相邻采样点积分能量和容量。录制会话边界由调用方通过分段重置时间基线保证；
- * 这里仅跳过倒序、非有限或缺失值区间。直播路径的休眠空档由 {@link nextRecordingX} 先夹掉。
+ * 这里跳过倒序、非有限、缺失值，以及超过 {@link MAX_ENERGY_STEP_S} 的空档。
  * @param {number[]} timestamps 毫秒时间戳
  * @param {number[]} current
  * @param {number[]} power
@@ -103,30 +103,11 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex) {
     const currentValue = Math.abs(current[i]);
     const powerValue = Math.abs(power[i]);
     if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
+    if (dt * 3600 > MAX_ENERGY_STEP_S) continue;
     wh += powerValue * dt;
     mah += currentValue * 1000 * dt;
   }
   return { wh, mah };
-}
-
-/**
- * 从唯一的图表数据源生成导出行，避免录制缓冲与图表内容分叉。
- * @param {{ timestamps: number[], voltage: number[], current: number[], power: number[], temp: number[], dp: number[], dn: number[], cc1: number[], cc2: number[] }} chartData
- * @param {{ x: number[] }} chartSeries
- * @returns {{ relSeconds: number, voltage: number, current: number, power: number, temp: number, dp: number, dn: number, cc1: number, cc2: number }[]}
- */
-export function buildExportRows(chartData, chartSeries) {
-  return chartSeries.x.map((relSeconds, i) => ({
-    relSeconds,
-    voltage: chartData.voltage[i],
-    current: chartData.current[i],
-    power: chartData.power[i],
-    temp: chartData.temp[i],
-    dp: chartData.dp[i],
-    dn: chartData.dn[i],
-    cc1: chartData.cc1[i],
-    cc2: chartData.cc2[i],
-  }));
 }
 
 /**

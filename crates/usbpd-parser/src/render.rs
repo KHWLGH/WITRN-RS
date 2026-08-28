@@ -132,7 +132,8 @@ fn push(msg: &Metadata, level: usize, level_thr: usize, out: &mut Vec<ColorToken
             if matches!(
                 msg.field(),
                 crate::fields::USB_VENDOR_ID | crate::fields::VID
-            ) {
+            ) && !value.contains('[')
+            {
                 let name = vendor_name(&value).unwrap_or("Unknown Vendor");
                 out.push((Style::Blue, format!("[{name}] ")));
             }
@@ -251,5 +252,21 @@ mod tests {
     fn style_names_match_the_original() {
         assert_eq!(Style::Red.as_str(), "red");
         assert_eq!(Style::Purple.as_str(), "purple");
+    }
+
+    #[cfg(feature = "vendor-ids")]
+    #[test]
+    fn already_annotated_vid_is_not_labelled_again() {
+        let mut msg = Parser::new().parse(
+            &[0xAF, 0x11, 0x00, 0x00, 0xAC, 0x05],
+            ParseOptions {
+                sop: Sop::Sop,
+                ..Default::default()
+            },
+        );
+        msg.annotate_vendor_names();
+        let text = to_plain(&render(&msg, 1));
+        assert!(text.contains("0x05AC [Apple]"), "{text}");
+        assert!(!text.contains("[Apple] ["), "{text}");
     }
 }

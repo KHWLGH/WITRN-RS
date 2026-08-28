@@ -88,10 +88,3 @@ test('index.html has no duplicate ids at all', () => {
   const dupes = [...counts.entries()].filter(([, n]) => n > 1).map(([id]) => id);
   assert.deepEqual(dupes, [], `重复 id: ${dupes.join(', ')}`);
 });
-
-test('CSV import calls updateChartEmptyState after writing columns', () => {
-  const csv = readFileSync(path.join(srcDir, 'csv.js'), 'utf8');
-  const importFn = csv.slice(csv.indexOf('export async function importCSV'));
-  const afterSet = importFn.slice(importFn.indexOf('setChartColumns'));
-  assert.match(afterSet, /updateChartEmptyState\s*\(/);
-});

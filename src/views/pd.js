@@ -165,11 +165,11 @@ function ingestOne(payload, live = true) {
   if (!entry) return false;
   if (!isDivider(entry)) {
     const gen = Number.isFinite(entry.gen) ? /** @type {number} */ (entry.gen) : null;
-    if (live && acceptedGen === -1 && gen !== null) return false;
-    if (live && gen !== null && acceptedGen !== null && acceptedGen !== -1 && gen !== acceptedGen) {
-      return false;
+    if (gen !== null) {
+      if (acceptedGen === -1) return false;
+      if (acceptedGen !== null && gen !== acceptedGen) return false;
+      acceptedGen = gen;
     }
-    if (gen !== null) acceptedGen = gen;
     const seq = entry.seq;
     if (seq !== undefined && Number.isFinite(seq) && seq <= lastIngestedSeq) return false;
   }
@@ -762,9 +762,15 @@ export function clearPdEntries() {
   acceptedGen = -1;
   metaCache.clear();
   clearSelection();
-  void invokeCmd('pd_log_clear').then((gen) => {
-    acceptedGen = typeof gen === 'number' && Number.isFinite(gen) ? gen : null;
-  });
+  void invokeCmd('pd_log_clear')
+    .then((gen) => {
+      acceptedGen = typeof gen === 'number' && Number.isFinite(gen) ? gen : null;
+    })
+    .catch((e) => {
+      console.error(e);
+      acceptedGen = null;
+      toast.error(`清空 PD 日志失败: ${e}`);
+    });
   rebuildFilterAndWindow();
 }
 
@@ -846,7 +852,7 @@ async function importPdCapture() {
           return { t: e.t, divider: false, bytes: e.bytes ?? [], vbus: e.vbus, ibus: e.ibus };
         }),
       });
-      if (!Array.isArray(loaded) || loaded.length !== result.entries.length) {
+      if (!Array.isArray(loaded)) {
         toast.error('导入失败: 后端无法替换报文日志');
         return;
       }
@@ -856,7 +862,13 @@ async function importPdCapture() {
         if (entry) nextEntries.push(entry);
       }
     } else {
-      void invokeCmd('pd_log_clear');
+      const gen = await invokeCmd('pd_log_clear');
+      if (typeof gen === 'number' && Number.isFinite(gen)) {
+        acceptedGen = gen;
+      } else {
+        toast.error('导入失败: 无法清空后端报文日志');
+        return;
+      }
     }
 
     log.length = 0;
@@ -864,7 +876,7 @@ async function importPdCapture() {
     bufferedWhilePaused = 0;
     softCapWarned = false;
     lastIngestedSeq = -1;
-    acceptedGen = null;
+    if (needBackend) acceptedGen = null;
     metaCache.clear();
     clearSelection();
     for (const entry of nextEntries) {

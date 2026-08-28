@@ -43,7 +43,6 @@ WITRN-RS/
 承载应用状态与全部 Tauri 命令。共享状态的设计原则是**只在必要处加锁**：
 
 - `sample_rate: Arc<AtomicU64>` —— HID 读循环每次迭代都要读采样率，用原子量避免每帧取一次锁。
-- `connection_epoch: AtomicU64` —— 连接世代号。异步命令（如读取设备身份）执行期间如果设备重连，回来时对不上 epoch 就丢弃结果，避免把旧连接的数据写进新连接。
 - 其余共享状态用 `Arc<Mutex<...>>`。
 
 ### 线程模型
@@ -55,8 +54,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
  只解码，不 emit                合并 / 转发
 ```
 
-- **HID 读线程** —— 阻塞读 HID 报告，解码校验后写入通道。它不接触 Tauri 的 `emit`，因此 IPC 的抖动不会反压到读取节奏。
-- **IPC 发射线程** —— 把 PD 报文按约 8 ms 一帧合并为 `pd-data-batch` 事件；`device-data` 已在读侧按采样率节流，发射侧原样转发不再合并。
+- **HID 读线程** —— 阻塞读 HID 报告，解码校验后写入通道。PD 事件在通道满时进入最多 256 条的 pending，循环下次先排空再读。它不接触 Tauri 的 `emit`，因此 IPC 的抖动不会反压到读取节奏。
+- **IPC 发射线程** —— 把 PD 报文按约 8 ms 一帧合并为 `pd-data-batch` 事件；`device-data` 已在读侧按采样率节流，发射侧原样转发不再合并。发送端 drop 时先排空残留再发 `device-disconnected`。
 
 `BackgroundTask::stop()` 先置停止标志再 `join`，且**顺序固定为先生产者后消费者** —— 反过来会让读线程写入一个没人消费的通道。
 
@@ -68,10 +67,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | --- | --- |
 | `enumerate_devices` | 枚举厂商 VID 下的全部 HID 接口 |
 | `connect_device_by_path` | 按 HID 路径连接（前端实际使用的入口） |
-| `connect_device` | 按 VID/PID 连接 |
 | `disconnect_device` | 断开并停止该连接的后台线程 |
 | `get_current_device_info` | 返回当前连接的设备信息 |
-| `identify_current_device` | 读取产品名与批次序列号并计算稳定指纹（约 2 秒，期间暂停数据流） |
 | `set_sample_rate` | 设置采样间隔，接受 10 – 60000 ms |
 | `set_pd_capture_enabled` | 开关 PD 报文采集 |
 | `pd_log_clear` | 清空 PD 日志，返回新的 generation |
@@ -99,7 +96,7 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 
 其他平台返回 `None`，设备名退化为不带端口后缀的形式。
 
-> 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。所以设备指纹先按端口分组，再叠加序列号。
+> 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。枚举时先按 USB 端口分组，再叠加序列号，以便标题栏区分插在不同口上的同型号仪表。
 
 ## 协议库
 
@@ -117,7 +114,7 @@ USB-PD 报文解码，约 6,300 行 / 102 个测试。按报文结构分模块�
 
 ### `crates/witrn-hid`
 
-WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开与读取，`general.rs` 负责解码测量帧，`info.rs` 负责设备身份。
+WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责解码测量帧。
 
 `decode_general_sample` 返回的 `GeneralSample`：
 
@@ -146,7 +143,7 @@ WITRN HID 设备封装，约 1,660 行 / 34 个测试。`device.rs` 负责打开
 | 图表 | `chart.js`、`chart-buckets.js`、`chart-window.js`、`theme.js` | uPlot 初始化与渲染调度、可见窗口像素桶、时间窗缩放纯函数、把 CSS 设计令牌桥接给 canvas |
 | 数据 | `data.js`、`measurement.js`、`csv.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
-| 设备 | `device.js`、`views/device.js`、`temperature.js` | 连接管理、设备身份面板、TCP 温度源 |
+| 设备 | `device.js`、`temperature.js` | 连接管理、设置页 VID/PID/SN、TCP 温度源 |
 | 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、设置页、50–200% 缩放、避免首帧闪白的主题引导 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `windowcontrols` |
 | 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
@@ -216,18 +213,18 @@ version-sync
 其余是纯逻辑测试，例如：
 
 - **`chart-window.test.js`** —— 滚轮缩放钳位、follow 保 duration、frozen 窗口不随 `lastX` 漂移。
-- **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分、导出行构造。
+- **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分（跳过过大空档）。
 - **`pd-model.test.js`** —— 报文摘要提取（SOP / 角色 / 速览）、GoodCRC 过滤、缓冲回绕。
 
-### Rust —— 158 个 `#[test]`
+### Rust —— 149 个 `#[test]`
 
 | 位置 | 数量 |
 | --- | --- |
-| `crates/usbpd-parser`（12 个模块 + `tests/conversation.rs` 完整会话回放） | 102 |
-| `crates/witrn-hid`（`device.rs`、`general.rs`、`info.rs`） | 34 |
+| `crates/usbpd-parser`（12 个模块 + `tests/conversation.rs` 完整会话回放） | 104 |
+| `crates/witrn-hid`（`device.rs`、`general.rs`） | 23 |
 | `src-tauri`（`lib.rs`、`pd_capture.rs`、`usb_port.rs`） | 22 |
 
-另有 20 个文档测试（`crates/usbpd-parser` 13 个、`crates/witrn-hid` 7 个），随 `cargo test --workspace` 一并运行。
+另有 17 个文档测试（`crates/usbpd-parser` 13 个、`crates/witrn-hid` 4 个），随 `cargo test --workspace` 一并运行。
 
 硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
 

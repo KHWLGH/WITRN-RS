@@ -592,12 +592,6 @@ html[data-ui-scale-css] .app-shell {
   margin-bottom: var(--space-4);
 }
 
-.page-subtitle {
-  font: var(--type-subtitle);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-3);
-}
-
 /* 设置：主栏选项列表 + 宽屏设备/关于侧栏 */
 .settings-layout {
   display: grid;
@@ -797,42 +791,10 @@ html[data-ui-scale-css] .app-shell {
   }
 }
 
-.card {
-  background: var(--surface-card);
-  border: 1px solid var(--stroke-card);
-  border-radius: var(--radius-surface);
-  padding: var(--space-4);
-  margin-bottom: var(--space-3);
-  max-width: 640px;
-}
-
-.card-title {
-  font: var(--type-body-strong);
-  margin-bottom: var(--space-3);
-}
-
 .card-hint {
   font: var(--type-caption);
   color: var(--text-tertiary);
   margin-top: var(--space-2);
-}
-
-.field-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap; /* 窄卡片（min-width 300px）里长行折行而不是溢出卡片边框 */
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.field-row:last-child {
-  margin-bottom: 0;
-}
-
-.field-row > label {
-  min-width: 64px;
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 .scale-slider {
@@ -956,7 +918,7 @@ html[data-ui-scale-css] .app-shell {
   user-select: text;
 }
 
-.identity-value {
+.settings-kv-value {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-primary);

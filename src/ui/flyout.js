@@ -67,6 +67,7 @@ export function createFlyout(anchor, panel) {
     document.addEventListener('pointerdown', onOutsidePointerDown, true);
     document.addEventListener('keydown', onKeydown, true);
     window.addEventListener('resize', onDismiss);
+    window.addEventListener('scroll', onDismiss, true);
     closeCurrent = close;
     const first = /** @type {HTMLElement|null} */ (
       panel.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])')
@@ -81,6 +82,7 @@ export function createFlyout(anchor, panel) {
     document.removeEventListener('pointerdown', onOutsidePointerDown, true);
     document.removeEventListener('keydown', onKeydown, true);
     window.removeEventListener('resize', onDismiss);
+    window.removeEventListener('scroll', onDismiss, true);
     if (closeCurrent === close) closeCurrent = null;
   }
 

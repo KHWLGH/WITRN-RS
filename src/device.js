@@ -6,7 +6,6 @@
 import { refreshRecordButton, stopRecording } from './data.js';
 import { state } from './state.js';
 import { toast } from './ui/toast.js';
-import { refreshDeviceIdentifyState } from './views/device.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -89,13 +88,18 @@ export function onDeviceSelect() {
 
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
 
+/** @type {boolean} */
+let connecting = false;
+
 /** 连接到当前选中的设备。 */
 export async function connectDevice() {
+  if (connecting) return;
   try {
     if (!state.selectedDevicePath) {
       toast.warning('请先选择一个设备');
       return;
     }
+    connecting = true;
     await invoke('connect_device_by_path', { path: state.selectedDevicePath });
 
     // 获取连接后的设备信息
@@ -116,6 +120,8 @@ export async function connectDevice() {
     }
   } catch (e) {
     toast.error(`连接失败: ${e}`);
+  } finally {
+    connecting = false;
   }
 }
 
@@ -166,7 +172,6 @@ export function setConnected(connected) {
   }
 
   refreshRecordButton();
-  refreshDeviceIdentifyState();
 
   if (!connected) {
     state.__markPdDisconnect?.();

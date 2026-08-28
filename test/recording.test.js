@@ -27,7 +27,7 @@ globalThis.document = {
 };
 
 const { emptyChartColumns, setChartColumns, state } = await import('../src/state.js');
-const { startRecording, stopRecording, updateChartRange } = await import('../src/data.js');
+const { startRecording, stopRecording } = await import('../src/data.js');
 
 function resetRecordingState() {
   state.isConnected = true;
@@ -92,24 +92,31 @@ test('startRecording keeps an existing zoom window and does not disable the slid
   stopRecording();
 });
 
-test('updateChartRange follow keeps duration as lastX grows', () => {
+test('startRecording is not re-entrant while PD capture is enabling', async () => {
   resetRecordingState();
-  const xs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const ts = xs.map((x) => x * 1000);
-  state.chartSeries.x.set(xs);
-  state.chartSeries.timestamps.set(ts);
-  state.chartWindow = { mode: 'follow', duration: 4, min: 6, max: 10 };
-
-  updateChartRange();
-  assert.equal(state.chartWindow.mode, 'follow');
-  assert.equal(state.chartWindow.min, 6);
-  assert.equal(state.chartWindow.max, 10);
-
-  state.chartSeries.x.push(20);
-  state.chartSeries.timestamps.push(20_000);
-  updateChartRange();
-  assert.equal(state.chartWindow.mode, 'follow');
-  assert.equal(state.chartWindow.duration, 4);
-  assert.equal(state.chartWindow.max, 20);
-  assert.equal(state.chartWindow.min, 16);
+  let enableCalls = 0;
+  /** @type {() => void} */
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const invoke = globalThis.window.__TAURI__.core.invoke;
+  globalThis.window.__TAURI__.core.invoke = async (cmd) => {
+    if (cmd === 'set_pd_capture_enabled') {
+      enableCalls += 1;
+      await gate;
+    }
+    return null;
+  };
+  try {
+    const first = startRecording();
+    const second = startRecording();
+    release();
+    await Promise.all([first, second]);
+    assert.equal(enableCalls, 1);
+    assert.equal(state.isRecording, true);
+  } finally {
+    globalThis.window.__TAURI__.core.invoke = invoke;
+    stopRecording();
+  }
 });

@@ -39,7 +39,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 | :---: | :---: |
 | <img src="docs/screenshots/dark-record.png" alt="监控工作区（深色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/light-record.png" alt="监控工作区（浅色）" /><br><sub>**监控** · 浅色主题</sub> |
 | <img src="docs/screenshots/dark-pd.png" alt="PD 分析工作区（深色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/light-pd.png" alt="PD 分析工作区（浅色）" /><br><sub>**PD 分析** · 浅色主题</sub> |
-| <img src="docs/screenshots/dark-settings.png" alt="设置页（深色）：外观、图表与记录、设备、关于" /><br><sub>**设置** · 外观 / 图表与记录 / 设备身份 / 关于</sub> | <img src="docs/screenshots/light-settings.png" alt="设置页（浅色）" /><br><sub>**设置** · 浅色主题</sub> |
+| <img src="docs/screenshots/dark-settings.png" alt="设置页（深色）：外观、图表与记录、设备、关于" /><br><sub>**设置** · 外观 / 图表与记录 / 设备 / 关于</sub> | <img src="docs/screenshots/light-settings.png" alt="设置页（浅色）" /><br><sub>**设置** · 浅色主题</sub> |
 
 ## ✨ 功能特性
 

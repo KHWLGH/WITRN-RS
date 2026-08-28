@@ -417,6 +417,54 @@ impl Metadata {
         self.value.as_list()?.get(index)
     }
 
+    /// 给 VID / USB Vendor ID / SVID 叶子补上 USB-IF 厂商名，供 UI 摘要与详情使用。
+    ///
+    /// 命中写成 `0x05AC [Apple]`；VID / USB Vendor ID 未命中写成 `[Unknown Vendor]`。
+    /// SVID 未命中保持原十六进制（`0xFF00` 是 PD SID，不是厂商）。
+    /// 未启用 `vendor-ids` 时为空操作。
+    pub fn annotate_vendor_names(&mut self) {
+        #[cfg(feature = "vendor-ids")]
+        self.annotate_vendor_names_walk();
+        #[cfg(not(feature = "vendor-ids"))]
+        let _ = self;
+    }
+
+    #[cfg(feature = "vendor-ids")]
+    fn annotate_vendor_names_walk(&mut self) {
+        let field = self.field.clone();
+        match &mut self.value {
+            Value::List(children) => {
+                for child in children {
+                    child.annotate_vendor_names_walk();
+                }
+            }
+            Value::Str(value) => Self::annotate_vendor_leaf(field.as_ref(), value),
+            _ => {}
+        }
+        if let Some(Value::List(children)) = self.raw_value.as_mut() {
+            for child in children {
+                child.annotate_vendor_names_walk();
+            }
+        }
+    }
+
+    #[cfg(feature = "vendor-ids")]
+    fn annotate_vendor_leaf(field: &str, value: &mut String) {
+        if value.contains('[') {
+            return;
+        }
+        let is_vid = field == crate::fields::VID || field == crate::fields::USB_VENDOR_ID;
+        let is_svid = field == "SVID" || field.starts_with("SVID ");
+        if !is_vid && !is_svid {
+            return;
+        }
+        if let Some(name) = crate::vendor_name(value) {
+            *value = format!("{value} [{name}]");
+        } else if is_vid {
+            *value = format!("{value} [Unknown Vendor]");
+        }
+    }
+
     /// `field: value`, the original's `repr()`.
     pub fn repr(&self) -> String {
         format!("{}: {}", self.field, self.value)
@@ -655,6 +703,53 @@ mod tests {
         let m = tree();
         assert_eq!(m.full_raw(), m.raw());
         assert_eq!(m.raw_value(), m.value());
+    }
+
+    #[cfg(feature = "vendor-ids")]
+    #[test]
+    fn annotate_names_unstructured_vid_and_leaves_pd_svid() {
+        use crate::{ParseOptions, Parser, Sop};
+
+        let mut apple = Parser::new().parse(
+            &[0xAF, 0x11, 0x00, 0x00, 0xAC, 0x05],
+            ParseOptions {
+                sop: Sop::Sop,
+                ..Default::default()
+            },
+        );
+        apple.annotate_vendor_names();
+        assert_eq!(
+            apple
+                .get(crate::fields::DATA_OBJECTS)
+                .unwrap()
+                .get("VDM Header")
+                .unwrap()
+                .get(crate::fields::VID)
+                .unwrap()
+                .value()
+                .as_str(),
+            Some("0x05AC [Apple]")
+        );
+
+        let mut sid = Parser::new().parse(
+            &[0xAF, 0x11, 0x01, 0x80, 0x00, 0xFF],
+            ParseOptions {
+                sop: Sop::Sop,
+                ..Default::default()
+            },
+        );
+        sid.annotate_vendor_names();
+        assert_eq!(
+            sid.get(crate::fields::DATA_OBJECTS)
+                .unwrap()
+                .get("VDM Header")
+                .unwrap()
+                .get("SVID")
+                .unwrap()
+                .value()
+                .as_str(),
+            Some("0xFF00")
+        );
     }
 
     #[cfg(feature = "serde")]

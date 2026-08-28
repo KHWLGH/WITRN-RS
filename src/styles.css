@@ -79,10 +79,6 @@ select {
   max-width: 280px;
 }
 
-.device-sn-input {
-  width: 160px !important;
-}
-
 /* ── 复选框（flyout / PD 命令栏共用） ─────────────────────────── */
 
 .ribbon-checkbox {
@@ -634,20 +630,6 @@ input[type="number"]::-webkit-outer-spin-button {
   letter-spacing: 0.4px;
   color: var(--text-secondary);
   font-weight: 600;
-}
-
-.realtime-average {
-  font-size: 13px;
-  letter-spacing: 0.25px;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  align-self: flex-start;
-  text-align: left;
-}
-
-.realtime-average span {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
 .realtime-content {

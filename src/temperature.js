@@ -35,8 +35,11 @@ export function syncTempSourceUI() {
 
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
 
+let connectingTemp = false;
+
 /** 连接到温度服务（本机或 TCP）。 */
 export async function connectTempService() {
+  if (connectingTemp) return;
   if (currentTempSource() === 'device') {
     if (!state.isConnected) {
       toast.warning('请先连接设备');
@@ -51,6 +54,7 @@ export async function connectTempService() {
   const ip = ipEl?.value || '127.0.0.1';
   const port = Number.parseInt(portEl?.value || '', 10);
 
+  connectingTemp = true;
   try {
     await invoke('connect_temp_service', { ip, port });
     setTempConnected(true);
@@ -58,6 +62,8 @@ export async function connectTempService() {
     state.settings.tempPort = port;
   } catch (e) {
     toast.error(`温度服务连接失败: ${e}`);
+  } finally {
+    connectingTemp = false;
   }
 }
 

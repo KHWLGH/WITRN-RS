@@ -68,9 +68,9 @@ export function initWindowControls() {
     return btn;
   };
 
-  mkBtn('subtract', '最小化', () => appWindow.minimize());
-  const maxBtn = mkBtn('maximize', '最大化', () => appWindow.toggleMaximize());
-  const closeBtn = mkBtn('dismiss', '关闭', () => appWindow.close());
+  mkBtn('subtract', '最小化', () => void appWindow.minimize().catch(() => {}));
+  const maxBtn = mkBtn('maximize', '最大化', () => void appWindow.toggleMaximize().catch(() => {}));
+  const closeBtn = mkBtn('dismiss', '关闭', () => void appWindow.close().catch(() => {}));
   closeBtn.classList.add('wc-btn-close');
 
   const syncMaximized = async () => {
@@ -96,7 +96,7 @@ export function initWindowControls() {
     zone.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      void appWindow.startResizeDragging(direction);
+      void appWindow.startResizeDragging(direction).catch(() => {});
     });
     document.body.appendChild(zone);
   }

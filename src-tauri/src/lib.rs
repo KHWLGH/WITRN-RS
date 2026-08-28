@@ -4,8 +4,7 @@ mod window_material;
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
@@ -15,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
-use witrn_hid::{decode_general_sample, decode_pd_report, Parser, ReportKind, WitrnDev};
+use witrn_hid::{decode_general_sample, decode_pd_report, Parser, ReportKind};
 
 use pd_capture::{now_ms, PdEvent, PdLoadEntry, PdLog};
 
@@ -75,17 +74,6 @@ pub struct DeviceInfo {
     pub display_name: String,
     pub interface_number: i32,
     pub usage_page: u16,
-}
-
-/// 身份命令返回的稳定摘要；实时监控仍使用 `DeviceInfo` 和 `device-data`。
-#[derive(Clone, Serialize, Debug, PartialEq)]
-pub struct DeviceIdentity {
-    pub vendor_id: u16,
-    pub product_id: u16,
-    pub product: Option<String>,
-    pub usb_serial: Option<String>,
-    pub path: String,
-    pub fingerprint: String,
 }
 
 type PhysicalDeviceKey = (u16, u16, String);
@@ -281,6 +269,52 @@ fn emit_device_outgoing(
     }
 }
 
+const PD_IPC_PENDING_CAP: usize = 256;
+
+fn enqueue_pd_pending(pending: &mut VecDeque<PdEvent>, event: PdEvent) {
+    if pending.len() >= PD_IPC_PENDING_CAP {
+        pending.pop_front();
+    }
+    pending.push_back(event);
+}
+
+/// 把 pending 里的 PD 事件尽量送进通道。发送端已断开时返回 `false`。
+fn drain_pd_pending(tx: &mpsc::SyncSender<DeviceOutgoing>, pending: &mut VecDeque<PdEvent>) -> bool {
+    while let Some(event) = pending.pop_front() {
+        match tx.try_send(DeviceOutgoing::Pd(Box::new(event))) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(mpsc::TrySendError::Full(msg)) => {
+                if let DeviceOutgoing::Pd(boxed) = msg {
+                    pending.push_front(*boxed);
+                }
+                break;
+            }
+        }
+    }
+    true
+}
+
+/// 读线程已退出、发送端 drop 之后：先排空通道里残留的采样/PD，再发断开。
+/// 若队列里没有 `Disconnected`（例如 `try_send` 失败），仍通知前端。
+fn flush_outgoing_on_sender_drop(app: &AppHandle, rx: &mpsc::Receiver<DeviceOutgoing>) {
+    let mut remaining = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        remaining.push(msg);
+    }
+    if !remaining.is_empty() {
+        let first = remaining.remove(0);
+        let (samples, pds, _disconnected) = drain_device_outgoing(first, remaining);
+        for sample in samples {
+            let _ = app.emit("device-data", sample);
+        }
+        if !pds.is_empty() {
+            let _ = app.emit("pd-data-batch", pds);
+        }
+    }
+    let _ = app.emit("device-disconnected", ());
+}
+
 fn stop_task(slot: &mut Option<BackgroundTask>) {
     if let Some(task) = slot.take() {
         task.stop();
@@ -294,7 +328,6 @@ pub(crate) struct AppState {
     temp_task: Mutex<Option<BackgroundTask>>,
     pd_log: Arc<Mutex<PdLog>>,
     pd_capture_enabled: Arc<AtomicBool>,
-    connection_epoch: AtomicU64,
     pub(crate) window_material_available: AtomicBool,
     pub(crate) window_material_enabled: AtomicBool,
 }
@@ -309,7 +342,6 @@ impl Default for AppState {
             pd_log: Arc::new(Mutex::new(PdLog::default())),
             // 默认跟随记录且未开始记录：与前端 ingest 门控一致，不入库。
             pd_capture_enabled: Arc::new(AtomicBool::new(false)),
-            connection_epoch: AtomicU64::new(0),
             window_material_available: AtomicBool::new(false),
             window_material_enabled: AtomicBool::new(false),
         }
@@ -329,88 +361,19 @@ fn get_current_device_info(state: State<'_, AppState>) -> Option<DeviceInfo> {
     state.current_device_info.lock().unwrap().clone()
 }
 
-/// 在不污染实时读取线程的前提下读取当前设备身份，然后恢复原连接。
-///
-/// `WitrnDev::identity` 会主动等待一个可用于签名的普通报告，因此它只在
-/// 读取任务停止后调用。无论身份读取成功还是失败，都会尝试按原 path 重建
-/// 读取任务；设备拔出时恢复失败会作为原始身份错误的附加日志保留。
-#[tauri::command(async)]
-fn identify_current_device(
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<DeviceIdentity, String> {
-    let path = {
-        let info = state
-            .current_device_info
-            .lock()
-            .map_err(|_| "设备信息状态已损坏".to_string())?;
-        info.as_ref()
-            .map(|device| device.path.clone())
-            .ok_or_else(|| "当前没有已连接的设备".to_string())?
-    };
-
-    {
-        let mut task = state
-            .device_task
-            .lock()
-            .map_err(|_| "设备任务状态已损坏".to_string())?;
-        stop_task(&mut task);
-    }
-
-    let epoch = state.connection_epoch.load(Ordering::Relaxed);
-
-    let identity_result = (|| {
-        let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
-        let mut device = WitrnDev::new();
-        device
-            .open_path(path_cstr.as_c_str())
-            .map_err(|e| format!("无法打开设备读取身份: {e}"))?;
-        let identity = device
-            .identity(2_000)
-            .map_err(|e| format!("读取设备身份失败: {e}"))?;
-        let fingerprint = identity.fingerprint();
-        Ok::<DeviceIdentity, String>(DeviceIdentity {
-            vendor_id: identity.vendor_id,
-            product_id: identity.product_id,
-            product: identity.product,
-            usb_serial: identity.usb_serial,
-            path: identity.path,
-            fingerprint,
-        })
-    })();
-
-    match connect_device_on_path(path, &state, app.clone(), Some(epoch)) {
-        Ok(_) => identity_result,
-        Err(error) if error == CONNECTION_CHANGED => Err(CONNECTION_CHANGED.to_string()),
-        Err(error) => {
-            if let Ok(mut info) = state.current_device_info.lock() {
-                *info = None;
-            }
-            let _ = app.emit("device-disconnected", ());
-            match identity_result {
-                Ok(_) => Err(format!("读取身份成功但恢复连接失败: {error}")),
-                Err(identity_error) => Err(identity_error),
-            }
-        }
-    }
-}
-
-const CONNECTION_CHANGED: &str = "设备连接已变更";
-
 #[tauri::command(async)]
 fn connect_device_by_path(
     path: String,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    connect_device_on_path(path, &state, app, None)
+    connect_device_on_path(path, &state, app)
 }
 
 fn connect_device_on_path(
     path: String,
     state: &AppState,
     app: AppHandle,
-    expected_epoch: Option<u64>,
 ) -> Result<String, String> {
     let api = HidApi::new().map_err(|e| e.to_string())?;
 
@@ -430,25 +393,29 @@ fn connect_device_on_path(
         .device_task
         .lock()
         .map_err(|_| "设备任务状态已损坏".to_string())?;
-    if let Some(expected) = expected_epoch {
-        if state.connection_epoch.load(Ordering::Relaxed) != expected {
-            return Err(CONNECTION_CHANGED.to_string());
-        }
-    }
+    let had_session = task_slot.is_some();
     stop_task(&mut task_slot);
 
     // 打开设备
     let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
-    let device = api
-        .open_path(path_cstr.as_c_str())
-        .map_err(|e| format!("无法打开设备: {}", e))?;
+    let device = match api.open_path(path_cstr.as_c_str()) {
+        Ok(device) => device,
+        Err(e) => {
+            if had_session {
+                if let Ok(mut info) = state.current_device_info.lock() {
+                    *info = None;
+                }
+                let _ = app.emit("device-disconnected", ());
+            }
+            return Err(format!("无法打开设备: {}", e));
+        }
+    };
 
     // Store device info
     {
         let mut info = state.current_device_info.lock().unwrap();
         *info = Some(current_info);
     }
-    state.connection_epoch.fetch_add(1, Ordering::Relaxed);
 
     // 每个连接拥有自己的停止标志；旧连接即使延迟醒来也不会看到新连接的状态。
     let running_arc = Arc::new(AtomicBool::new(true));
@@ -464,7 +431,10 @@ fn connect_device_on_path(
         match rx.recv_timeout(Duration::from_millis(8)) {
             Ok(first) => emit_device_outgoing(&emit_app, first, &rx),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Disconnected) => {
+                flush_outgoing_on_sender_drop(&emit_app, &rx);
+                break;
+            }
         }
     });
 
@@ -473,6 +443,7 @@ fn connect_device_on_path(
         let mut buf = [0u8; 64];
         let mut last_emit: Option<Instant> = None;
         let mut pending: Option<DeviceData> = None;
+        let mut pd_pending: VecDeque<PdEvent> = VecDeque::new();
         // 最近一次 0xFF 采样，给 PD 报文盖 V/I；不随监控节流 take() 清掉。
         let mut last_bus: Option<(f32, f32)> = None;
         // PD state belongs to this connection and is discarded with the thread.
@@ -482,6 +453,10 @@ fn connect_device_on_path(
 
         loop {
             if !running_for_thread.load(Ordering::Relaxed) {
+                break;
+            }
+
+            if !drain_pd_pending(&tx, &mut pd_pending) {
                 break;
             }
 
@@ -498,7 +473,7 @@ fn connect_device_on_path(
                             if let Ok(mut info) = device_info_arc.lock() {
                                 *info = None;
                             }
-                            let _ = tx.send(DeviceOutgoing::Disconnected);
+                            let _ = tx.try_send(DeviceOutgoing::Disconnected);
                         }
                         break;
                     }
@@ -530,11 +505,7 @@ fn connect_device_on_path(
                                             )
                                         };
                                         if let Some(event) = event {
-                                            match tx.try_send(DeviceOutgoing::Pd(Box::new(event))) {
-                                                Ok(()) => {}
-                                                Err(mpsc::TrySendError::Disconnected(_)) => break,
-                                                Err(mpsc::TrySendError::Full(_)) => {}
-                                            }
+                                            enqueue_pd_pending(&mut pd_pending, event);
                                         }
                                     }
                                 }
@@ -552,7 +523,7 @@ fn connect_device_on_path(
                         if let Ok(mut info) = device_info_arc.lock() {
                             *info = None;
                         }
-                        let _ = tx.send(DeviceOutgoing::Disconnected);
+                        let _ = tx.try_send(DeviceOutgoing::Disconnected);
                     }
                     break;
                 }
@@ -580,11 +551,11 @@ fn connect_device_on_path(
                         if let DeviceOutgoing::Sample(sample) = msg {
                             pending = Some(sample);
                         }
-                        last_emit = Some(Instant::now());
                     }
                 }
             }
         }
+        let _ = drain_pd_pending(&tx, &mut pd_pending);
         if let Some(sample) = pending.take() {
             let _ = tx.try_send(DeviceOutgoing::Sample(sample));
         }
@@ -601,32 +572,12 @@ fn connect_device_on_path(
 }
 
 #[tauri::command(async)]
-fn connect_device(
-    vid: u16,
-    pid: u16,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<String, String> {
-    let api = HidApi::new().map_err(|e| e.to_string())?;
-
-    let path = collect_supported_device_infos(&api)
-        .into_iter()
-        .find(|device| device.vid == vid && device.pid == pid)
-        .map(|device| device.path)
-        .ok_or(format!("找不到设备 VID:{:04X} PID:{:04X}", vid, pid))?;
-
-    drop(api);
-    connect_device_by_path(path, state, app)
-}
-
-#[tauri::command(async)]
 fn disconnect_device(state: State<'_, AppState>) -> Result<String, String> {
     let mut task_slot = state
         .device_task
         .lock()
         .map_err(|_| "设备任务状态已损坏".to_string())?;
     stop_task(&mut task_slot);
-    state.connection_epoch.fetch_add(1, Ordering::Relaxed);
 
     // Clear device info immediately
     {
@@ -914,14 +865,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            connect_device,
             connect_device_by_path,
             disconnect_device,
             set_sample_rate,
             shutdown,
             enumerate_devices,
             get_current_device_info,
-            identify_current_device,
             connect_temp_service,
             disconnect_temp_service,
             set_pd_capture_enabled,

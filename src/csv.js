@@ -15,8 +15,7 @@ import {
   updateStats,
   updateStatsDisplay,
 } from './data.js';
-import { calculateEnergy, mapCsvColumns, parseRelativeTime } from './measurement.js';
-import { applySampleRate } from './settings.js';
+import { calculateEnergyInRange, mapCsvColumns, parseRelativeTime } from './measurement.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -157,21 +156,11 @@ export async function importCSV() {
     /** @type {number[]} */ let newCc1 = [];
     /** @type {number[]} */ let newCc2 = [];
 
-    let newSampleRate = state.settings.sampleRate;
     let newStartTime = Date.now();
 
     const headerLine = lines[dataStartIndex - 1] || '';
     // 旧格式（官方 / 本应用早期导出）没有温度或信号线列，按表头名定位，缺失列记 NaN
     const colMap = mapCsvColumns(headerLine);
-
-    const sampTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('SampTime(ms),'));
-    if (sampTimeLine) {
-      const rate = Number.parseInt(sampTimeLine.split(',')[1], 10);
-      if (Number.isFinite(rate)) {
-        // Imported metadata is untrusted; keep it within the same range as the Rust command/settings.
-        newSampleRate = Math.min(60_000, Math.max(10, rate));
-      }
-    }
 
     const dateTimeLine = lines.find((/** @type {string} */ l) => l.startsWith('DateTime,'));
     if (dateTimeLine) {
@@ -230,7 +219,7 @@ export async function importCSV() {
       throw new Error('No valid data found in CSV');
     }
 
-    if (state.isRecording || state.chartData.timestamps.length > 0) {
+    if (state.isRecording || state.chartSeries.timestamps.length > 0) {
       const message = state.isRecording
         ? '当前正在录制，导入 CSV 将停止录制并清除现有记录。\n确定要继续吗？'
         : '当前已有数据，导入 CSV 将清除现有记录。\n确定要继续吗？';
@@ -269,8 +258,7 @@ export async function importCSV() {
     if (state.isRecording) stopRecording();
     clearAndResetStats();
 
-    // 文件里的相对时间已经是 x；采样间隔只用于本次继续记录，不写回持久化配置。
-    await applySampleRate(newSampleRate);
+    // 文件里的相对时间已经是 x；继续记录用用户当前采样率，不改设置、不下发 HID。
     state.lastRecordingStartTime = newStartTime;
 
     const cols = emptyChartColumns(newSeconds.length);
@@ -297,7 +285,7 @@ export async function importCSV() {
     }
 
     // Calculate energy
-    const importedEnergy = calculateEnergy(newTimestamps, newCurrent, newPower);
+    const importedEnergy = calculateEnergyInRange(newSeconds, newCurrent, newPower, 0, newSeconds.length - 1);
     state.energy.wh = importedEnergy.wh;
     state.energy.mah = importedEnergy.mah;
     state.energy.lastX = null;
@@ -311,7 +299,7 @@ export async function importCSV() {
     updateStatsDisplay();
     updateEnergyDisplay();
     const dataCountEl = document.getElementById('data-count');
-    if (dataCountEl) dataCountEl.textContent = String(state.chartData.timestamps.length);
+    if (dataCountEl) dataCountEl.textContent = String(state.chartSeries.timestamps.length);
 
     // 序列数组已整体替换，重新绑定数据集并刷新（导航图范围由 uPlot range 函数自动计算）
     syncChartSeries();

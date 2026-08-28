@@ -2,6 +2,7 @@
 //!
 //! 前端列表只拿摘要 + 原始 HID 帧；解码树留在这边，点选时 `decode_pd_at` 直接
 //! 取出，不再重放 Parser。会话上下文（RDO 相对 PDO）在捕获当下已经解析好。
+//! 入库前给 VID / USB Vendor ID 叶子补 USB-IF 厂商名，列表 Note 与详情共用。
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -115,6 +116,8 @@ impl PdLog {
             return None;
         }
         let seq = self.messages.len() as u64;
+        let mut meta = meta;
+        meta.annotate_vendor_names();
         let mut event = PdEvent::message(t, seq, &report, &meta);
         event.vbus = vbus;
         event.ibus = ibus;

@@ -1,7 +1,6 @@
 //! Opening a WITRN meter and unpacking the reports it streams.
 
 use std::ffi::CStr;
-use std::time::{Duration, Instant};
 
 use chrono::Local;
 use hidapi::{DeviceInfo, HidApi, HidDevice};
@@ -10,27 +9,16 @@ use usbpd_parser::{ParseOptions, Parser, Sop};
 
 use crate::error::{Error, Result};
 use crate::general::{general_msg, REPORT_LEN};
-use crate::info::{self, Identity};
 
 /// WITRN's USB vendor ID, shared by every model.
 pub const WITRN_VID: u16 = 0x0716;
 /// Product ID of the WITRN K2, the default [`WitrnDev::open`] target.
 pub const K2_PID: u16 = 0x5060;
 
-/// How long [`WitrnDev::identity`] waits after a failed read before trying again.
-const RETRY_BACKOFF: Duration = Duration::from_millis(10);
-
 /// Where reports come from.
-///
-/// Crate-internal, and deliberately not part of the public API: it exists so the
-/// read loop can be exercised against a source that fails, times out, or answers
-/// somebody else, none of which can be arranged with real hardware in a test.
 pub(crate) trait ReportSource {
     /// Fill `buf` with the next report, waiting at most `timeout_ms` if given.
     fn read_report(&self, buf: &mut [u8], timeout_ms: Option<i32>) -> Result<usize>;
-
-    /// What USB enumeration says about this device.
-    fn device_info(&self) -> Result<DeviceInfo>;
 }
 
 impl ReportSource for HidDevice {
@@ -40,10 +28,6 @@ impl ReportSource for HidDevice {
             None => self.read(buf)?,
         };
         Ok(len)
-    }
-
-    fn device_info(&self) -> Result<DeviceInfo> {
-        Ok(self.get_device_info()?)
     }
 }
 
@@ -256,76 +240,6 @@ impl WitrnDev {
         Ok((at, general_msg(bytes)?))
     }
 
-    /// Identify the open meter, without writing anything to it.
-    ///
-    /// Combines what USB enumeration says — vendor, model, serial string, port —
-    /// with the [`signature`](crate::info::signature) bytes out of its own
-    /// stream. Reads reports until one arrives that is not carrying another
-    /// program's reply, since those cannot be trusted for the signature; in
-    /// practice that is the first one.
-    ///
-    /// ```no_run
-    /// # use witrn_hid::WitrnDev;
-    /// # let mut dev = WitrnDev::new();
-    /// # dev.open()?;
-    /// let id = dev.identity(2000)?;
-    /// println!("{id}");                   // WITRN.K2 0716:5060 batch 20230727
-    /// println!("{}", id.fingerprint());   // 0716:5060-20230727-340000200880060020
-    /// # Ok::<_, witrn_hid::Error>(())
-    /// ```
-    pub fn identity(&mut self, timeout_ms: i32) -> Result<Identity> {
-        let info = self.device.as_ref().ok_or(Error::NotOpen)?.device_info()?;
-        let signature = self.wait_for_signature(timeout_ms)?;
-
-        Ok(Identity {
-            vendor_id: info.vendor_id(),
-            product_id: info.product_id(),
-            product: info.product_string().map(str::to_owned),
-            usb_serial: info.serial_number().map(str::to_owned),
-            path: info.path().to_string_lossy().into_owned(),
-            signature,
-        })
-    }
-
-    /// Read until a report arrives that can be trusted for the signature.
-    ///
-    /// Two different things can go wrong here and the caller needs to be told which:
-    /// the transport failing, and the meter answering somebody else. Only the second
-    /// is worth waiting out, so the first is remembered and returned at the deadline
-    /// rather than discarded.
-    fn wait_for_signature(&mut self, timeout_ms: i32) -> Result<[u8; info::SIGNATURE_LEN]> {
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
-        let mut last_err = None;
-
-        loop {
-            let left = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis() as i32;
-            if left <= 0 {
-                return Err(last_err.unwrap_or(Error::NoData));
-            }
-            if let Err(err) = self.read_into(Some(left.max(1))) {
-                last_err = Some(err);
-                // An unplugged device fails immediately, so without this the loop
-                // spins at full tilt until the deadline.
-                std::thread::sleep(RETRY_BACKOFF);
-                continue;
-            }
-            let Some(bytes) = self.data.as_deref() else {
-                continue;
-            };
-            match info::signature(bytes) {
-                // The identity block is carrying somebody's reply; try the next one.
-                Ok(None) => continue,
-                Ok(Some(signature)) => return Ok(signature),
-                Err(err) => {
-                    last_err = Some(err);
-                    continue;
-                }
-            }
-        }
-    }
-
     /// Unpack a captured USB-PD report.
     ///
     /// With `data = None` the stored report is decoded against the device's own
@@ -343,6 +257,9 @@ impl WitrnDev {
         last_rdo: Option<&Metadata>,
     ) -> Result<Unpacked> {
         let (at, bytes) = self.subject(data)?;
+        if bytes[0] != 0xFE {
+            return Err(Error::UnknownReport { kind: bytes[0] });
+        }
         let bytes = bytes.to_vec();
 
         // Byte 1 is the message length including the 2-byte report preamble; byte 2
@@ -417,15 +334,6 @@ impl WitrnDev {
         }
         Ok(self.api.as_ref().expect("just initialised"))
     }
-
-    /// A device backed by something other than real hardware.
-    #[cfg(test)]
-    fn with_source(source: Box<dyn ReportSource>) -> Self {
-        Self {
-            device: Some(source),
-            ..Self::new()
-        }
-    }
 }
 
 /// Local wall-clock to the millisecond, matching the Python API's timestamps.
@@ -456,85 +364,12 @@ fn sop_of(byte: u8) -> Option<Sop> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    /// A report source that answers from a script instead of from hardware.
-    struct Fake {
-        /// What each successive read should do.
-        script: Vec<FakeRead>,
-        /// Shared with the test, so it can see how hard the loop tried.
-        calls: Rc<Cell<usize>>,
-    }
-
-    enum FakeRead {
-        /// The transport failed.
-        Fails,
-        /// A report arrived.
-        Gives(Vec<u8>),
-    }
-
-    impl Fake {
-        /// Repeat one outcome for as long as anything keeps reading.
-        fn always(read: FakeRead) -> (Box<dyn ReportSource>, Rc<Cell<usize>>) {
-            Self::scripted(vec![read])
-        }
-
-        fn scripted(script: Vec<FakeRead>) -> (Box<dyn ReportSource>, Rc<Cell<usize>>) {
-            let calls = Rc::new(Cell::new(0));
-            let source = Box::new(Self {
-                script,
-                calls: Rc::clone(&calls),
-            });
-            (source, calls)
-        }
-    }
-
-    impl ReportSource for Fake {
-        fn read_report(&self, buf: &mut [u8], _timeout_ms: Option<i32>) -> Result<usize> {
-            let n = self.calls.get();
-            self.calls.set(n + 1);
-            match &self.script[n.min(self.script.len() - 1)] {
-                // A variant nothing in the read path produces on its own, so seeing
-                // it come back out proves it was propagated rather than replaced.
-                FakeRead::Fails => Err(Error::UnknownReport { kind: 0x99 }),
-                FakeRead::Gives(report) => {
-                    let len = report.len().min(buf.len());
-                    buf[..len].copy_from_slice(&report[..len]);
-                    Ok(len)
-                }
-            }
-        }
-
-        fn device_info(&self) -> Result<DeviceInfo> {
-            Err(Error::NotOpen)
-        }
-    }
 
     fn general_report() -> Vec<u8> {
         let mut d = vec![0u8; REPORT_LEN];
         d[0] = 0xFF;
         d[46..50].copy_from_slice(&5.0f32.to_le_bytes());
         d
-    }
-
-    /// A K2 while it was answering another program: the identity block holds that
-    /// reply, so the signature bytes are somebody else's payload.
-    fn busy_report() -> Vec<u8> {
-        let hex = "FF558777424713980A01500050005C29A5409DE89A425A1F0000870800003666223F\
-                   D97C0E3F0000C8410000C8C20000000000000000001F2008800600209D23";
-        (0..hex.len() / 2)
-            .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
-            .collect()
-    }
-
-    /// An idle K2, which does yield a signature.
-    fn idle_report() -> Vec<u8> {
-        let hex = "FF5592ACB3B548231A34000050005C29A5409DE89A425A1F00009214000043A0223F\
-                   A09D0E3F0000C8410000C8C20000000000000000001E200880060020D53A";
-        (0..hex.len() / 2)
-            .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
-            .collect()
     }
 
     /// A PD report wrapping Source_Capabilities: 5 V / 3 A.
@@ -669,6 +504,15 @@ mod tests {
     }
 
     #[test]
+    fn pd_unpack_rejects_a_general_report() {
+        let mut dev = WitrnDev::new();
+        assert!(matches!(
+            dev.pd_unpack(Some(&general_report()), None, None, None),
+            Err(Error::UnknownReport { kind: 0xFF })
+        ));
+    }
+
+    #[test]
     fn standalone_pd_decoder_rejects_general_and_unknown_ordered_sets() {
         let mut parser = Parser::new();
         let mut general = pd_report();
@@ -684,63 +528,5 @@ mod tests {
             decode_pd_report(&mut parser, &unknown),
             Err(Error::UnknownOrderedSet { byte: 0x2A })
         ));
-    }
-
-    /// A failing read used to be discarded with `continue`, so the caller was told
-    /// "no report has been read yet" for a device that was reporting a real error.
-    #[test]
-    fn waiting_for_a_signature_reports_the_transport_error() {
-        let (source, _) = Fake::always(FakeRead::Fails);
-        let mut dev = WitrnDev::with_source(source);
-        assert!(matches!(
-            dev.wait_for_signature(30),
-            Err(Error::UnknownReport { kind: 0x99 })
-        ));
-    }
-
-    /// ...and it used to spin at full tilt while doing it, because a device that is
-    /// gone fails immediately rather than consuming the timeout.
-    #[test]
-    fn waiting_for_a_signature_backs_off_instead_of_spinning() {
-        let (source, calls) = Fake::always(FakeRead::Fails);
-        let mut dev = WitrnDev::with_source(source);
-
-        let started = Instant::now();
-        assert!(dev.wait_for_signature(100).is_err());
-        let elapsed = started.elapsed();
-
-        // 100 ms of back-off at 10 ms a turn is about ten reads. Without it this
-        // loop managed hundreds of thousands.
-        let made = calls.get();
-        assert!(
-            made <= 30,
-            "{made} reads in {elapsed:?} — the loop is not backing off"
-        );
-    }
-
-    /// A report whose identity block is carrying somebody else's reply is worth
-    /// waiting past, unlike a transport error.
-    #[test]
-    fn waiting_for_a_signature_skips_reports_that_cannot_carry_one() {
-        let (source, _) = Fake::scripted(vec![
-            FakeRead::Gives(busy_report()),
-            FakeRead::Gives(busy_report()),
-            FakeRead::Gives(idle_report()),
-        ]);
-        let mut dev = WitrnDev::with_source(source);
-
-        let signature = dev.wait_for_signature(1_000).unwrap();
-        assert_eq!(
-            signature,
-            [0x34, 0x00, 0x00, 0x20, 0x08, 0x80, 0x06, 0x00, 0x20]
-        );
-    }
-
-    /// A meter that never stops answering somebody else times out.
-    #[test]
-    fn a_meter_that_is_always_busy_times_out() {
-        let (source, _) = Fake::always(FakeRead::Gives(busy_report()));
-        let mut dev = WitrnDev::with_source(source);
-        assert!(matches!(dev.wait_for_signature(30), Err(Error::NoData)));
     }
 }

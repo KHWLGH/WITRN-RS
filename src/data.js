@@ -12,7 +12,7 @@ import {
   resolveChartWindow,
   zoomTimeWindow,
 } from './chart-window.js';
-import { nextRecordingX, niceCeiling } from './measurement.js';
+import { MAX_ENERGY_STEP_S, nextRecordingX, niceCeiling } from './measurement.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncRecordUI } from './ui/controlbar.js';
@@ -120,7 +120,7 @@ export function refreshRecordButton() {
   syncRecordUI({
     connected: state.isConnected,
     recording: state.isRecording,
-    hasData: state.chartData.timestamps.length > 0,
+    hasData: state.chartSeries.timestamps.length > 0,
     followPd: state.settings.pdFollowRecording,
   });
 }
@@ -151,7 +151,7 @@ export function addDataPoint(data) {
   if (!state.isRecording) {
     updateRealtimeDisplay(realtime);
     const el = document.getElementById('data-count');
-    if (el) el.textContent = String(state.chartData.timestamps.length);
+    if (el) el.textContent = String(state.chartSeries.timestamps.length);
     return;
   }
 
@@ -192,8 +192,9 @@ export function addDataPoint(data) {
 
   // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
   if (state.energy.lastX !== null) {
-    const dt = (relSeconds - state.energy.lastX) / 3600;
-    if (dt >= 0) {
+    const stepS = relSeconds - state.energy.lastX;
+    const dt = stepS / 3600;
+    if (dt >= 0 && stepS <= MAX_ENERGY_STEP_S) {
       state.energy.wh += powerAbs * dt;
       state.energy.mah += Math.abs(currentValue) * 1000 * dt;
     }
@@ -218,7 +219,10 @@ export function addDataPoint(data) {
     }
 
     if (value <= state.autoPauseSettings.condition) {
-      if (!state.autoPauseSettings.triggerStartTime) {
+      if (state.autoPauseSettings.duration <= 0) {
+        stopRecording();
+        state.autoPauseSettings.triggerStartTime = null;
+      } else if (!state.autoPauseSettings.triggerStartTime) {
         state.autoPauseSettings.triggerStartTime = Date.now();
       } else {
         const elapsed = (Date.now() - state.autoPauseSettings.triggerStartTime) / 1000;
@@ -512,7 +516,7 @@ export function updateRealtimeDisplay(data) {
  * @returns {{ startIndex: number, endIndex: number }}
  */
 export function getVisibleDataRange() {
-  const totalPoints = state.chartData.timestamps.length;
+  const totalPoints = state.chartSeries.timestamps.length;
   if (totalPoints === 0) return { startIndex: 0, endIndex: 0 };
 
   const mode = state.chartWindow?.mode ?? 'full';
@@ -575,7 +579,7 @@ function foldRangePoint(cache, i) {
   const dt = (cols.x.buf[i] - cols.x.buf[i - 1]) / 3600;
   const currentAbs = Math.abs(c);
   const powerAbs = Math.abs(p);
-  if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentAbs) || !Number.isFinite(powerAbs)) return;
+  if (dt < 0 || dt > MAX_ENERGY_STEP_S / 3600 || !Number.isFinite(dt) || !Number.isFinite(currentAbs) || !Number.isFinite(powerAbs)) return;
   cache.wh += powerAbs * dt;
   cache.mah += currentAbs * 1000 * dt;
 }
@@ -833,53 +837,62 @@ export function clearChart() {
 
 // ─── Recording control ───────────────────────────────────────────────────────
 
+/** 防止连点在 await PD 门期间重入。 */
+let recordingStartLock = false;
+
 /** 开始录制。先打开后端 PD 门再置本地标志，避免点开始后立刻插充电器丢握手。 */
 export async function startRecording() {
   if (!state.isConnected) {
     console.warn('Attempted to start recording while not connected');
     return;
   }
-  if (state.isRecording) return;
+  if (state.isRecording || recordingStartLock) return;
 
+  recordingStartLock = true;
   try {
-    await invokeCmd('set_pd_capture_enabled', { enabled: true });
-  } catch (e) {
-    console.error(e);
+    try {
+      await invokeCmd('set_pd_capture_enabled', { enabled: true });
+    } catch (e) {
+      console.error(e);
+    }
+    if (!state.isConnected || state.isRecording) return;
+
+    state.isRecording = true;
+    const now = Date.now();
+    state.recordingStartTime = now;
+    if (state.chartSeries.timestamps.length === 0) {
+      state.lastRecordingStartTime = now;
+      state.recordingBaseSeconds = 0;
+    } else {
+      const lastX = state.chartSeries.x.at(-1);
+      state.recordingBaseSeconds =
+        (Number.isFinite(lastX) ? lastX : 0) + Math.max(state.settings.sampleRate / 1000, 0.001);
+      if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartSeries.timestamps.at(0);
+    }
+    // 暂停期间不属于下一段能量积分区间。
+    state.energy.lastX = null;
+    state.autoPauseSettings.triggerStartTime = null;
+
+    const el = document.getElementById('record-status');
+    if (el) el.textContent = '记录中...';
+
+    startDurationTicker();
+    updateChartEmptyState();
+
+    refreshRecordButton();
+    const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
+    if (btnClear) btnClear.disabled = true;
+
+    // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
+    document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
+  } finally {
+    recordingStartLock = false;
   }
-  if (!state.isConnected || state.isRecording) return;
-
-  state.isRecording = true;
-  const now = Date.now();
-  state.recordingStartTime = now;
-  if (state.chartData.timestamps.length === 0) {
-    state.lastRecordingStartTime = now;
-    state.recordingBaseSeconds = 0;
-  } else {
-    const lastX = state.chartSeries.x.at(-1);
-    state.recordingBaseSeconds =
-      (Number.isFinite(lastX) ? lastX : 0) + Math.max(state.settings.sampleRate / 1000, 0.001);
-    if (state.lastRecordingStartTime === null) state.lastRecordingStartTime = state.chartData.timestamps.at(0);
-  }
-  // 暂停期间不属于下一段能量积分区间。
-  state.energy.lastX = null;
-  state.autoPauseSettings.triggerStartTime = null;
-
-  const el = document.getElementById('record-status');
-  if (el) el.textContent = '记录中...';
-
-  startDurationTicker();
-  updateChartEmptyState();
-
-  refreshRecordButton();
-  const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
-  if (btnClear) btnClear.disabled = true;
-
-  // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
-  document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
 
 /** 停止（暂停）录制。 */
 export function stopRecording() {
+  recordingStartLock = false;
   if (!state.isRecording) return;
 
   state.isRecording = false;

@@ -1,8 +1,8 @@
 // @ts-check
 /**
- * @file 应用内模态对话框 — 替代 tauri dialog 插件的 ask()/message()。
+ * @file 应用内模态对话框 — 替代 tauri dialog 插件的 ask()。
  *
- * 签名与 `window.__TAURI__.dialog` 的同名函数保持一致，调用点迁移只需换 import。
+ * 签名与 `window.__TAURI__.dialog.ask` 保持一致，调用点迁移只需换 import。
  * 基于原生 <dialog> + showModal()（背景自动 inert、焦点自动捕获）；
  * 极老的 WebKitGTK 无 HTMLDialogElement 时透明回退到插件实现。
  *
@@ -153,18 +153,4 @@ export async function ask(text, options = {}) {
     return window.__TAURI__.dialog.ask(text, options);
   }
   return show(text, options, true);
-}
-
-/**
- * 消息对话框（仅"确定"）。
- * @param {string} text
- * @param {DialogOptions} [options]
- * @returns {Promise<void>}
- */
-export async function message(text, options = {}) {
-  if (!supportsDialog) {
-    console.warn('[dialog] HTMLDialogElement 不可用，回退到 tauri dialog 插件');
-    return window.__TAURI__.dialog.message(text, options);
-  }
-  await show(text, options, false);
 }

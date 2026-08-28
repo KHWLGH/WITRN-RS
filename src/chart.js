@@ -1476,7 +1476,7 @@ export function initChart() {
 }
 
 /** 初始化导航器图表（功率全量缩略图，无轴无交互）。 */
-export function initNavigatorChart() {
+function initNavigatorChart() {
   const host = document.getElementById('navigator-chart');
   if (!host) return;
 

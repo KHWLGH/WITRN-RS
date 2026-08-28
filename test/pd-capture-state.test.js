@@ -44,3 +44,11 @@ test('ingest gating matches the followSuspended flag', () => {
   ingestPdData(meta);
   assert.equal(getPdBufferLength(), before + 1, 'live capture must buffer the message');
 });
+
+test('PD capture remains active when follow-recording is disabled', () => {
+  state.settings.pdFollowRecording = false;
+  state.isRecording = false;
+  const before = getPdBufferLength();
+  ingestPdData(meta);
+  assert.equal(getPdBufferLength(), before + 1);
+});

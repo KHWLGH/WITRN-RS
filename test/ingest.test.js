@@ -59,15 +59,14 @@ const sample = { voltage: 5, current: -2, power: -10, dp: 2.7, dn: 2.7, cc1: 1.7
 test('signed-current ON keeps the sign; power and energy stay non-negative', () => {
   resetIngestState();
   state.settings.signedCurrent = true;
-  // 提前一小时的积分基线，让能量段有确定的正 dt
+  // 积分基线落后一个采样间隔，保证 dt 为正且不超过空档上限
   state.energy.lastX = 0;
-  state.recordingBaseSeconds = 3600;
+  state.recordingBaseSeconds = 1;
 
   addDataPoint(sample);
 
-  assert.equal(state.chartData.current.at(-1), -2);
-  assert.equal(state.chartSeries.current.at(-1), -2);
-  assert.equal(state.chartData.power.at(-1), 10);
+    assert.equal(state.chartSeries.current.at(-1), -2);
+  assert.equal(state.chartSeries.power.at(-1), 10);
   assert.equal(state.stats.current.min, -2);
   assert.ok(state.energy.mah > 0, 'reverse current must still add capacity');
   assert.ok(state.energy.wh > 0);
@@ -79,7 +78,6 @@ test('signed-current OFF records the absolute value (legacy behavior)', () => {
 
   addDataPoint(sample);
 
-  assert.equal(state.chartData.current.at(-1), 2);
   assert.equal(state.chartSeries.current.at(-1), 2);
   assert.equal(state.stats.current.min, 2);
 });
@@ -90,10 +88,10 @@ test('signal-line voltages are stored alongside the main channels', () => {
 
   addDataPoint(sample);
 
-  assert.equal(state.chartData.dp.at(-1), 2.7);
-  assert.equal(state.chartData.dn.at(-1), 2.7);
-  assert.equal(state.chartData.cc1.at(-1), 1.7);
-  assert.equal(state.chartData.cc2.at(-1), 0);
+  assert.equal(state.chartSeries.dp.at(-1), 2.7);
+  assert.equal(state.chartSeries.dn.at(-1), 2.7);
+  assert.equal(state.chartSeries.cc1.at(-1), 1.7);
+  assert.equal(state.chartSeries.cc2.at(-1), 0);
   assert.equal(state.chartSeries.dp.length, state.chartSeries.x.length);
 });
 
@@ -102,22 +100,22 @@ test('missing signal fields are stored as NaN', () => {
 
   addDataPoint({ voltage: 5, current: 1, power: 5 });
 
-  assert.ok(Number.isNaN(state.chartData.dp.at(-1)));
-  assert.ok(Number.isNaN(state.chartData.cc2.at(-1)));
+  assert.ok(Number.isNaN(state.chartSeries.dp.at(-1)));
+  assert.ok(Number.isNaN(state.chartSeries.cc2.at(-1)));
 });
 
 test('out-of-range D+/D- are stored as NaN', () => {
   resetIngestState();
   addDataPoint({ voltage: 5, current: 1, power: 5, dp: 1e20, dn: 2.7 });
-  assert.ok(Number.isNaN(state.chartData.dp.at(-1)));
-  assert.equal(state.chartData.dn.at(-1), 2.7);
+  assert.ok(Number.isNaN(state.chartSeries.dp.at(-1)));
+  assert.equal(state.chartSeries.dn.at(-1), 2.7);
 });
 
 test('HID temperature is ignored until the temperature service is connected', () => {
   resetIngestState();
   state.settings.tempSource = 'device';
   addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
-  assert.ok(Number.isNaN(state.chartData.temp.at(-1)));
+  assert.ok(Number.isNaN(state.chartSeries.temp.at(-1)));
 });
 
 test('device temperature source records HID temperature', () => {
@@ -125,7 +123,7 @@ test('device temperature source records HID temperature', () => {
   state.settings.tempSource = 'device';
   state.isTempConnected = true;
   addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
-  assert.equal(state.chartData.temp.at(-1), 36.5);
+  assert.equal(state.chartSeries.temp.at(-1), 36.5);
 });
 
 test('external temperature source prefers TCP over HID', () => {
@@ -134,7 +132,7 @@ test('external temperature source prefers TCP over HID', () => {
   state.isTempConnected = true;
   state.currentTemp = 21.25;
   addDataPoint({ voltage: 5, current: 1, power: 5, temperature: 36.5 });
-  assert.equal(state.chartData.temp.at(-1), 21.25);
+  assert.equal(state.chartSeries.temp.at(-1), 21.25);
 });
 
 test('a sleep-sized wall-clock jump does not explode energy', () => {

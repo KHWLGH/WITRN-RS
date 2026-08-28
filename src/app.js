@@ -37,6 +37,7 @@ import {
   applyRealtimePanelWidth,
   applySampleRate,
   debouncedSaveSettings,
+  echoApUnit,
   loadSettings,
   resetSettings,
   saveSettings,
@@ -59,7 +60,6 @@ import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
-import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
 import {
   applyPdSplitLayout,
   clearPdEntries,
@@ -619,17 +619,6 @@ function setupControls() {
   const apBasis = /** @type {HTMLSelectElement} */ (document.getElementById('ap-basis'));
   const apCondition = /** @type {HTMLInputElement} */ (document.getElementById('ap-condition'));
   const apDuration = /** @type {HTMLInputElement} */ (document.getElementById('ap-duration'));
-  const apUnit = document.getElementById('ap-unit');
-
-  function updateApUnit() {
-    const basis = apBasis.value;
-    if (apUnit) {
-      if (basis === 'voltage') apUnit.textContent = 'V';
-      else if (basis === 'current') apUnit.textContent = 'A';
-      else if (basis === 'power') apUnit.textContent = 'W';
-      else apUnit.textContent = '';
-    }
-  }
 
   btn('btn-auto-pause-command', () => {
     state.autoPauseSettings.enabled = !state.autoPauseSettings.enabled;
@@ -644,11 +633,11 @@ function setupControls() {
         /** @type {HTMLSelectElement} */ (e.target).value
       );
       state.autoPauseSettings.triggerStartTime = null;
-      updateApUnit();
+      echoApUnit();
       debouncedSaveSettings();
     });
 
-    updateApUnit();
+    echoApUnit();
   }
 
   if (apCondition) {
@@ -762,11 +751,7 @@ function setupShell() {
     id: 'settings',
     icon: 'settings',
     label: '设置',
-    init: () => {
-      initSettingsView();
-      initDeviceView();
-    },
-    onShow: refreshDeviceIdentifyState,
+    init: initSettingsView,
   });
 
   const tabsContainer = document.getElementById('titlebar-tabs');
