@@ -31,7 +31,7 @@ export function initTabBar(container, tabs, onSelect) {
     btn.setAttribute('aria-selected', 'false');
     btn.setAttribute('aria-controls', `view-${tab.id}`);
     btn.tabIndex = -1;
-    btn.innerHTML = `<i class="codicon ${tab.icon}" aria-hidden="true"></i><span>${tab.label}</span>`;
+    btn.innerHTML = `<i class="fi fi-${tab.icon}" aria-hidden="true"></i><span>${tab.label}</span>`;
     btn.addEventListener('click', () => onSelect(tab.id));
     container.appendChild(btn);
     buttons.set(tab.id, btn);

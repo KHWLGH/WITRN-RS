@@ -116,10 +116,12 @@ export function updateTempUIVisibility() {
   const showTemp = state.isTempConnected || state.hasTempData;
 
   const tempCard = document.getElementById('temp-card');
-  if (tempCard) tempCard.style.display = showTemp ? 'flex' : 'none';
+  if (tempCard) tempCard.style.display = showTemp ? 'grid' : 'none';
 
   const exportWithTemp = document.getElementById('export-with-temp');
   if (exportWithTemp) exportWithTemp.classList.toggle('hidden', !showTemp);
+  const overflowExportWithTemp = document.getElementById('overflow-export-with-temp');
+  if (overflowExportWithTemp) overflowExportWithTemp.classList.toggle('hidden', !showTemp);
 
   const showTempContainer = document.getElementById('show-temp-container');
   if (showTempContainer) showTempContainer.style.display = showTemp ? 'flex' : 'none';

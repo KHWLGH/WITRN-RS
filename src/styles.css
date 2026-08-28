@@ -239,6 +239,7 @@ input[type="number"]::-webkit-outer-spin-button {
   background: var(--surface-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-2);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -443,13 +444,14 @@ input[type="number"]::-webkit-outer-spin-button {
   background: var(--surface-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-2);
   padding: 0;
 }
 
 .realtime-card {
   background: transparent;
   border-radius: 0;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 8px;
   text-align: left;
   border: none;
   border-bottom: 1px solid var(--stroke-divider);
@@ -462,52 +464,163 @@ input[type="number"]::-webkit-outer-spin-button {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  /* 侧栏是高频扫描区域：稍微拉开字距，中文标签和数值不会挤成一团。 */
-  letter-spacing: 0.25px;
+  letter-spacing: 0;
 }
 
-.realtime-card::before {
+.realtime-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.realtime-card.voltage .realtime-body,
+.realtime-card.current .realtime-body,
+.realtime-card.power .realtime-body,
+.realtime-card.temperature .realtime-body {
+  gap: 4px;
+}
+
+.realtime-card.voltage .realtime-content,
+.realtime-card.current .realtime-content,
+.realtime-card.power .realtime-content,
+.realtime-card.temperature .realtime-content {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-content: stretch;
+  align-items: center;
+  column-gap: 4px;
+  padding: 4px 10px;
+  overflow: hidden;
+  border-radius: var(--radius-surface);
+  isolation: isolate;
+}
+
+.realtime-card.voltage .realtime-content {
+  background: var(--ch-voltage-card);
+}
+.realtime-card.current .realtime-content {
+  background: var(--ch-current-card);
+}
+.realtime-card.power .realtime-content {
+  background: var(--ch-power-card);
+}
+.realtime-card.temperature .realtime-content {
+  background: var(--ch-temp-card);
+}
+
+.level-bar {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.level-bar::after {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 3px;
-  height: auto;
-  background: transparent;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(25% - 1px),
+    color-mix(in srgb, var(--stroke-control) 55%, transparent) calc(25% - 1px),
+    color-mix(in srgb, var(--stroke-control) 55%, transparent) 25%
+  );
 }
 
-.realtime-card.voltage::before {
+.level-bar-fill {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.realtime-card.voltage .level-bar-fill {
+  background: var(--ch-voltage-meter);
+}
+.realtime-card.current .level-bar-fill {
+  background: var(--ch-current-meter);
+}
+.realtime-card.power .level-bar-fill {
+  background: var(--ch-power-meter);
+}
+.realtime-card.temperature .level-bar-fill {
+  background: var(--ch-temp-meter);
+}
+
+.realtime-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex: none;
+  background: var(--text-tertiary);
+}
+
+.realtime-card.voltage .realtime-dot {
   background: var(--ch-voltage);
 }
-.realtime-card.current::before {
+.realtime-card.current .realtime-dot {
   background: var(--ch-current);
 }
-.realtime-card.power::before {
+.realtime-card.power .realtime-dot {
   background: var(--ch-power);
 }
-.realtime-card.temperature::before {
+.realtime-card.temperature .realtime-dot {
   background: var(--ch-temp);
 }
-.realtime-card.energy::before {
+
+.mini-bar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--fill-recess);
+  overflow: hidden;
+}
+
+.mini-bar-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.mini-bar-fill.energy {
   background: var(--ch-energy);
 }
-.realtime-card.signals::before {
-  background: linear-gradient(180deg, var(--ch-dp), var(--ch-dn), var(--ch-cc1), var(--ch-cc2));
+.mini-bar-fill.dp {
+  background: var(--ch-dp);
+}
+.mini-bar-fill.dn {
+  background: var(--ch-dn);
+}
+.mini-bar-fill.cc1 {
+  background: var(--ch-cc1);
+}
+.mini-bar-fill.cc2 {
+  background: var(--ch-cc2);
 }
 
 .realtime-card:hover {
   background: var(--fill-subtle-hover);
 }
 
-/* 温度卡标题行仍把「平均」放右侧；功率卡的平均在主数字下方左对齐 */
 .realtime-label {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   width: 100%;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 18px;
   letter-spacing: 0.4px;
   color: var(--text-secondary);
   font-weight: 600;
@@ -527,39 +640,54 @@ input[type="number"]::-webkit-outer-spin-button {
   font-variant-numeric: tabular-nums;
 }
 
-.realtime-card.power .realtime-average span {
-  color: var(--ch-power);
-}
-.realtime-card.temperature .realtime-average span {
-  color: var(--ch-temp);
-}
-
 .realtime-content {
   display: flex;
   align-items: baseline;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 0;
+  line-height: 1;
+}
+
+.realtime-card.voltage .realtime-value,
+.realtime-card.current .realtime-value,
+.realtime-card.power .realtime-value,
+.realtime-card.temperature .realtime-value {
+  position: relative;
+  z-index: 1;
+  grid-column: 2;
+  min-width: 0;
+  text-align: center;
+  color: color-mix(in srgb, var(--text-primary) 82%, transparent);
+}
+
+.realtime-card.voltage .realtime-unit,
+.realtime-card.current .realtime-unit,
+.realtime-card.power .realtime-unit,
+.realtime-card.temperature .realtime-unit {
+  position: relative;
+  z-index: 1;
+  grid-column: 3;
+  margin-left: 0;
+}
+
+.realtime-direction {
+  position: relative;
+  z-index: 1;
+  grid-column: 1;
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-right: 0;
 }
 
 .realtime-value {
   font: var(--rt-numeral);
-  text-align: center;
+  text-align: left;
   white-space: nowrap;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
 
-.realtime-card.voltage .realtime-value {
-  color: var(--ch-voltage);
-}
-.realtime-card.current .realtime-value {
-  color: var(--ch-current);
-}
-.realtime-card.power .realtime-value {
-  color: var(--ch-power);
-}
-.realtime-card.temperature .realtime-value {
-  color: var(--ch-temp);
-}
 .realtime-card.energy .realtime-value {
   color: var(--ch-energy);
 }
@@ -571,26 +699,50 @@ input[type="number"]::-webkit-outer-spin-button {
   margin-left: 4px;
 }
 
-.realtime-direction {
-  font-size: 18px;
-  color: var(--ch-current);
-  align-self: center;
-  margin-right: 2px;
-}
-
-/* 最小 / 最大对开一行；靠 span 自身的省略号收敛，窄档下不会硬裁 */
+/* 最小 / 平均 / 最大三列：短数字与长数字共用等宽，避免全部左对齐把间距挤乱 */
 .realtime-stats {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px;
   width: 100%;
-  font-size: 13px;
-  letter-spacing: 0.25px;
+  font-size: 11px;
+  line-height: 1.25;
+  letter-spacing: 0;
   font-weight: 600;
-  color: var(--text-tertiary);
-  margin-top: 3px;
+  color: var(--text-primary);
+  margin-top: 2px;
   padding-top: 3px;
   border-top: 1px solid var(--stroke-divider);
+}
+
+.realtime-stats > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.realtime-stats > span:nth-child(1) {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.realtime-stats > span:nth-child(2) {
+  align-items: center;
+  text-align: center;
+}
+
+.realtime-stats > span:nth-child(3) {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.stat-k {
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  letter-spacing: 0.2px;
 }
 
 .realtime-metric {
@@ -625,14 +777,15 @@ input[type="number"]::-webkit-outer-spin-button {
   margin-top: 2px;
 }
 
-.realtime-stats span {
-  min-width: 0; /* 允许作为 flex 子项收缩，配合省略号替代旧的无声硬裁 */
+.realtime-stats > span > span:not(.stat-k) {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
-.realtime-stats span span,
 #data-count {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -648,12 +801,18 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .signal-cell {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: baseline;
-  gap: 4px;
+  gap: 4px 4px;
   font-size: 13px;
+  line-height: 1.25;
   letter-spacing: 0.25px;
   min-width: 0;
+}
+
+.signal-cell .mini-bar {
+  grid-column: 1 / -1;
 }
 
 .signal-name {
@@ -692,6 +851,7 @@ input[type="number"]::-webkit-outer-spin-button {
   border-radius: var(--radius-surface);
   padding: var(--chart-pad);
   border: 1px solid var(--stroke-card);
+  box-shadow: var(--shadow-2);
   position: relative;
   min-height: var(--chart-min-height);
   display: flex;

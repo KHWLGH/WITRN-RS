@@ -927,10 +927,10 @@ function hasVisibleYScale(/** @type {any} */ u) {
 }
 
 /**
- * 在主刻度之间各画一条中线，形成主 / 次两级网格。
+ * 在主刻度之间画次网格：每个主格均分成 5 格（4 条次线）。
  *
- * 纵向中线取自 X 轴实际刻度（时间步长非等距，只能读 _splits）；
- * 横向中线按几何等分推出——全部 Y 轴共用 yDivisions 等分，中线与任一条轴的刻度
+ * 纵向次线取自 X 轴实际刻度（时间步长非等距，只能读 _splits）；
+ * 横向次线按几何等分推出——全部 Y 轴共用 yDivisions 等分，次线与任一条轴的刻度
  * 都对齐，因此不依赖某条具体的轴，隐藏电压曲线后横向次网格依然在位。
  * @param {any} u
  */
@@ -943,8 +943,9 @@ function drawMinorGrid(u) {
   const top = bbox.top;
   const bottom = bbox.top + bbox.height;
   const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  // 主刻度间距低于此值时不再插中线，避免窄图上重新糊成一片（设备像素）
+  // 主刻度间距低于此值时不再插次线，避免窄图上重新糊成一片（设备像素）
   const minGapPx = 36 * pxRatio;
+  const minorCells = 5;
 
   ctx.save();
   ctx.lineWidth = pxRatio;
@@ -954,29 +955,33 @@ function drawMinorGrid(u) {
   ctx.translate(offset, offset);
   ctx.beginPath();
 
-  // ── 纵向中线（X 轴主刻度之间） ──
+  // ── 纵向次线（X 轴主刻度之间） ──
   const xSplits = u.axes?.[0]?._splits;
   if (Array.isArray(xSplits) && xSplits.length >= 2) {
     for (let i = 0; i < xSplits.length - 1; i++) {
       const a = u.valToPos(xSplits[i], 'x', true);
       const b = u.valToPos(xSplits[i + 1], 'x', true);
       if (Math.abs(b - a) < minGapPx) continue;
-      const x = Math.round((a + b) / 2);
-      if (x >= left && x <= right) {
-        ctx.moveTo(x, top);
-        ctx.lineTo(x, bottom);
+      for (let k = 1; k < minorCells; k++) {
+        const x = Math.round(a + ((b - a) * k) / minorCells);
+        if (x >= left && x <= right) {
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+        }
       }
     }
   }
 
-  // ── 横向中线（Y 轴等分格之间） ──
+  // ── 横向次线（Y 轴等分格之间） ──
   const divisions = appliedYDivisions || yDivisions(u);
   if (bbox.height / divisions >= minGapPx && hasVisibleYScale(u)) {
     for (let i = 0; i < divisions; i++) {
-      const y = Math.round(top + (bbox.height * (i + 0.5)) / divisions);
-      if (y >= top && y <= bottom) {
-        ctx.moveTo(left, y);
-        ctx.lineTo(right, y);
+      for (let k = 1; k < minorCells; k++) {
+        const y = Math.round(top + (bbox.height * (i + k / minorCells)) / divisions);
+        if (y >= top && y <= bottom) {
+          ctx.moveTo(left, y);
+          ctx.lineTo(right, y);
+        }
       }
     }
   }
@@ -1254,6 +1259,7 @@ function tooltipPlugin() {
  */
 function observeResize(host, chart, onSize = null) {
   const ro = new ResizeObserver(() => {
+    if (state.__layoutResizing) return;
     if (!monitorVisible()) {
       chartDirty = true;
       return;

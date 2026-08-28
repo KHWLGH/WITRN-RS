@@ -4,13 +4,14 @@
  */
 
 import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js';
-import { updateEnergyDisplay, updateSliderFill, updateStatsDisplay } from './data.js';
+import { updateEnergyDisplay, updateSampleRateStatus, updateSliderFill, updateStatsDisplay } from './data.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { applyThemePreference, echoThemeUI } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
+import { echoWindowMaterialUI, setWindowMaterialEnabled } from './window-material.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -60,6 +61,11 @@ function normalizeSettings(saved) {
   if (merged.theme !== 'dark' && merged.theme !== 'light' && merged.theme !== 'system') {
     merged.theme = defaultSettings.theme;
   }
+  merged.windowMaterial = merged.windowMaterial !== false;
+  merged.realtimePanelWidth = Math.round(
+    clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
+  );
+  merged.pdSplitSide = merged.pdSplitSide === true;
   return merged;
 }
 
@@ -79,6 +85,7 @@ export async function applySampleRate(rate) {
       console.error('Failed to set sample rate:', err);
     }
   }
+  updateSampleRateStatus();
 }
 
 function echoRangeUI() {
@@ -103,7 +110,29 @@ function echoHeadroomUI() {
   }
 }
 
-/** 回显界面缩放滑条（loadSettings / resetSettings 共用）。 */
+/**
+ * 监控页读数栏宽度。inline style 是用户偏好；窄窗用 CSS max-width 裁可视宽度，不改偏好。
+ * @param {number} [px]
+ * @param {{ persistAria?: boolean, commit?: boolean }} [opts]
+ *   persistAria / commit 默认 true。拖动预览传 false，松手再按是否真的改了可视宽度写入。
+ * @returns {number}
+ */
+export function applyRealtimePanelWidth(px = state.settings.realtimePanelWidth, opts = {}) {
+  const persistAria = opts.persistAria !== false;
+  const commit = opts.commit !== false;
+  const width = Math.round(Math.min(360, Math.max(200, Number(px) || defaultSettings.realtimePanelWidth)));
+  if (commit) state.settings.realtimePanelWidth = width;
+  const panel = document.querySelector('.realtime-panel');
+  if (panel instanceof HTMLElement) panel.style.width = `${width}px`;
+  if (persistAria && commit) {
+    document.getElementById('monitor-splitter')?.setAttribute('aria-valuenow', String(width));
+  }
+  return width;
+}
+
+function echoRealtimePanelWidth() {
+  applyRealtimePanelWidth(state.settings.realtimePanelWidth);
+}
 function echoUiScaleUI() {
   const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('ui-scale'));
   if (slider) slider.value = String(state.settings.uiScalePercent);
@@ -221,6 +250,8 @@ export async function loadSettings() {
   } finally {
     echoUiScaleUI();
     echoThemeUI();
+    echoWindowMaterialUI();
+    echoRealtimePanelWidth();
     fillUiScaleHint();
     try {
       applyThemePreference(state.settings.theme);
@@ -304,7 +335,10 @@ export async function resetSettings() {
     echoHeadroomUI();
     echoUiScaleUI();
     echoThemeUI();
+    echoWindowMaterialUI();
+    echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
+    void setWindowMaterialEnabled(state.settings.windowMaterial);
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位

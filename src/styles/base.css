@@ -50,13 +50,22 @@ button {
   height: 8px;
 }
 
+*:hover::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
+  background: color-mix(in srgb, var(--scrollbar-thumb) 40%, transparent);
   border-radius: var(--radius-full);
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--scrollbar-thumb) 80%, transparent);
 }
 
 ::-webkit-scrollbar-thumb:hover {

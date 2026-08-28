@@ -21,6 +21,21 @@ export function parseRelativeTime(label) {
   return Number.isFinite(seconds) ? seconds : null;
 }
 
+/**
+ * 把正数取到 1-2-5 系列的上档，供读数栏电平条自动量程使用。
+ * 12.3 → 20，3.4 → 5，31 → 50；非正数或非有限值返回 1。
+ * @param {number} value
+ * @returns {number}
+ */
+export function niceCeiling(value) {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  const exp = Math.floor(Math.log10(value));
+  const mag = 10 ** exp;
+  const mantissa = value / mag;
+  const nice = mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10;
+  return nice * mag;
+}
+
 /** 相邻采样点超过该秒数视为中断（休眠 / NTP / 漏采），不把空档积进 Wh/mAh。 */
 export const MAX_ENERGY_STEP_S = 2;
 

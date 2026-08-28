@@ -256,7 +256,7 @@
   color: var(--text-primary);
 }
 
-.toast-close .codicon {
+.toast-close .fi {
   font-size: 14px;
 }
 
@@ -329,6 +329,84 @@
   color: var(--status-danger);
 }
 
-.menu-item .codicon {
+.menu-item .fi {
   font-size: 14px;
+}
+
+/* Fluent ToggleSwitch：原生 checkbox + 轨道 / 滑块 */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 20px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.toggle-track {
+  display: block;
+  width: 40px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--fill-control);
+  border: 1px solid var(--stroke-control);
+  position: relative;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+.toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+  transition:
+    transform var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+
+.toggle:hover .toggle-track {
+  background: var(--fill-control-hover);
+}
+
+.toggle:active .toggle-track {
+  background: var(--fill-subtle-pressed);
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+
+.toggle:active input:checked + .toggle-track {
+  filter: brightness(0.92);
+}
+
+.toggle input:checked + .toggle-track::after {
+  transform: translateX(20px);
+  background: var(--text-on-accent);
+}
+
+.toggle input:disabled + .toggle-track {
+  opacity: 0.5;
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: 1px;
 }

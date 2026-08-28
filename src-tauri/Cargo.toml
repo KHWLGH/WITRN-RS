@@ -33,6 +33,7 @@ tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
 
 [target.'cfg(windows)'.dependencies]
+window-vibrancy = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_Properties",

@@ -4,17 +4,107 @@
  */
 
 import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
-import { nextRecordingX } from './measurement.js';
+import { nextRecordingX, niceCeiling } from './measurement.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncRecordUI } from './ui/controlbar.js';
-import { formatRelativeHMS } from './utils.js';
+import { formatRelativeHMS, formatSampleRateLabel } from './utils.js';
 
 /** @param {string} cmd @param {Record<string, unknown>} [args] */
 function invokeCmd(cmd, args) {
   const invoke = window.__TAURI__?.core?.invoke;
   if (typeof invoke !== 'function') return Promise.resolve(null);
   return invoke(cmd, args);
+}
+
+/** @type {Record<string, number>} */
+const meterPeak = {
+  voltage: 0,
+  current: 0,
+  power: 0,
+  temp: 0,
+  energy: 0,
+  capacity: 0,
+  dp: 0,
+  dn: 0,
+  cc1: 0,
+  cc2: 0,
+};
+
+/**
+ * @param {string} id
+ * @param {keyof typeof meterPeak} channel
+ * @param {number} value
+ * @param {'x'|'y'} axis
+ */
+function setMeter(id, channel, value, axis) {
+  const el = document.getElementById(id);
+  if (!el?.style) return;
+  const abs = Math.abs(value);
+  if (!Number.isFinite(abs)) {
+    el.style.transform = axis === 'x' ? 'scaleX(0)' : 'scaleY(0)';
+    return;
+  }
+  if (abs > meterPeak[channel]) meterPeak[channel] = abs;
+  const ceil = niceCeiling(meterPeak[channel]);
+  const pct = ceil > 0 ? Math.min(1, abs / ceil) : 0;
+  el.style.transform = axis === 'x' ? `scaleX(${pct})` : `scaleY(${pct})`;
+}
+
+function resetMeters() {
+  for (const key of Object.keys(meterPeak)) meterPeak[key] = 0;
+  for (const id of [
+    'lv-voltage',
+    'lv-current',
+    'lv-power',
+    'lv-temp',
+    'lv-energy',
+    'lv-capacity',
+    'lv-dp',
+    'lv-dn',
+    'lv-cc1',
+    'lv-cc2',
+  ]) {
+    const el = document.getElementById(id);
+    if (el?.style) el.style.transform = 'scaleX(0)';
+  }
+}
+
+export function updateChartEmptyState() {
+  document.querySelector?.('.chart-container')?.classList.toggle('has-data', state.chartSeries.x.length > 0);
+}
+
+/** @type {ReturnType<typeof setInterval>|null} */
+let durationTimer = null;
+
+export function updateDurationDisplay() {
+  const el = document.getElementById('record-duration');
+  if (!el) return;
+  const lastX = state.chartSeries.x.length > 0 ? state.chartSeries.x.at(-1) : Number.NaN;
+  let seconds = Number.isFinite(lastX) ? lastX : 0;
+  if (state.isRecording && state.recordingStartTime !== null) {
+    seconds = state.recordingBaseSeconds + Math.max(0, (Date.now() - state.recordingStartTime) / 1000);
+  }
+  el.textContent = state.chartSeries.x.length === 0 && !state.isRecording ? '--' : formatRelativeHMS(seconds);
+}
+
+export function updateSampleRateStatus() {
+  const el = document.getElementById('status-sample-rate');
+  if (el) el.textContent = formatSampleRateLabel(state.settings.sampleRate);
+}
+
+function startDurationTicker() {
+  if (durationTimer !== null) return;
+  updateDurationDisplay();
+  durationTimer = setInterval(updateDurationDisplay, 250);
+}
+
+function stopDurationTicker() {
+  if (durationTimer !== null) {
+    clearInterval(durationTimer);
+    durationTimer = null;
+  }
+  updateDurationDisplay();
 }
 
 /** 按当前状态刷新命令栏的记录按钮（开始 / 继续 / 暂停）。 */
@@ -230,13 +320,17 @@ export function updateRealtimeDisplay(data) {
   if (cEl) cEl.textContent = Math.abs(data.current).toFixed(4);
   if (pEl) pEl.textContent = data.power.toFixed(4);
 
+  setMeter('lv-voltage', 'voltage', data.voltage, 'x');
+  setMeter('lv-current', 'current', data.current, 'x');
+  setMeter('lv-power', 'power', data.power, 'x');
+
   const dirEl = /** @type {HTMLElement|null} */ (document.getElementById('rt-current-dir'));
   if (dirEl) {
     const showDir = state.settings.signedCurrent && Number.isFinite(data.current) && data.current !== 0;
     dirEl.hidden = !showDir;
     if (showDir) {
-      dirEl.classList?.toggle('codicon-arrow-small-right', data.current > 0);
-      dirEl.classList?.toggle('codicon-arrow-small-left', data.current < 0);
+      dirEl.classList?.toggle('fi-arrow-right', data.current > 0);
+      dirEl.classList?.toggle('fi-arrow-left', data.current < 0);
       dirEl.title = data.current > 0 ? '正向电流' : '反向电流';
     }
   }
@@ -244,9 +338,11 @@ export function updateRealtimeDisplay(data) {
   if (state.isTempConnected && Number.isFinite(data.temp)) {
     const tEl = document.getElementById('rt-temp');
     if (tEl) tEl.textContent = data.temp.toFixed(1);
+    setMeter('lv-temp', 'temp', data.temp, 'x');
   } else if (state.isTempConnected) {
     const tEl = document.getElementById('rt-temp');
     if (tEl) tEl.textContent = '--';
+    setMeter('lv-temp', 'temp', Number.NaN, 'x');
   }
 
   /** @param {string} id @param {number|undefined} val */
@@ -258,6 +354,10 @@ export function updateRealtimeDisplay(data) {
   setSignal('rt-dn', data.dn);
   setSignal('rt-cc1', data.cc1);
   setSignal('rt-cc2', data.cc2);
+  setMeter('lv-dp', 'dp', Number.isFinite(data.dp) ? /** @type {number} */ (data.dp) : Number.NaN, 'x');
+  setMeter('lv-dn', 'dn', Number.isFinite(data.dn) ? /** @type {number} */ (data.dn) : Number.NaN, 'x');
+  setMeter('lv-cc1', 'cc1', Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN, 'x');
+  setMeter('lv-cc2', 'cc2', Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN, 'x');
 }
 
 /**
@@ -284,6 +384,7 @@ export function getVisibleDataRange() {
  *   startIndex: number, endIndex: number, len: number,
  *   minV: number, maxV: number, minC: number, maxC: number,
  *   minP: number, maxP: number, minT: number, maxT: number,
+ *   sumV: number, countV: number, sumC: number, countC: number,
  *   sumP: number, countP: number, sumT: number, countT: number,
  *   wh: number, mah: number,
  * }} RangeStatsCache
@@ -300,8 +401,12 @@ function foldRangePoint(cache, i) {
   const t = cols.temp.buf[i];
   if (v < cache.minV) cache.minV = v;
   if (v > cache.maxV) cache.maxV = v;
+  cache.sumV += v;
+  cache.countV += 1;
   if (c < cache.minC) cache.minC = c;
   if (c > cache.maxC) cache.maxC = c;
+  cache.sumC += c;
+  cache.countC += 1;
   if (p < cache.minP) cache.minP = p;
   if (p > cache.maxP) cache.maxP = p;
   cache.sumP += p;
@@ -370,6 +475,10 @@ function getRangeStats() {
     maxP: -Infinity,
     minT: Infinity,
     maxT: -Infinity,
+    sumV: 0,
+    countV: 0,
+    sumC: 0,
+    countC: 0,
     sumP: 0,
     countP: 0,
     sumT: 0,
@@ -394,10 +503,10 @@ export function updateStatsDisplay() {
     const range = getRangeStats();
     if (range) {
       displayStats = {
-        voltage: { min: range.minV, max: range.maxV, sum: 0, count: 0 },
-        current: { min: range.minC, max: range.maxC, sum: 0, count: 0 },
-        power: { min: range.minP, max: range.maxP, sum: 0, count: 0 },
-        temp: { min: range.minT, max: range.maxT, sum: 0, count: 0 },
+        voltage: { min: range.minV, max: range.maxV, sum: range.sumV, count: range.countV },
+        current: { min: range.minC, max: range.maxC, sum: range.sumC, count: range.countC },
+        power: { min: range.minP, max: range.maxP, sum: range.sumP, count: range.countP },
+        temp: { min: range.minT, max: range.maxT, sum: range.sumT, count: range.countT },
       };
       powerAvg = range.countP > 0 ? range.sumP / range.countP : null;
       tempAvg = range.countT > 0 ? range.sumT / range.countT : null;
@@ -418,6 +527,13 @@ export function updateStatsDisplay() {
   setText('max-current', displayStats.current.max);
   setText('min-power', displayStats.power.min);
   setText('max-power', displayStats.power.max);
+
+  const avgVoltage = displayStats.voltage.count > 0 ? displayStats.voltage.sum / displayStats.voltage.count : null;
+  const avgCurrent = displayStats.current.count > 0 ? displayStats.current.sum / displayStats.current.count : null;
+  const avgVoltageEl = document.getElementById('avg-voltage');
+  const avgCurrentEl = document.getElementById('avg-current');
+  if (avgVoltageEl) avgVoltageEl.textContent = avgVoltage !== null ? avgVoltage.toFixed(3) : '--';
+  if (avgCurrentEl) avgCurrentEl.textContent = avgCurrent !== null ? Math.abs(avgCurrent).toFixed(3) : '--';
 
   const avgPowerEl = document.getElementById('avg-power');
   if (avgPowerEl) avgPowerEl.textContent = displayPowerAvg !== null ? displayPowerAvg.toFixed(3) : '--';
@@ -447,6 +563,8 @@ export function updateEnergyDisplay() {
   const mahEl = document.getElementById('rt-capacity');
   if (whEl) whEl.textContent = wh.toFixed(4);
   if (mahEl) mahEl.textContent = mah.toFixed(2);
+  setMeter('lv-energy', 'energy', wh, 'x');
+  setMeter('lv-capacity', 'capacity', mah, 'x');
 }
 
 // ─── Throttled stats refresh ─────────────────────────────────────────────────
@@ -468,6 +586,8 @@ export function scheduleRangeUi() {
     __rangeUiPending = false;
     if (lastRealtime) updateRealtimeDisplay(lastRealtime);
     updateChartRange();
+    updateChartEmptyState();
+    updateDurationDisplay();
     const el = document.getElementById('data-count');
     if (el) el.textContent = String(state.chartSeries.x.length);
   });
@@ -524,6 +644,7 @@ export function resetRealtimeCards() {
   dash('rt-cc2');
   const dirEl = document.getElementById('rt-current-dir');
   if (dirEl) dirEl.hidden = true;
+  resetMeters();
 }
 
 /** 清空图表数据和相关状态。 */
@@ -534,6 +655,8 @@ export function clearChart() {
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
   resetRealtimeCards();
+  updateChartEmptyState();
+  updateDurationDisplay();
 
   if (!state.isTempConnected) {
     state.hasTempData = false;
@@ -593,6 +716,9 @@ export async function startRecording() {
   const el = document.getElementById('record-status');
   if (el) el.textContent = '记录中...';
 
+  startDurationTicker();
+  updateChartEmptyState();
+
   refreshRecordButton();
   const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));
   if (btnClear) btnClear.disabled = true;
@@ -613,6 +739,8 @@ export function stopRecording() {
 
   const el = document.getElementById('record-status');
   if (el) el.textContent = '停止';
+
+  stopDurationTicker();
 
   refreshRecordButton();
   const btnClear = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-clear-chart'));

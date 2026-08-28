@@ -1,0 +1,101 @@
+/*
+ * Fluent System Icons — 以 CSS mask 染色，尺寸跟随 font-size（1em）。
+ * SVG 源文件在 fluent-icons/，MIT License（Microsoft）。
+ */
+
+.fi {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  font-size: inherit;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: var(--fi) center / contain no-repeat;
+  mask: var(--fi) center / contain no-repeat;
+}
+
+.fi-refresh {
+  --fi: url("fluent-icons/arrow-clockwise.svg");
+}
+.fi-plug {
+  --fi: url("fluent-icons/plug-connected.svg");
+}
+.fi-plug-off {
+  --fi: url("fluent-icons/plug-disconnected.svg");
+}
+.fi-record {
+  --fi: url("fluent-icons/record.svg");
+}
+.fi-pause {
+  --fi: url("fluent-icons/pause.svg");
+}
+.fi-play {
+  --fi: url("fluent-icons/play.svg");
+}
+.fi-export {
+  --fi: url("fluent-icons/arrow-export.svg");
+}
+.fi-download {
+  --fi: url("fluent-icons/arrow-download.svg");
+}
+.fi-clear {
+  --fi: url("fluent-icons/delete.svg");
+}
+.fi-eye {
+  --fi: url("fluent-icons/eye.svg");
+}
+.fi-settings {
+  --fi: url("fluent-icons/settings.svg");
+}
+.fi-fire {
+  --fi: url("fluent-icons/fire.svg");
+}
+.fi-flash {
+  --fi: url("fluent-icons/flash.svg");
+}
+.fi-select {
+  --fi: url("fluent-icons/select-all-on.svg");
+}
+.fi-info {
+  --fi: url("fluent-icons/info.svg");
+}
+.fi-warning {
+  --fi: url("fluent-icons/warning.svg");
+}
+.fi-error {
+  --fi: url("fluent-icons/error-circle.svg");
+}
+.fi-success {
+  --fi: url("fluent-icons/checkmark-circle.svg");
+}
+.fi-dismiss,
+.fi-close {
+  --fi: url("fluent-icons/dismiss.svg");
+}
+.fi-subtract {
+  --fi: url("fluent-icons/subtract.svg");
+}
+.fi-maximize {
+  --fi: url("fluent-icons/maximize.svg");
+}
+.fi-restore {
+  --fi: url("fluent-icons/square-multiple.svg");
+}
+.fi-pulse {
+  --fi: url("fluent-icons/heart-pulse.svg");
+}
+.fi-arrow-right {
+  --fi: url("fluent-icons/arrow-right.svg");
+}
+.fi-arrow-left {
+  --fi: url("fluent-icons/arrow-left.svg");
+}
+.fi-more {
+  --fi: url("fluent-icons/more-horizontal.svg");
+}
+.fi-split {
+  --fi: url("fluent-icons/square-split-horizontal.svg");
+}
+.fi-split-side {
+  --fi: url("fluent-icons/square-split-vertical.svg");
+}

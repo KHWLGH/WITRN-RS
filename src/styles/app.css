@@ -10,6 +10,11 @@
   flex-direction: column;
   height: 100vh;
   background: var(--surface-content);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] .app-shell {
+  color-scheme: light;
 }
 
 /* CSS zoom 回退：zoom 不改 100vh，把布局盒按因子撑开再缩小，避免裁切 */
@@ -78,7 +83,7 @@ html[data-ui-scale-css] .app-shell {
   color: var(--text-primary);
 }
 
-.tab .codicon {
+.tab .fi {
   font-size: 14px;
 }
 
@@ -90,6 +95,10 @@ html[data-ui-scale-css] .app-shell {
 
 .tab[aria-selected="true"]::after,
 .tab.active::after {
+  opacity: 1;
+}
+
+.tab::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -99,6 +108,8 @@ html[data-ui-scale-css] .app-shell {
   height: 3px;
   border-radius: var(--radius-full);
   background: var(--accent-fill);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
 .tab-icon-only {
@@ -112,7 +123,7 @@ html[data-ui-scale-css] .app-shell {
   flex: 1;
   min-width: 16px;
   /* 保留足够的拖拽区域，但不要让它吞掉标题栏右侧的可用空间。 */
-  max-width: 220px;
+  max-width: 400px;
   height: 100%;
 }
 
@@ -169,7 +180,7 @@ html[data-ui-scale-css] .app-shell {
   color: var(--text-on-danger);
 }
 
-.wc-btn .codicon {
+.wc-btn .fi {
   font-size: 17px;
 }
 
@@ -322,6 +333,10 @@ html[data-ui-scale-css] .app-shell {
   user-select: none;
 }
 
+#view-monitor .commandbar {
+  overflow-x: hidden;
+}
+
 .cmd-btn {
   display: inline-flex;
   align-items: center;
@@ -356,7 +371,7 @@ html[data-ui-scale-css] .app-shell {
   cursor: not-allowed;
 }
 
-.cmd-btn .codicon {
+.cmd-btn .fi {
   font-size: 14px;
 }
 
@@ -478,6 +493,21 @@ html[data-ui-scale-css] .app-shell {
   padding: var(--monitor-gutter);
   min-height: 0;
   overflow: hidden;
+}
+
+.monitor-splitter {
+  flex: none;
+  width: 5px;
+  margin: 0 -2px;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  align-self: stretch;
+}
+
+.monitor-splitter:hover,
+.monitor-splitter:focus-visible {
+  background: var(--accent-fill);
 }
 
 /* ── 状态栏 ───────────────────────────────────────────────────── */
@@ -604,6 +634,7 @@ html[data-ui-scale-css] .app-shell {
   background: var(--surface-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-2);
   padding: 2px var(--space-4);
 }
 
@@ -833,7 +864,7 @@ html[data-ui-scale-css] .app-shell {
   text-align: center;
 }
 
-.empty-state .codicon {
+.empty-state .fi {
   font-size: 36px;
   opacity: 0.6;
 }
@@ -841,6 +872,37 @@ html[data-ui-scale-css] .app-shell {
 .empty-state-title {
   font: var(--type-subtitle);
   color: var(--text-secondary);
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
+}
+
+.chart-container.has-data .chart-empty {
+  display: none;
+}
+
+.status-record {
+  cursor: pointer;
+  border-radius: var(--radius-control);
+  padding: 0 4px;
+}
+
+.status-record:hover {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+:root:not([data-theme="light"]) .realtime-panel,
+:root:not([data-theme="light"]) .chart-container,
+:root:not([data-theme="light"]) .timeline-container,
+:root:not([data-theme="light"]) .settings-group {
+  box-shadow:
+    var(--shadow-2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* ── 杂项小件 ─────────────────────────────────────────────────── */

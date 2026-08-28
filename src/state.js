@@ -51,6 +51,9 @@
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
+ * @property {boolean} windowMaterial - Win11 Mica 窗口材质（不可用时由运行时忽略）
+ * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
+ * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  */
 
 /**
@@ -208,6 +211,9 @@ export const defaultSettings = {
   signedCurrent: false,
   uiScalePercent: 100,
   theme: 'dark',
+  windowMaterial: true,
+  realtimePanelWidth: 250,
+  pdSplitSide: false,
 };
 
 /** @type {AutoPauseSettings} */
@@ -248,6 +254,8 @@ export const state = {
   __clearMonitorData: null,
   /** @type {(() => void)|null} 手动或拔线断开时在 PD 日志插入分隔行 */
   __markPdDisconnect: null,
+  /** @type {boolean} 读数栏分栏拖动中：图表的 ResizeObserver 跳过，松手再定尺 */
+  __layoutResizing: false,
 
   // ── Raw data storage（chartData / chartSeries 同一份列）──
   /** @type {ChartSeriesColumns} */
@@ -284,6 +292,9 @@ export const state = {
   deviceList: [],
   /** @type {string|null} */
   selectedDevicePath: null,
+
+  /** @type {boolean} 后端报告当前平台能否启用 Mica */
+  windowMaterialAvailable: false,
 
   // ── Settings ──
   /** @type {Settings} */

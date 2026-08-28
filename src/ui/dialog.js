@@ -29,11 +29,11 @@ let cancelBtn = null;
 /** 串行队列：前一个对话框关闭后才弹下一个。 */
 let queue = Promise.resolve();
 
-/** kind → codicon 类名与配色 class。 */
+/** kind → Fluent 图标类名与配色 class。 */
 const KIND_ICON = {
-  info: 'codicon-info',
-  warning: 'codicon-warning',
-  error: 'codicon-error',
+  info: 'fi-info',
+  warning: 'fi-warning',
+  error: 'fi-error',
 };
 
 function ensureDialog() {
@@ -43,7 +43,7 @@ function ensureDialog() {
   dialogEl.className = 'fluent-dialog';
   dialogEl.innerHTML = [
     '<div class="fluent-dialog-header">',
-    '  <i class="fluent-dialog-icon codicon" aria-hidden="true"></i>',
+    '  <i class="fluent-dialog-icon fi fi-info" aria-hidden="true"></i>',
     '  <h2 class="fluent-dialog-title"></h2>',
     '</div>',
     '<div class="fluent-dialog-body"></div>',
@@ -78,7 +78,7 @@ function show(text, options, withCancel) {
       if (titleEl) titleEl.textContent = options.title ?? '提示';
       if (bodyEl) bodyEl.textContent = text;
       if (iconEl) {
-        iconEl.className = `fluent-dialog-icon codicon ${KIND_ICON[kind] ?? KIND_ICON.info}`;
+        iconEl.className = `fluent-dialog-icon fi ${KIND_ICON[kind] ?? KIND_ICON.info}`;
         iconEl.setAttribute('data-kind', kind);
       }
       if (okBtn) {

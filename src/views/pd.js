@@ -103,6 +103,8 @@ const els = {
   tableHead: () => document.getElementById('pd-table-head'),
   split: () => document.getElementById('pd-split'),
   splitter: () => document.getElementById('pd-splitter'),
+  layoutBtn: () => /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-pd-layout')),
+  layoutIcon: () => document.getElementById('pd-layout-icon'),
 };
 
 function currentFilterText() {
@@ -913,6 +915,36 @@ function formatTime(t) {
 
 // ─── 视图钩子 ────────────────────────────────────────────────────────────────
 
+const PD_SIDE_MIN_WIDTH = 1400;
+
+/**
+ * 按偏好与窗口宽度应用 PD 分栏方向。宽屏（≥1400px）且偏好开启时左右分栏。
+ */
+export function applyPdSplitLayout() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const split = els.split();
+  const handle = els.splitter();
+  const btn = els.layoutBtn();
+  const icon = els.layoutIcon();
+  const preferSide = state.settings.pdSplitSide === true;
+  const side = preferSide && window.innerWidth >= PD_SIDE_MIN_WIDTH;
+  split?.classList.toggle('pd-split-side', side);
+  if (handle) {
+    handle.style.cursor = side ? 'col-resize' : 'row-resize';
+    handle.setAttribute('aria-orientation', side ? 'vertical' : 'horizontal');
+    handle.setAttribute('aria-label', side ? '调整列表与详情宽度' : '调整列表与详情高度');
+  }
+  if (btn) {
+    btn.setAttribute('aria-pressed', String(preferSide));
+    btn.title = preferSide ? '改回上下分栏' : '左右分栏（窗口宽度 ≥1400px 时生效）';
+    btn.setAttribute('aria-label', btn.title);
+  }
+  if (icon) {
+    icon.classList.toggle('fi-split-side', !preferSide);
+    icon.classList.toggle('fi-split', preferSide);
+  }
+}
+
 function initSplitter() {
   const split = els.split();
   const handle = els.splitter();
@@ -936,18 +968,27 @@ function initSplitter() {
   handle.addEventListener('pointermove', (e) => {
     if (pointer === null) return;
     const rect = split.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    apply((e.clientY - rect.top) / rect.height);
+    const side = split.classList.contains('pd-split-side');
+    if (side) {
+      if (rect.width <= 0) return;
+      apply((e.clientX - rect.left) / rect.width);
+    } else {
+      if (rect.height <= 0) return;
+      apply((e.clientY - rect.top) / rect.height);
+    }
   });
   handle.addEventListener('pointerup', () => {
     pointer = null;
   });
   handle.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    const side = split.classList.contains('pd-split-side');
+    const shrink = side ? 'ArrowLeft' : 'ArrowUp';
+    const grow = side ? 'ArrowRight' : 'ArrowDown';
+    if (e.key !== shrink && e.key !== grow) return;
     e.preventDefault();
     const current = Number.parseFloat(getComputedStyle(split).getPropertyValue('--pd-list-basis')) / 100;
     const basis = Number.isFinite(current) ? current : 0.56;
-    apply(basis + (e.key === 'ArrowUp' ? -0.04 : 0.04));
+    apply(basis + (e.key === shrink ? -0.04 : 0.04));
   });
 }
 
@@ -1045,7 +1086,16 @@ export function initPdView() {
       document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
     });
   }
+  const layoutBtn = els.layoutBtn();
+  if (layoutBtn) {
+    layoutBtn.addEventListener('click', () => {
+      state.settings.pdSplitSide = !state.settings.pdSplitSide;
+      applyPdSplitLayout();
+      debouncedSaveSettings();
+    });
+  }
   initSplitter();
+  applyPdSplitLayout();
 
   els.autoscroll()?.addEventListener('change', (e) => {
     const listEl = els.list();

@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="styles/views.css" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="styles/compact.css" />
-    <link rel="stylesheet" href="assets/codicon.css" />
+    <link rel="stylesheet" href="assets/fluent-icons.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WITRN-RS</title>
     <script src="vendor/uPlot.iife.min.js"></script>
@@ -29,17 +29,14 @@
             <option value="">-- 点击刷新扫描设备 --</option>
           </select>
           <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="刷新设备列表">
-            <i class="codicon codicon-refresh"></i>
+            <i class="fi fi-refresh" aria-hidden="true"></i>
           </button>
           <button type="button" class="cmd-btn" id="btn-connect" title="连接设备">
-            <i class="codicon codicon-plug"></i>连接
-          </button>
-          <button type="button" class="cmd-btn" id="btn-disconnect" title="断开连接" disabled>
-            <i class="codicon codicon-debug-disconnect"></i>断开
+            <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label">连接</span>
           </button>
         </div>
         <button type="button" class="tab tab-icon-only" id="btn-settings-tab" title="设置" aria-label="设置">
-          <i class="codicon codicon-settings-gear"></i>
+          <i class="fi fi-settings" aria-hidden="true"></i>
         </button>
         <div class="titlebar-controls" id="titlebar-controls"><!-- Linux: ui/windowcontrols.js 自绘 --></div>
       </header>
@@ -49,7 +46,7 @@
         <section class="view" id="view-monitor" role="tabpanel" aria-labelledby="tab-monitor">
           <div class="commandbar">
             <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
-              <i class="codicon codicon-record"></i>开始记录
+              <i class="fi fi-record" aria-hidden="true"></i>开始记录
             </button>
             <span class="cmd-sep"></span>
             <span class="cmd-label">采样率</span>
@@ -62,18 +59,21 @@
               <option value="10000">0.1 次/秒 (10秒1次)</option>
             </select>
             <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn" id="btn-export" title="导出CSV"><i class="codicon codicon-export"></i>导出CSV</button>
-            <button type="button" class="cmd-btn" id="btn-import" title="导入CSV">
-              <i class="codicon codicon-desktop-download"></i>导入CSV
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-export" title="导出CSV"><i class="fi fi-export" aria-hidden="true"></i>导出CSV</button>
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-import" title="导入CSV">
+              <i class="fi fi-download" aria-hidden="true"></i>导入CSV
             </button>
-            <button type="button" class="cmd-btn" id="btn-clear-chart" title="清空图表并重置统计与能量">
-              <i class="codicon codicon-clear-all"></i>一键重置
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-clear-chart" title="清空图表并重置统计与能量">
+              <i class="fi fi-clear" aria-hidden="true"></i>一键重置
+            </button>
+            <button type="button" class="cmd-btn cmd-btn-icon" id="btn-cmd-overflow" hidden title="更多" aria-label="更多">
+              <i class="fi fi-more" aria-hidden="true"></i>
             </button>
             <span class="cmd-spacer"></span>
-            <button type="button" class="cmd-btn" id="btn-flyout-display" title="显示通道设置"><i class="codicon codicon-eye"></i>显示</button>
+            <button type="button" class="cmd-btn" id="btn-flyout-display" title="显示通道设置"><i class="fi fi-eye" aria-hidden="true"></i>显示</button>
             <div class="cmd-action-group" id="auto-pause-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
-                <i class="codicon codicon-debug-pause" id="auto-pause-command-icon"></i>
+                <i class="fi fi-pause" id="auto-pause-command-icon" aria-hidden="true"></i>
                 <span>自动暂停</span>
               </button>
               <button
@@ -83,12 +83,12 @@
                 aria-label="自动暂停设置"
                 title="自动暂停设置"
               >
-                <i class="codicon codicon-settings-gear"></i>
+                <i class="fi fi-settings" aria-hidden="true"></i>
               </button>
             </div>
             <div class="cmd-action-group" id="temperature-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
-                <i class="codicon codicon-flame" aria-hidden="true"></i>
+                <i class="fi fi-fire" aria-hidden="true"></i>
                 <span id="temp-toggle-label">温度服务</span>
               </button>
               <button
@@ -98,7 +98,7 @@
                 aria-label="温度服务设置"
                 title="温度服务设置"
               >
-                <i class="codicon codicon-settings-gear"></i>
+                <i class="fi fi-settings" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -107,52 +107,64 @@
             <!-- 实时读数栏 -->
             <div class="realtime-panel">
               <div class="realtime-card voltage">
-                <div class="realtime-label">电压</div>
-                <div class="realtime-content">
-                  <div class="realtime-value" id="rt-voltage">--</div>
-                  <div class="realtime-unit">V</div>
-                </div>
-                <div class="realtime-stats">
-                  <span>最小: <span id="min-voltage">--</span></span>
-                  <span>最大: <span id="max-voltage">--</span></span>
+                <div class="realtime-body">
+                  <div class="realtime-label"><span class="realtime-dot"></span><span>电压</span></div>
+                  <div class="realtime-content">
+                    <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-voltage"></span></div>
+                    <div class="realtime-value" id="rt-voltage">--</div>
+                    <div class="realtime-unit">V</div>
+                  </div>
+                  <div class="realtime-stats">
+                    <span><span class="stat-k">最小</span><span id="min-voltage">--</span></span>
+                    <span><span class="stat-k">平均</span><span id="avg-voltage">--</span></span>
+                    <span><span class="stat-k">最大</span><span id="max-voltage">--</span></span>
+                  </div>
                 </div>
               </div>
               <div class="realtime-card current">
-                <div class="realtime-label">电流</div>
-                <div class="realtime-content">
-                  <i class="codicon codicon-arrow-small-right realtime-direction" id="rt-current-dir" hidden></i>
-                  <div class="realtime-value" id="rt-current">--</div>
-                  <div class="realtime-unit">A</div>
-                </div>
-                <div class="realtime-stats">
-                  <span>最小: <span id="min-current">--</span></span>
-                  <span>最大: <span id="max-current">--</span></span>
+                <div class="realtime-body">
+                  <div class="realtime-label"><span class="realtime-dot"></span><span>电流</span></div>
+                  <div class="realtime-content">
+                    <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-current"></span></div>
+                    <i class="fi fi-arrow-right realtime-direction" id="rt-current-dir" hidden></i>
+                    <div class="realtime-value" id="rt-current">--</div>
+                    <div class="realtime-unit">A</div>
+                  </div>
+                  <div class="realtime-stats">
+                    <span><span class="stat-k">最小</span><span id="min-current">--</span></span>
+                    <span><span class="stat-k">平均</span><span id="avg-current">--</span></span>
+                    <span><span class="stat-k">最大</span><span id="max-current">--</span></span>
+                  </div>
                 </div>
               </div>
               <div class="realtime-card power">
-                <div class="realtime-label">功率</div>
-                <div class="realtime-content">
-                  <div class="realtime-value" id="rt-power">--</div>
-                  <div class="realtime-unit">W</div>
-                </div>
-                <div class="realtime-average">平均 <span id="avg-power">--</span></div>
-                <div class="realtime-stats">
-                  <span>最小: <span id="min-power">--</span></span>
-                  <span>最大: <span id="max-power">--</span></span>
+                <div class="realtime-body">
+                  <div class="realtime-label"><span class="realtime-dot"></span><span>功率</span></div>
+                  <div class="realtime-content">
+                    <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-power"></span></div>
+                    <div class="realtime-value" id="rt-power">--</div>
+                    <div class="realtime-unit">W</div>
+                  </div>
+                  <div class="realtime-stats">
+                    <span><span class="stat-k">最小</span><span id="min-power">--</span></span>
+                    <span><span class="stat-k">平均</span><span id="avg-power">--</span></span>
+                    <span><span class="stat-k">最大</span><span id="max-power">--</span></span>
+                  </div>
                 </div>
               </div>
               <div class="realtime-card temperature" id="temp-card">
-                <div class="realtime-label">
-                  <span>温度</span>
-                  <span class="realtime-average">平均 <span id="avg-temp">--</span></span>
-                </div>
-                <div class="realtime-content">
-                  <div class="realtime-value" id="rt-temp">--</div>
-                  <div class="realtime-unit">°C</div>
-                </div>
-                <div class="realtime-stats">
-                  <span>最低: <span id="min-temp">--</span></span>
-                  <span>最高: <span id="max-temp">--</span></span>
+                <div class="realtime-body">
+                  <div class="realtime-label"><span class="realtime-dot"></span><span>温度</span></div>
+                  <div class="realtime-content">
+                    <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-temp"></span></div>
+                    <div class="realtime-value" id="rt-temp">--</div>
+                    <div class="realtime-unit">°C</div>
+                  </div>
+                  <div class="realtime-stats">
+                    <span><span class="stat-k">最低</span><span id="min-temp">--</span></span>
+                    <span><span class="stat-k">平均</span><span id="avg-temp">--</span></span>
+                    <span><span class="stat-k">最高</span><span id="max-temp">--</span></span>
+                  </div>
                 </div>
               </div>
               <div class="realtime-card energy">
@@ -162,6 +174,7 @@
                     <div class="realtime-value" id="rt-energy">--</div>
                     <div class="realtime-unit">Wh</div>
                   </div>
+                  <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill energy" id="lv-energy"></span></span>
                 </div>
                 <div class="realtime-metric">
                   <div class="realtime-label">累计容量</div>
@@ -169,6 +182,7 @@
                     <div class="realtime-value" id="rt-capacity">--</div>
                     <div class="realtime-unit">mAh</div>
                   </div>
+                  <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill energy" id="lv-capacity"></span></span>
                 </div>
               </div>
               <div class="realtime-card signals">
@@ -178,31 +192,51 @@
                     <span class="signal-name dp">D+</span>
                     <span class="signal-value" id="rt-dp">--</span>
                     <span class="signal-unit">V</span>
+                    <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill dp" id="lv-dp"></span></span>
                   </div>
                   <div class="signal-cell">
                     <span class="signal-name dn">D-</span>
                     <span class="signal-value" id="rt-dn">--</span>
                     <span class="signal-unit">V</span>
+                    <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill dn" id="lv-dn"></span></span>
                   </div>
                   <div class="signal-cell">
                     <span class="signal-name cc1">CC1</span>
                     <span class="signal-value" id="rt-cc1">--</span>
                     <span class="signal-unit">V</span>
+                    <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill cc1" id="lv-cc1"></span></span>
                   </div>
                   <div class="signal-cell">
                     <span class="signal-name cc2">CC2</span>
                     <span class="signal-value" id="rt-cc2">--</span>
                     <span class="signal-unit">V</span>
+                    <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill cc2" id="lv-cc2"></span></span>
                   </div>
                 </div>
               </div>
             </div>
+            <div
+              class="monitor-splitter"
+              id="monitor-splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin="200"
+              aria-valuemax="360"
+              aria-valuenow="250"
+              aria-label="调整读数栏宽度"
+              tabindex="0"
+            ></div>
 
             <div class="chart-area">
               <!-- 主图表 -->
               <div class="chart-container">
                 <div class="chart-legend" id="main-chart-legend"></div>
                 <div id="main-chart"></div>
+                <div class="empty-state chart-empty" id="chart-empty">
+                  <i class="fi fi-pulse" aria-hidden="true"></i>
+                  <div class="empty-state-title">暂无数据</div>
+                  <div>连接设备后点击开始记录</div>
+                </div>
               </div>
 
               <!-- 时间线导航器 -->
@@ -251,17 +285,17 @@
         <section class="view" id="view-pd" role="tabpanel" aria-labelledby="tab-pd" hidden>
           <div class="commandbar">
             <button type="button" class="cmd-btn cmd-state-btn" id="btn-pd-pause" disabled>
-              <i class="codicon codicon-debug-pause"></i>暂停
+              <i class="fi fi-pause" aria-hidden="true"></i>暂停
             </button>
             <button type="button" class="cmd-btn" id="btn-pd-clear" title="清空报文列表" disabled>
-              <i class="codicon codicon-clear-all"></i>清空
+              <i class="fi fi-clear" aria-hidden="true"></i>清空
             </button>
             <span class="cmd-sep"></span>
             <button type="button" class="cmd-btn" id="btn-pd-export" title="导出 PD 捕获" disabled>
-              <i class="codicon codicon-export"></i>导出
+              <i class="fi fi-export" aria-hidden="true"></i>导出
             </button>
             <button type="button" class="cmd-btn" id="btn-pd-import" title="导入 PD 捕获" disabled>
-              <i class="codicon codicon-desktop-download"></i>导入
+              <i class="fi fi-download" aria-hidden="true"></i>导入
             </button>
             <span class="cmd-sep"></span>
             <input type="text" id="pd-filter" class="ribbon-input pd-filter" placeholder="按消息类型过滤…" />
@@ -284,6 +318,16 @@
               跟随记录
             </label>
             <span class="cmd-spacer"></span>
+            <button
+              type="button"
+              class="cmd-btn cmd-btn-icon"
+              id="btn-pd-layout"
+              title="左右分栏（宽屏）"
+              aria-label="切换分栏方向"
+              aria-pressed="false"
+            >
+              <i class="fi fi-split-side" id="pd-layout-icon" aria-hidden="true"></i>
+            </button>
             <span class="cmd-label" id="pd-counter"></span>
           </div>
           <div class="pd-split" id="pd-split">
@@ -302,7 +346,7 @@
               </div>
               <div class="pd-list" id="pd-list" hidden></div>
               <div class="empty-state" id="pd-empty">
-                <i class="codicon codicon-zap"></i>
+                <i class="fi fi-flash" aria-hidden="true"></i>
                 <div class="empty-state-title">等待 USB-PD 通信</div>
                 <div>连接设备后自动捕获 USB-PD 报文（插拔充电器时的握手最有价值）</div>
               </div>
@@ -320,7 +364,7 @@
             ></div>
             <div class="pd-detail-pane">
               <div class="empty-state" id="pd-detail-empty">
-                <i class="codicon codicon-list-selection"></i>
+                <i class="fi fi-select" aria-hidden="true"></i>
                 <div class="empty-state-title">选择报文查看详情</div>
                 <div>点击上方列表中的报文行，此处按字 / 表拆开当前帧</div>
               </div>
@@ -358,6 +402,20 @@
                             <span>跟随系统</span>
                           </label>
                         </div>
+                      </div>
+                    </div>
+                    <div class="settings-row" id="window-material-row" hidden>
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">窗口材质</div>
+                        <div class="settings-row-desc">
+                          使用 Windows 11 Mica 半透明材质。远程桌面或录屏下若出现透底，可关闭此项。
+                        </div>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="toggle">
+                          <input type="checkbox" id="window-material" checked />
+                          <span class="toggle-track"></span>
+                        </label>
                       </div>
                     </div>
                     <div class="settings-row">
@@ -424,10 +482,9 @@
                         </div>
                       </div>
                       <div class="settings-row-control">
-                        <label class="ribbon-checkbox">
+                        <label class="toggle">
                           <input type="checkbox" id="signed-current" />
-                          <span class="checkmark"></span>
-                          启用
+                          <span class="toggle-track"></span>
                         </label>
                       </div>
                     </div>
@@ -502,7 +559,7 @@
                         <span class="identity-value selectable">github.com/KHWLGH/WITRN-RS</span>
                       </div>
                     </div>
-                    <p class="settings-row-desc">第三方组件：uPlot (MIT) · Codicons (CC-BY-4.0)</p>
+                    <p class="settings-row-desc">第三方组件：uPlot (MIT) · Fluent System Icons (MIT)</p>
                   </div>
                 </section>
               </aside>
@@ -513,7 +570,11 @@
 
       <!-- 全局状态栏 -->
       <footer class="statusbar" id="statusbar">
-        <span class="status-item"><span class="status-label">记录:</span><span id="record-status">停止</span></span>
+        <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="开始或暂停记录">
+          <span class="status-label">记录:</span><span id="record-status">停止</span>
+        </span>
+        <span class="status-item"><span class="status-label">时长:</span><span id="record-duration">--</span></span>
+        <span class="status-item"><span class="status-label">采样:</span><span id="status-sample-rate">4 次/秒</span></span>
         <span class="status-item"><span class="status-label">点数:</span><span id="data-count">0</span></span>
         <span class="status-item status-connection" title="连接状态">
           <span class="status-indicator" id="connection-status"></span>

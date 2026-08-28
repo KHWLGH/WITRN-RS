@@ -13,12 +13,12 @@
 const MAX_VISIBLE = 3;
 const DEFAULT_DURATION = 4000;
 
-/** severity → codicon 类名。 */
+/** severity → Fluent 图标类名。 */
 const SEVERITY_ICON = {
-  info: 'codicon-info',
-  success: 'codicon-pass',
-  warning: 'codicon-warning',
-  error: 'codicon-error',
+  info: 'fi-info',
+  success: 'fi-success',
+  warning: 'fi-warning',
+  error: 'fi-error',
 };
 
 /** @type {HTMLElement|null} */
@@ -54,7 +54,7 @@ function render(text, options) {
   if (severity === 'error') el.setAttribute('role', 'alert');
 
   const icon = document.createElement('i');
-  icon.className = `toast-icon codicon ${SEVERITY_ICON[severity]}`;
+  icon.className = `toast-icon fi ${SEVERITY_ICON[severity]}`;
   icon.setAttribute('aria-hidden', 'true');
   el.appendChild(icon);
 
@@ -81,7 +81,7 @@ function render(text, options) {
   closeBtn.className = 'toast-close';
   closeBtn.title = '关闭';
   closeBtn.setAttribute('aria-label', '关闭通知');
-  closeBtn.innerHTML = '<i class="codicon codicon-close" aria-hidden="true"></i>';
+  closeBtn.innerHTML = '<i class="fi fi-dismiss" aria-hidden="true"></i>';
   closeBtn.addEventListener('click', () => dismiss());
   el.appendChild(closeBtn);
 

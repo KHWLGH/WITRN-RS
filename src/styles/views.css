@@ -33,6 +33,23 @@
   background: var(--accent-fill);
 }
 
+.pd-split.pd-split-side {
+  flex-direction: row;
+}
+
+.pd-split.pd-split-side .pd-splitter {
+  width: 5px;
+  height: auto;
+  align-self: stretch;
+  cursor: col-resize;
+}
+
+.pd-split.pd-split-side .pd-master,
+.pd-split.pd-split-side .pd-detail-pane {
+  min-width: 220px;
+  min-height: 0;
+}
+
 .pd-detail-pane {
   flex: 1 1 var(--pd-detail-basis, 44%);
   min-width: 0;
@@ -40,7 +57,7 @@
   display: flex;
   flex-direction: column;
   overflow: auto;
-  background: var(--surface-base);
+  background: var(--surface-content);
 }
 
 .pd-detail-body {
@@ -99,6 +116,7 @@
   cursor: pointer;
   border-bottom: 1px solid var(--stroke-divider);
   user-select: none;
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 
 .pd-row.pd-row-wrap {

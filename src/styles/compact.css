@@ -4,13 +4,15 @@
  * 布局为固定 px（设计基准 1280×800），文字 13px；用户缩放走 WebView zoom
  * （设置 → 外观），本文件看到的是缩放后的逻辑视口。窗口低于基准时按各区域
  * min-content 实测分档收紧，保证任何允许的窗口尺寸下功能全部可见、互不遮挡：
- *   W1 <1080：收紧间距类旋钮（tokens.css 定义），把空间还给图表；
+ *   W1 <1080：收紧间距类旋钮（tokens.css 定义），读数栏上限 220px，把空间还给图表；
  *             1080–1280 一切都装得下（最大 min-content 是命令栏 ≈943px），
  *             刻意不动，接近默认尺寸的窗口保持设计原貌
- *   W2 <980 ：监控命令栏 min-content ≈ 943px → 图标化（title 保留语义）。
- *             Tauri minWidth=900，900–979 是实机最窄区间，必进此档
- *   W3 <900 ：安全网——极端 DPI 下 OS 给出的窗口可能小于 minWidth
- *             （如 150% 缩放的 1280 宽屏幕仅 ≈853 逻辑 px），以及浏览器调试
+ *   W2 <980 ：监控命令栏低频项（导出/导入/重置）改走 ⋯ 溢出菜单；
+ *             其余非状态按钮图标化（title 保留语义）。
+ *             Tauri minWidth=900，900–979 是实机最窄区间，必进此档；读数栏上限 200px
+ *   W3 ≤900：最小窗宽 900 与极端 DPI / 浏览器安全网——Tab 文字改图标，
+ *             连接按钮图标化，避免标题栏顶到窗口按钮
+ *             （900.98px 把整数 900 含进档内，与其它档的 .98 边界同理）
  *   W4 <700 ：极窄窗再收紧 PD 表列与详情下限（同为安全网）
  *   H1 <620 ：纵向紧凑——最小窗高 600 与低分屏最大化（1366×768 @125% ≈ 577）
  *             都会进入；时间轴 64px + 图表下限 240px 后纵向 min-content ≈ 433px
@@ -22,7 +24,6 @@
 @media (max-width: 1079.98px) {
   :root {
     --monitor-gutter: 8px;
-    --panel-realtime-width: 200px;
     --chart-pad: 10px;
   }
 
@@ -38,20 +39,19 @@
 /* ── W2：视口 < 980，命令栏图标化 ────────────────────────────── */
 
 @media (max-width: 979.98px) {
-  /* 图标 + title 提示保留全部功能可见，替代旧的横向滚出视野。
-     状态承载按钮（自动暂停 / 温度服务 / PD 暂停-继续-等待记录）保留文字——
-     文字即状态。用 font-size:0 而非包裹 span：按钮文字是裸文本节点，且
-     controlbar.js 会整体改写 #btn-pd-pause 的 innerHTML，包裹方案会被冲掉。 */
-  .commandbar .cmd-btn:not(.cmd-state-btn) {
+  /* 图标 + title 提示保留全部功能可见。
+     状态承载按钮（自动暂停 / 温度服务 / PD 暂停）保留文字——文字即状态。
+     导出 / 导入 / 一键重置由命令栏溢出菜单收纳，此处不再图标化。 */
+  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-overflow-src) {
     font-size: 0;
     gap: 0;
   }
 
-  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-btn-icon) {
+  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-btn-icon):not(.cmd-overflow-src) {
     padding: 0 8px;
   }
 
-  .commandbar .cmd-btn:not(.cmd-state-btn) .codicon {
+  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-overflow-src) .fi {
     font-size: 14px;
   }
 
@@ -60,9 +60,9 @@
   }
 }
 
-/* ── W3：视口 < 900（极端 DPI / 浏览器安全网） ───────────────── */
+/* ── W3：视口 ≤ 900（最小窗宽 + 极端 DPI / 浏览器安全网） ───── */
 
-@media (max-width: 899.98px) {
+@media (max-width: 900.98px) {
   .tab > span {
     display: none;
   }
@@ -72,7 +72,7 @@
     gap: 0;
   }
 
-  .titlebar-connect .cmd-btn .codicon {
+  .titlebar-connect .cmd-btn .fi {
     font-size: 14px;
   }
 }
@@ -109,21 +109,39 @@
     --timeline-height: 64px;
     --chart-min-height: 240px;
     --monitor-gutter: 8px;
-    --rt-numeral: 700 20px / 22px var(--font-mono);
+    --rt-numeral: 700 20px / 1 var(--font-mono);
   }
 
-  /* 读数栏最后一档收紧：600 窗高 + 温度卡时六张卡片仍需塞进 ≈483px */
+  /* 读数栏最后一档收紧：600 窗高 + 温度卡时六张卡片仍需塞进 ≈484px */
   .realtime-card {
-    padding: 4px 10px;
+    padding: 4px 8px 4px 6px;
   }
 
-  .realtime-label {
+  .realtime-label,
+  .realtime-card.energy .realtime-label {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .realtime-unit {
     font-size: 13px;
+  }
+
+  .realtime-card.voltage .realtime-content,
+  .realtime-card.current .realtime-content,
+  .realtime-card.power .realtime-content,
+  .realtime-card.temperature .realtime-content {
+    padding: 2px 8px;
   }
 
   .realtime-average,
   .realtime-stats {
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .stat-k {
+    line-height: 1.15;
   }
 
   .realtime-card.energy .realtime-value {
@@ -134,8 +152,17 @@
     margin-top: 2px;
   }
 
+  .signal-grid {
+    gap: 0 8px;
+  }
+
   .signal-cell {
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .mini-bar {
+    margin-top: 2px;
   }
 
   .realtime-stats {
@@ -149,5 +176,24 @@
 
   .page {
     padding: var(--space-3);
+  }
+}
+
+/* 窄窗 / 矮窗：读数栏不要继续占满用户拖出的 250–360px。
+   主卡数字左对齐，栏过宽时右侧会空一截；同时把宽度还给图表。
+   分档写在最后，W2 的 200px 盖过 W1/H1 的 220px。 */
+@media (max-width: 1079.98px), (max-height: 619.98px) {
+  .realtime-panel {
+    max-width: 220px;
+  }
+
+  .realtime-stats {
+    gap: 2px;
+  }
+}
+
+@media (max-width: 979.98px) {
+  .realtime-panel {
+    max-width: 200px;
   }
 }

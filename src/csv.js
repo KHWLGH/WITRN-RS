@@ -8,6 +8,7 @@ import {
   clearAndResetStats,
   refreshRecordButton,
   stopRecording,
+  updateChartEmptyState,
   updateChartRange,
   updateEnergyDisplay,
   updateRealtimeDisplay,
@@ -316,6 +317,7 @@ export async function importCSV() {
     syncChartSeries();
     updateChartRange();
     updateCharts();
+    updateChartEmptyState();
 
     updateTempUIVisibility();
     const last = newVoltage.length - 1;

@@ -21,14 +21,24 @@ import {
   scheduleStatsUpdate,
   startRecording,
   stopRecording,
+  updateChartEmptyState,
   updateChartRange,
+  updateDurationDisplay,
   updateEnergyDisplay,
+  updateSampleRateStatus,
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
 import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
 import { enhanceSelects } from './dropdown.js';
-import { applySampleRate, debouncedSaveSettings, loadSettings, resetSettings, saveSettings } from './settings.js';
+import {
+  applyRealtimePanelWidth,
+  applySampleRate,
+  debouncedSaveSettings,
+  loadSettings,
+  resetSettings,
+  saveSettings,
+} from './settings.js';
 import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import {
@@ -39,7 +49,7 @@ import {
   updateTempUIVisibility,
 } from './temperature.js';
 import { applyThemePreference } from './theme.js';
-import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
+import { initCommandOverflow, syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
 import { createMenu } from './ui/menu.js';
@@ -48,8 +58,16 @@ import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
 import { initDeviceView, refreshDeviceIdentifyState } from './views/device.js';
-import { clearPdEntries, ingestPdBatch, initPdView, markPdDisconnect, syncPdView } from './views/pd.js';
+import {
+  applyPdSplitLayout,
+  clearPdEntries,
+  ingestPdBatch,
+  initPdView,
+  markPdDisconnect,
+  syncPdView,
+} from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
+import { initWindowMaterial, setWindowMaterialEnabled } from './window-material.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -342,14 +360,26 @@ function setupControls() {
       });
   };
 
-  btn('btn-connect', () => connectDevice());
-  btn('btn-disconnect', () => disconnectDevice());
+  btn('btn-connect', () => (state.isConnected ? disconnectDevice() : connectDevice()));
   btn('btn-refresh-devices', () => refreshDeviceList());
 
   const deviceSelect = document.getElementById('device-select');
   if (deviceSelect) deviceSelect.addEventListener('change', onDeviceSelect);
 
   btn('btn-record-toggle', () => (state.isRecording ? stopRecording() : startRecording()));
+
+  const statusRecord = document.getElementById('status-record');
+  const toggleRecording = () => {
+    if (!state.isConnected) return;
+    if (state.isRecording) stopRecording();
+    else void startRecording();
+  };
+  statusRecord?.addEventListener('click', () => toggleRecording());
+  statusRecord?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    toggleRecording();
+  });
 
   // PD 视图在「跟随记录」开启时需要触发这几个监控侧动作。用注入而非让 pd.js
   // 直接 import data.js：那条边会把 chart.js / temperature.js 拖进 PD 的单元测试环境。
@@ -388,9 +418,16 @@ function setupControls() {
   const importBtn = document.getElementById('btn-import');
   if (importBtn) importBtn.addEventListener('click', importCSV);
 
+  initCommandOverflow({ exportCSV });
+
+  initMonitorSplitter();
+
   btn('btn-reset-settings', async () => {
     const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
-    if (yes) await resetSettings();
+    if (yes) {
+      await resetSettings();
+      applyPdSplitLayout();
+    }
   });
 
   // 主题（设置页 外观 卡）
@@ -465,6 +502,12 @@ function setupControls() {
       const dirEl = document.getElementById('rt-current-dir');
       if (dirEl) dirEl.hidden = true;
     }
+    debouncedSaveSettings();
+  });
+
+  const windowMaterialEl = /** @type {HTMLInputElement|null} */ (document.getElementById('window-material'));
+  windowMaterialEl?.addEventListener('change', () => {
+    void setWindowMaterialEnabled(windowMaterialEl.checked);
     debouncedSaveSettings();
   });
 
@@ -592,15 +635,90 @@ function setupControls() {
   syncFollowLinkageUI(state.settings.pdFollowRecording);
 }
 
+function initMonitorSplitter() {
+  const handle = document.getElementById('monitor-splitter');
+  const panel = document.querySelector('.realtime-panel');
+  if (!(handle instanceof HTMLElement) || !(panel instanceof HTMLElement)) return;
+
+  /** @type {number|null} */
+  let pointer = null;
+  let originLeft = 0;
+  let originPref = state.settings.realtimePanelWidth;
+  let originVisual = 0;
+  let pendingWidth = originPref;
+  let raf = 0;
+
+  const visualWidth = () => Math.round(panel.getBoundingClientRect().width);
+  const widthCap = () => {
+    const cap = Number.parseFloat(getComputedStyle(panel).maxWidth);
+    return Number.isFinite(cap) ? cap : 360;
+  };
+
+  const flushVisual = () => {
+    raf = 0;
+    applyRealtimePanelWidth(pendingWidth, { persistAria: false, commit: false });
+  };
+
+  const endDrag = () => {
+    if (!state.__layoutResizing) return;
+    pointer = null;
+    if (raf) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+    const visual = visualWidth();
+    // 窄窗 max-width 卡住时拖动不会改变可视宽度，不能把鼠标位移写进偏好，
+    // 否则放大窗口后侧栏会跟着被改掉。
+    if (Math.abs(visual - originVisual) < 1) {
+      applyRealtimePanelWidth(originPref);
+    } else {
+      applyRealtimePanelWidth(visual);
+      debouncedSaveSettings();
+    }
+    state.__layoutResizing = false;
+    handleMonitorShown();
+  };
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    pointer = e.pointerId;
+    originLeft = panel.getBoundingClientRect().left;
+    originPref = state.settings.realtimePanelWidth;
+    originVisual = visualWidth();
+    pendingWidth = originPref;
+    handle.setPointerCapture(e.pointerId);
+    state.__layoutResizing = true;
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (pointer === null) return;
+    pendingWidth = e.clientX - originLeft;
+    if (!raf) raf = requestAnimationFrame(flushVisual);
+  });
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const visual = visualWidth();
+    const next = visual + (e.key === 'ArrowRight' ? 8 : -8);
+    const clamped = Math.round(Math.min(widthCap(), Math.max(200, next)));
+    if (clamped === visual) return;
+    applyRealtimePanelWidth(clamped);
+    handleMonitorShown();
+    debouncedSaveSettings();
+  });
+}
+
 // ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────
 
 function setupShell() {
-  registerView({ id: 'monitor', icon: 'codicon-pulse', label: '监控', onShow: handleMonitorShown });
-  registerView({ id: 'pd', icon: 'codicon-zap', label: 'PD 分析', init: initPdView, onShow: syncPdView });
+  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: handleMonitorShown });
+  registerView({ id: 'pd', icon: 'flash', label: 'PD 分析', init: initPdView, onShow: syncPdView });
   // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
   registerView({
     id: 'settings',
-    icon: 'codicon-settings-gear',
+    icon: 'settings',
     label: '设置',
     init: () => {
       initSettingsView();
@@ -615,8 +733,8 @@ function setupShell() {
     const tabbar = initTabBar(
       tabsContainer,
       [
-        { id: 'monitor', icon: 'codicon-pulse', label: '监控' },
-        { id: 'pd', icon: 'codicon-zap', label: 'PD 分析' },
+        { id: 'monitor', icon: 'pulse', label: '监控' },
+        { id: 'pd', icon: 'flash', label: 'PD 分析' },
       ],
       showView,
     );
@@ -696,10 +814,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await setupCloseConfirm();
   await loadSettings();
+  await initWindowMaterial();
   initChart();
   setupChartToggles();
   setupControls();
   setupShell();
+  applyPdSplitLayout();
+  window.addEventListener('resize', applyPdSplitLayout);
+  updateSampleRateStatus();
+  updateChartEmptyState();
+  updateDurationDisplay();
 
   // Clean recording state on load
   state.isRecording = false;

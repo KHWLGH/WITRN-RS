@@ -123,7 +123,8 @@
   --light-teal-tint40: #a6e9ed;
 
   /* ── 2. 语义角色（暗色 = webDark alias） ───────────────────── */
-  color-scheme: dark;
+  /* color-scheme 不写在 :root：Chromium/WebView2 会按它给 html 画布填 UA Canvas 色
+     （暗色偏海军蓝），盖住 DWM Mica。控件方案下沉到 .app-shell。 */
 
   /* 表面：Background2 / Background1 / CardBackground / Background1 */
   --surface-base: var(--grey-12); /* 壳 chrome：标题栏 / 命令栏 / 状态栏 */
@@ -199,6 +200,16 @@
   --ch-cc1: var(--light-teal-tint20);
   --ch-cc2: var(--pink-tint20);
 
+  /* 读数主卡：底色更淡、电平更饱和，均从通道色混入卡片表面 */
+  --ch-voltage-card: color-mix(in srgb, var(--ch-voltage) 28%, var(--surface-card));
+  --ch-voltage-meter: color-mix(in srgb, var(--ch-voltage) 58%, var(--surface-card));
+  --ch-current-card: color-mix(in srgb, var(--ch-current) 28%, var(--surface-card));
+  --ch-current-meter: color-mix(in srgb, var(--ch-current) 58%, var(--surface-card));
+  --ch-power-card: color-mix(in srgb, var(--ch-power) 28%, var(--surface-card));
+  --ch-power-meter: color-mix(in srgb, var(--ch-power) 58%, var(--surface-card));
+  --ch-temp-card: color-mix(in srgb, var(--ch-temp) 28%, var(--surface-card));
+  --ch-temp-meter: color-mix(in srgb, var(--ch-temp) 58%, var(--surface-card));
+
   /* 图表基建：必须不透明（四条 Y 轴会叠画同一像素） */
   --chart-axis-text: var(--text-tertiary);
   --chart-grid: var(--stroke-control);
@@ -261,8 +272,8 @@
   --resize-corner: calc(10px / var(--ui-scale));
 
   /* 监控视图布局旋钮 — styles/compact.css 的紧凑档按视口重赋这些值 */
-  --panel-realtime-width: 230px; /* 实时读数侧栏宽 */
-  --rt-numeral: 700 24px / 26px var(--font-mono); /* 读数栏大字读数 */
+  --panel-realtime-width: 250px; /* 实时读数侧栏宽 */
+  --rt-numeral: 700 28px / 1 var(--font-mono); /* 读数栏大字读数，贴满电平条 */
   --timeline-height: 80px; /* 时间线导航器高 */
   --monitor-gutter: 12px; /* 监控主体 padding / gap */
   --chart-min-height: 300px;
@@ -338,8 +349,6 @@
 
 /* 亮色：只重赋语义层。通道 / PD 徽章改走 Foreground2 / Background2 浅色侧。 */
 :root[data-theme="light"] {
-  color-scheme: light;
-
   --surface-base: var(--grey-98);
   --surface-content: var(--white);
   --surface-card: var(--grey-98);
@@ -404,6 +413,15 @@
   --ch-cc1: var(--light-teal-primary);
   --ch-cc2: var(--pink-primary);
 
+  --ch-voltage-card: color-mix(in srgb, var(--ch-voltage) 20%, var(--surface-card));
+  --ch-voltage-meter: color-mix(in srgb, var(--ch-voltage) 42%, var(--surface-card));
+  --ch-current-card: color-mix(in srgb, var(--ch-current) 20%, var(--surface-card));
+  --ch-current-meter: color-mix(in srgb, var(--ch-current) 42%, var(--surface-card));
+  --ch-power-card: color-mix(in srgb, var(--ch-power) 20%, var(--surface-card));
+  --ch-power-meter: color-mix(in srgb, var(--ch-power) 42%, var(--surface-card));
+  --ch-temp-card: color-mix(in srgb, var(--ch-temp) 20%, var(--surface-card));
+  --ch-temp-meter: color-mix(in srgb, var(--ch-temp) 42%, var(--surface-card));
+
   --pd-msg-crc-bg: var(--teal-tint40);
   --pd-msg-crc-fg: var(--teal-shade30);
   --pd-msg-request-bg: var(--red-tint40);
@@ -448,4 +466,21 @@
   --pd-header-table-fg: var(--blue-shade30);
   --pd-object-table-bg: var(--green-tint40);
   --pd-object-table-fg: var(--green-shade30);
+}
+
+/* Mica 覆盖必须在浅色主题之后：外壳用中性灰半透明罩层透出 DWM 材质，
+   卡片保持 --surface-card 不透明。html 画布显式透明，避免 WebView UA Canvas 海军蓝。 */
+:root[data-backdrop="mica"] {
+  --surface-base: color-mix(in srgb, var(--grey-12) 80%, transparent);
+  --surface-content: color-mix(in srgb, var(--grey-16) 55%, transparent);
+}
+
+:root[data-theme="light"][data-backdrop="mica"] {
+  --surface-base: color-mix(in srgb, var(--grey-98) 80%, transparent);
+  --surface-content: color-mix(in srgb, var(--white) 55%, transparent);
+}
+
+:root[data-backdrop="mica"],
+:root[data-backdrop="mica"] body {
+  background-color: transparent;
 }

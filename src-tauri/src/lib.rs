@@ -1,5 +1,6 @@
 mod pd_capture;
 mod usb_port;
+mod window_material;
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
@@ -286,7 +287,7 @@ fn stop_task(slot: &mut Option<BackgroundTask>) {
     }
 }
 
-struct AppState {
+pub(crate) struct AppState {
     device_task: Mutex<Option<BackgroundTask>>,
     sample_rate: Arc<AtomicU64>,
     current_device_info: Arc<Mutex<Option<DeviceInfo>>>,
@@ -294,6 +295,8 @@ struct AppState {
     pd_log: Arc<Mutex<PdLog>>,
     pd_capture_enabled: Arc<AtomicBool>,
     connection_epoch: AtomicU64,
+    pub(crate) window_material_available: AtomicBool,
+    pub(crate) window_material_enabled: AtomicBool,
 }
 
 impl Default for AppState {
@@ -307,6 +310,8 @@ impl Default for AppState {
             // 默认跟随记录且未开始记录：与前端 ingest 门控一致，不入库。
             pd_capture_enabled: Arc::new(AtomicBool::new(false)),
             connection_epoch: AtomicU64::new(0),
+            window_material_available: AtomicBool::new(false),
+            window_material_enabled: AtomicBool::new(false),
         }
     }
 }
@@ -900,6 +905,9 @@ pub fn run() {
                 main_window
                     .create_overlay_titlebar()
                     .expect("failed to create overlay titlebar");
+                // 默认尝试 Mica（Win10 / 远程桌面会失败，前端保持不透明底色）
+                let state = app.state::<AppState>();
+                window_material::try_enable_on_setup(&main_window, &state, true);
             }
             #[cfg(not(target_os = "windows"))]
             let _ = app;
@@ -920,7 +928,10 @@ pub fn run() {
             pd_log_clear,
             decode_pd_at,
             pd_log_after,
-            pd_log_replace
+            pd_log_replace,
+            window_material::get_window_material,
+            window_material::set_window_material_theme,
+            window_material::set_window_material_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

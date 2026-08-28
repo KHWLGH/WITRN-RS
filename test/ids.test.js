@@ -13,7 +13,14 @@ import { fileURLToPath } from 'node:url';
 const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 /** 运行时由 JS 创建、不在静态 HTML 里的 id。 */
-const RUNTIME_CREATED = new Set(['export-no-temp', 'export-with-temp']);
+const RUNTIME_CREATED = new Set([
+  'export-no-temp',
+  'export-with-temp',
+  'overflow-export-no-temp',
+  'overflow-export-with-temp',
+  'overflow-import',
+  'overflow-clear',
+]);
 
 /** 动态拼接（模板字符串 / 配置数组）无法被字面量扫描捕获的契约 id。 */
 const DYNAMIC_CONTRACT_IDS = [
@@ -80,4 +87,11 @@ test('index.html has no duplicate ids at all', () => {
   }
   const dupes = [...counts.entries()].filter(([, n]) => n > 1).map(([id]) => id);
   assert.deepEqual(dupes, [], `重复 id: ${dupes.join(', ')}`);
+});
+
+test('CSV import calls updateChartEmptyState after writing columns', () => {
+  const csv = readFileSync(path.join(srcDir, 'csv.js'), 'utf8');
+  const importFn = csv.slice(csv.indexOf('export async function importCSV'));
+  const afterSet = importFn.slice(importFn.indexOf('setChartColumns'));
+  assert.match(afterSet, /updateChartEmptyState\s*\(/);
 });

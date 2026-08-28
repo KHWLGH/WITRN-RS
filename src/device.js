@@ -92,21 +92,11 @@ export function onDeviceSelect() {
 /** 连接到当前选中的设备。 */
 export async function connectDevice() {
   try {
-    if (state.selectedDevicePath) {
-      await invoke('connect_device_by_path', { path: state.selectedDevicePath });
-    } else {
-      const vidStr = document.getElementById('device-vid')?.textContent ?? '';
-      const pidStr = document.getElementById('device-pid')?.textContent ?? '';
-      const vid = Number(vidStr.trim());
-      const pid = Number(pidStr.trim());
-
-      if (Number.isNaN(vid) || Number.isNaN(pid)) {
-        toast.warning('请先选择一个设备或输入有效的VID/PID');
-        return;
-      }
-
-      await invoke('connect_device', { vid, pid });
+    if (!state.selectedDevicePath) {
+      toast.warning('请先选择一个设备');
+      return;
     }
+    await invoke('connect_device_by_path', { path: state.selectedDevicePath });
 
     // 获取连接后的设备信息
     const deviceInfo = await invoke('get_current_device_info');
@@ -158,10 +148,22 @@ export function setConnected(connected) {
     if (el) el.disabled = disabled;
   };
 
-  setDisabled('btn-connect', connected);
-  setDisabled('btn-disconnect', !connected);
+  setDisabled('btn-connect', false);
   setDisabled('device-select', connected);
   setDisabled('btn-refresh-devices', connected);
+
+  const connectBtn = document.getElementById('btn-connect');
+  const connectLabel = document.getElementById('btn-connect-label');
+  const connectIcon = document.getElementById('btn-connect-icon');
+  if (connectBtn) {
+    connectBtn.title = connected ? '断开连接' : '连接设备';
+    connectBtn.setAttribute('aria-label', connectBtn.title);
+  }
+  if (connectLabel) connectLabel.textContent = connected ? '断开' : '连接';
+  if (connectIcon) {
+    connectIcon.classList.toggle('fi-plug', !connected);
+    connectIcon.classList.toggle('fi-plug-off', connected);
+  }
 
   refreshRecordButton();
   refreshDeviceIdentifyState();

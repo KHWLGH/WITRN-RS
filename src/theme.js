@@ -13,6 +13,7 @@
  */
 
 import { state } from './state.js';
+import { syncWindowMaterialTheme } from './window-material.js';
 
 /** @typedef {typeof chartTheme} ChartTheme */
 
@@ -144,12 +145,14 @@ export function applyThemePreference(preference) {
 
   const resolved = resolveTheme(pref, systemPrefersDark());
   document.documentElement.setAttribute('data-theme', resolved);
+  void syncWindowMaterialTheme();
 
   detachSystemListener();
   if (pref === 'system' && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
     systemListener = () => {
       document.documentElement.setAttribute('data-theme', resolveTheme('system', mql.matches));
+      void syncWindowMaterialTheme();
     };
     mql.addEventListener('change', systemListener);
     systemMql = mql;

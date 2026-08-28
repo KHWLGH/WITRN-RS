@@ -6,6 +6,9 @@
  * temperature.js 和 views/pd.js 负责，避免这些模块重复修改同一组 DOM。
  */
 
+import { fi } from './icons.js';
+import { createMenu } from './menu.js';
+
 /**
  * 设置悬浮提示。本应用统一用原生 title（compact.css 的图标化档依赖它），
  * 从 JS 写入时一律镜像到 aria-label。
@@ -29,16 +32,16 @@ export function syncRecordUI(s) {
 
   const linked = s.followPd ? '；跟随记录已开启，同时控制 PD 报文采集' : '';
   if (s.recording) {
-    button.innerHTML = '<i class="codicon codicon-debug-pause"></i>暂停记录';
+    button.innerHTML = `${fi('pause')}暂停记录`;
     setTip(button, `暂停记录，已记录的数据保留，可随时继续${linked}`);
   } else if (!s.connected) {
-    button.innerHTML = `<i class="codicon codicon-record"></i>${s.hasData ? '继续记录' : '开始记录'}`;
+    button.innerHTML = `${fi('record')}${s.hasData ? '继续记录' : '开始记录'}`;
     setTip(button, '请先连接设备');
   } else if (s.hasData) {
-    button.innerHTML = '<i class="codicon codicon-record"></i>继续记录';
+    button.innerHTML = `${fi('record')}继续记录`;
     setTip(button, `继续记录，续接当前时间线，不会清空已有数据${linked}`);
   } else {
-    button.innerHTML = '<i class="codicon codicon-record"></i>开始记录';
+    button.innerHTML = `${fi('record')}开始记录`;
     setTip(button, `开始记录${linked}`);
   }
 
@@ -92,19 +95,19 @@ export function syncPdCaptureUI(s, opts) {
   const recording = follow && !!opts?.recording;
 
   if (follow && recording) {
-    button.innerHTML = '<i class="codicon codicon-debug-pause"></i>暂停记录';
+    button.innerHTML = `${fi('pause')}暂停记录`;
     setTip(button, '暂停记录（跟随记录已开启：同时暂停主监控记录与 PD 采集）');
   } else if (follow) {
-    button.innerHTML = '<i class="codicon codicon-record"></i>开始记录';
+    button.innerHTML = `${fi('record')}开始记录`;
     setTip(
       button,
       opts?.connected ? '开始记录（跟随记录已开启：同时启动主监控记录并开始采集 PD 报文）' : '请先连接设备',
     );
   } else if (s.paused) {
-    button.innerHTML = '<i class="codicon codicon-debug-start"></i>继续';
+    button.innerHTML = `${fi('play')}继续`;
     setTip(button, '恢复报文列表刷新');
   } else {
-    button.innerHTML = '<i class="codicon codicon-debug-pause"></i>暂停';
+    button.innerHTML = `${fi('pause')}暂停`;
     setTip(button, '暂停报文列表刷新（后台继续缓冲）');
   }
 
@@ -135,4 +138,64 @@ export function syncFollowLinkageUI(followEnabled) {
       followEnabled ? '清空图表并重置统计与能量（跟随记录已开启：同时清空 PD 报文列表）' : '清空图表并重置统计与能量',
     );
   }
+}
+
+const MONITOR_OVERFLOW_IDS = ['btn-export', 'btn-import', 'btn-clear-chart'];
+
+/**
+ * 监控命令栏溢出：宽度不够时把导出 / 导入 / 一键重置收进 ⋯ 菜单。
+ * @param {{ exportCSV: (withTemp: boolean) => void }} actions
+ */
+export function initCommandOverflow(actions) {
+  const bar = document.querySelector('#view-monitor .commandbar');
+  const overflowBtn = document.getElementById('btn-cmd-overflow');
+  if (!(bar instanceof HTMLElement) || !overflowBtn) return;
+
+  createMenu(overflowBtn, [
+    {
+      id: 'overflow-export-no-temp',
+      label: '导出CSV（不带温度）',
+      icon: 'export',
+      onSelect: () => actions.exportCSV(false),
+    },
+    {
+      id: 'overflow-export-with-temp',
+      label: '导出CSV（带温度）',
+      icon: 'export',
+      onSelect: () => actions.exportCSV(true),
+    },
+    {
+      id: 'overflow-import',
+      label: '导入CSV',
+      icon: 'download',
+      onSelect: () => document.getElementById('btn-import')?.click(),
+    },
+    {
+      id: 'overflow-clear',
+      label: '一键重置',
+      icon: 'clear',
+      onSelect: () => {
+        const btn = document.getElementById('btn-clear-chart');
+        if (btn instanceof HTMLButtonElement && !btn.disabled) btn.click();
+      },
+    },
+  ]);
+
+  /** @param {boolean} overflowed */
+  const applyHidden = (overflowed) => {
+    for (const id of MONITOR_OVERFLOW_IDS) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = overflowed;
+    }
+    overflowBtn.hidden = !overflowed;
+  };
+
+  const measure = () => {
+    applyHidden(false);
+    applyHidden(bar.scrollWidth > bar.clientWidth + 1);
+  };
+
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measure).observe(bar);
+  window.addEventListener('resize', measure);
+  measure();
 }

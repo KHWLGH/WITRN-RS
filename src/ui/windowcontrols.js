@@ -62,22 +62,22 @@ export function initWindowControls() {
     btn.className = 'wc-btn';
     btn.title = label;
     btn.setAttribute('aria-label', label);
-    btn.innerHTML = `<i class="codicon ${icon}" aria-hidden="true"></i>`;
+    btn.innerHTML = `<i class="fi fi-${icon}" aria-hidden="true"></i>`;
     btn.addEventListener('click', onClick);
     container.appendChild(btn);
     return btn;
   };
 
-  mkBtn('codicon-chrome-minimize', '最小化', () => appWindow.minimize());
-  const maxBtn = mkBtn('codicon-chrome-maximize', '最大化', () => appWindow.toggleMaximize());
-  const closeBtn = mkBtn('codicon-chrome-close', '关闭', () => appWindow.close());
+  mkBtn('subtract', '最小化', () => appWindow.minimize());
+  const maxBtn = mkBtn('maximize', '最大化', () => appWindow.toggleMaximize());
+  const closeBtn = mkBtn('dismiss', '关闭', () => appWindow.close());
   closeBtn.classList.add('wc-btn-close');
 
   const syncMaximized = async () => {
     try {
       const maximized = await appWindow.isMaximized();
-      const icon = maxBtn.querySelector('.codicon');
-      if (icon) icon.className = `codicon ${maximized ? 'codicon-chrome-restore' : 'codicon-chrome-maximize'}`;
+      const icon = maxBtn.querySelector('.fi');
+      if (icon) icon.className = `fi ${maximized ? 'fi-restore' : 'fi-maximize'}`;
       maxBtn.title = maximized ? '还原' : '最大化';
       maxBtn.setAttribute('aria-label', maxBtn.title);
       document.documentElement.classList.toggle('is-maximized', maximized);

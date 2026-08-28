@@ -4,12 +4,26 @@ import test from 'node:test';
 globalThis.window = { __TAURI__: { core: { invoke: async () => null } } };
 
 const elements = new Map();
+/** @type {Map<string, boolean>} */
+const classToggles = new Map();
 globalThis.document = {
   getElementById(id) {
     if (!elements.has(id)) {
       elements.set(id, { textContent: '', disabled: false, hidden: false, title: '' });
     }
     return elements.get(id);
+  },
+  querySelector(sel) {
+    if (sel === '.chart-container') {
+      return {
+        classList: {
+          toggle(name, on) {
+            classToggles.set(name, !!on);
+          },
+        },
+      };
+    }
+    return null;
   },
 };
 globalThis.requestAnimationFrame = (cb) => {
@@ -18,7 +32,7 @@ globalThis.requestAnimationFrame = (cb) => {
 };
 
 const { emptyChartColumns, setChartColumns, state } = await import('../src/state.js');
-const { addDataPoint } = await import('../src/data.js');
+const { addDataPoint, updateChartEmptyState } = await import('../src/data.js');
 
 function resetIngestState() {
   state.isConnected = true;
@@ -144,4 +158,15 @@ test('colliding wall-clock samples still advance x and energy', () => {
   addDataPoint({ voltage: 5, current: 1, power: 5 });
   assert.ok(state.chartSeries.x.at(-1) > firstX);
   assert.ok(state.energy.wh > 0);
+});
+
+test('updateChartEmptyState toggles has-data from series length', () => {
+  resetIngestState();
+  classToggles.clear();
+  updateChartEmptyState();
+  assert.equal(classToggles.get('has-data'), false);
+
+  addDataPoint(sample);
+  updateChartEmptyState();
+  assert.equal(classToggles.get('has-data'), true);
 });

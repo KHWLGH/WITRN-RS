@@ -6,6 +6,7 @@ import {
   calculateEnergyInRange,
   mapCsvColumns,
   nextRecordingX,
+  niceCeiling,
   parseRelativeTime,
 } from '../src/measurement.js';
 
@@ -105,4 +106,20 @@ test('maps optional CSV columns from legacy and current headers', () => {
     mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),'),
     { tempIdx: 4, dpIdx: 5, dnIdx: 6, cc1Idx: 7, cc2Idx: 8 },
   );
+});
+
+test('niceCeiling snaps to the 1-2-5 series', () => {
+  assert.equal(niceCeiling(12.3), 20);
+  assert.equal(niceCeiling(3.4), 5);
+  assert.equal(niceCeiling(31), 50);
+  assert.equal(niceCeiling(1), 1);
+  assert.equal(niceCeiling(2), 2);
+  assert.equal(niceCeiling(5), 5);
+  assert.equal(niceCeiling(5.1), 10);
+  assert.equal(niceCeiling(100), 100);
+  assert.equal(niceCeiling(0.3), 0.5);
+  assert.equal(niceCeiling(0), 1);
+  assert.equal(niceCeiling(-8), 1);
+  assert.equal(niceCeiling(Number.NaN), 1);
+  assert.equal(niceCeiling(Number.POSITIVE_INFINITY), 1);
 });
