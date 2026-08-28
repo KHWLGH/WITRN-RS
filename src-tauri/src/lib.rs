@@ -279,7 +279,10 @@ fn enqueue_pd_pending(pending: &mut VecDeque<PdEvent>, event: PdEvent) {
 }
 
 /// 把 pending 里的 PD 事件尽量送进通道。发送端已断开时返回 `false`。
-fn drain_pd_pending(tx: &mpsc::SyncSender<DeviceOutgoing>, pending: &mut VecDeque<PdEvent>) -> bool {
+fn drain_pd_pending(
+    tx: &mpsc::SyncSender<DeviceOutgoing>,
+    pending: &mut VecDeque<PdEvent>,
+) -> bool {
     while let Some(event) = pending.pop_front() {
         match tx.try_send(DeviceOutgoing::Pd(Box::new(event))) {
             Ok(()) => {}
@@ -880,7 +883,8 @@ pub fn run() {
             pd_log_replace,
             window_material::get_window_material,
             window_material::set_window_material_theme,
-            window_material::set_window_material_enabled
+            window_material::set_window_material_enabled,
+            window_material::set_window_material_unfocused
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

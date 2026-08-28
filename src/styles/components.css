@@ -402,6 +402,10 @@
   background: var(--text-on-accent);
 }
 
+.toggle:has(input:disabled) {
+  cursor: default;
+}
+
 .toggle input:disabled + .toggle-track {
   opacity: 0.5;
 }

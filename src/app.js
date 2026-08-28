@@ -69,7 +69,7 @@ import {
   syncPdView,
 } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
-import { initWindowMaterial, setWindowMaterialEnabled } from './window-material.js';
+import { initWindowMaterial, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -550,6 +550,13 @@ function setupControls() {
   const windowMaterialEl = /** @type {HTMLInputElement|null} */ (document.getElementById('window-material'));
   windowMaterialEl?.addEventListener('change', () => {
     void setWindowMaterialEnabled(windowMaterialEl.checked);
+    debouncedSaveSettings();
+  });
+  const windowMaterialUnfocusedEl = /** @type {HTMLInputElement|null} */ (
+    document.getElementById('window-material-unfocused')
+  );
+  windowMaterialUnfocusedEl?.addEventListener('change', () => {
+    void setWindowMaterialUnfocused(windowMaterialUnfocusedEl.checked);
     debouncedSaveSettings();
   });
 

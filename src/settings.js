@@ -11,7 +11,7 @@ import { applyThemePreference, echoThemeUI } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
-import { echoWindowMaterialUI, setWindowMaterialEnabled } from './window-material.js';
+import { echoWindowMaterialUI, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -67,6 +67,7 @@ function normalizeSettings(saved) {
     merged.theme = defaultSettings.theme;
   }
   merged.windowMaterial = merged.windowMaterial !== false;
+  merged.windowMaterialUnfocused = merged.windowMaterialUnfocused === true;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
@@ -327,7 +328,8 @@ export async function resetSettings() {
     echoWindowMaterialUI();
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
-    void setWindowMaterialEnabled(state.settings.windowMaterial);
+    await setWindowMaterialUnfocused(state.settings.windowMaterialUnfocused);
+    await setWindowMaterialEnabled(state.settings.windowMaterial);
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位

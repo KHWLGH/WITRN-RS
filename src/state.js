@@ -52,6 +52,7 @@
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
  * @property {boolean} windowMaterial - Win11 Mica 窗口材质（不可用时由运行时忽略）
+ * @property {boolean} windowMaterialUnfocused - 非聚焦时仍使用窗口材质（需 windowMaterial）
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  */
@@ -211,6 +212,7 @@ export const defaultSettings = {
   uiScalePercent: 100,
   theme: 'dark',
   windowMaterial: true,
+  windowMaterialUnfocused: false,
   realtimePanelWidth: 250,
   pdSplitSide: false,
 };

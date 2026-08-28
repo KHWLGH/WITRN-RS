@@ -26,10 +26,33 @@ function setBackdrop(applied) {
 }
 
 function echoWindowMaterialUI() {
+  const available = state.windowMaterialAvailable;
+  const micaOn = available && state.settings.windowMaterial;
   const row = document.getElementById('window-material-row');
   const input = /** @type {HTMLInputElement|null} */ (document.getElementById('window-material'));
-  if (row) row.hidden = !state.windowMaterialAvailable;
+  const unfocusedRow = document.getElementById('window-material-unfocused-row');
+  const unfocusedInput = /** @type {HTMLInputElement|null} */ (document.getElementById('window-material-unfocused'));
+  if (row) row.hidden = !available;
   if (input) input.checked = state.settings.windowMaterial;
+  if (unfocusedRow) {
+    unfocusedRow.hidden = !available;
+    unfocusedRow.classList.toggle('is-disabled', !micaOn);
+  }
+  if (unfocusedInput) {
+    unfocusedInput.checked = state.settings.windowMaterialUnfocused;
+    unfocusedInput.disabled = !micaOn;
+  }
+}
+
+async function pushUnfocusedPreference() {
+  if (!state.windowMaterialAvailable) return;
+  try {
+    await invokeCmd('set_window_material_unfocused', {
+      enabled: !!state.settings.windowMaterialUnfocused,
+    });
+  } catch (error) {
+    console.error('切换非聚焦窗口材质失败:', error);
+  }
 }
 
 /**
@@ -57,6 +80,7 @@ export async function initWindowMaterial() {
       setBackdrop(want);
       if (want) await invokeCmd('set_window_material_theme', { dark: resolvedDark() });
     }
+    await pushUnfocusedPreference();
   } catch (error) {
     console.error('窗口材质初始化失败:', error);
     state.windowMaterialAvailable = false;
@@ -95,6 +119,16 @@ export async function setWindowMaterialEnabled(enabled) {
     console.error('切换窗口材质失败:', error);
     setBackdrop(false);
   }
+  echoWindowMaterialUI();
+}
+
+/**
+ * @param {boolean} enabled
+ * @returns {Promise<void>}
+ */
+export async function setWindowMaterialUnfocused(enabled) {
+  state.settings.windowMaterialUnfocused = enabled;
+  await pushUnfocusedPreference();
   echoWindowMaterialUI();
 }
 

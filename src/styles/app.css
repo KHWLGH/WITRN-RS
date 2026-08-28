@@ -656,6 +656,14 @@ html[data-ui-scale-css] .app-shell {
   border-bottom: none;
 }
 
+.settings-row-nested {
+  padding-left: 20px;
+}
+
+.settings-row.is-disabled {
+  opacity: 0.55;
+}
+
 .settings-row-text {
   min-width: 0;
   flex: 1 1 180px;
