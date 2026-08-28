@@ -20,6 +20,10 @@ const RUNTIME_CREATED = new Set([
   'overflow-export-with-temp',
   'overflow-import',
   'overflow-clear',
+  // Windows：tauri-plugin-decorum 注入，不在静态 HTML 里
+  'decorum-tb-minimize',
+  'decorum-tb-maximize',
+  'decorum-tb-close',
 ]);
 
 /** 动态拼接（模板字符串 / 配置数组）无法被字面量扫描捕获的契约 id。 */
