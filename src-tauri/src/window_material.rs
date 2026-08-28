@@ -68,6 +68,7 @@ fn clear_mica_on(_window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
 pub fn try_enable_on_setup(window: &WebviewWindow, state: &AppState, dark: bool) {
     match apply_mica_on(window, dark) {
         Ok(()) => {
