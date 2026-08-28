@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **图表列只保留 `chartSeries`**：去掉与之同对象的 `chartData` 别名
 
 ### Fixed
+- **Windows 窗口按钮方块字**：部分 Win10 缺少 Segoe Fluent Icons / MDL2 时，decorum 私用区字形会显示成方块。保留 decorum 按钮与贴靠浮窗，内容改用内置 Fluent SVG
 - **读数栏排版**：大字读数左对齐并用 `tabular-nums`；最小 / 平均 / 最大三列改为左 / 中 / 右对齐，不再被省略号规则套到内层数字上
 - **窄窗读数栏过宽**：小窗口下侧栏仍按 250px 计，主卡右侧留白过大。视口 <1080（或高度 <620）上限 220px，<980 上限 200px。被上限卡住时拖动分栏不再改写大窗口下的宽度偏好
 - **拖动读数栏卡顿**：分栏拖动期间跳过图表的 `ResizeObserver`，宽度写入合并到 rAF，松手后再 `setSize`

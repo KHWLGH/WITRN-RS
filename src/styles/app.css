@@ -216,6 +216,10 @@ html[data-ui-scale-css] .app-shell {
   color: var(--text-primary) !important;
 }
 
+:root[data-os="windows"] .decorum-tb-btn .fi {
+  font-size: 17px;
+}
+
 :root[data-os="windows"] #decorum-tb-close:hover {
   background: var(--danger-fill) !important;
   color: var(--text-on-danger) !important;

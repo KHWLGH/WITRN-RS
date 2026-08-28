@@ -844,8 +844,8 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             // 自定义标题栏：Windows 由 decorum 注入带贴靠布局浮窗的窗口控制按钮
-            // （前端 styles/app.css 按设计令牌重绘）；Linux 无此支持，改由前端
-            // windowcontrols.js 自绘按钮与边缘调整大小热区。
+            // （前端按设计令牌重绘，并用内置 Fluent SVG 替换 Segoe 字形以免 Win10 缺字）；
+            // Linux 无此支持，改由前端 windowcontrols.js 自绘按钮与边缘调整大小热区。
             #[cfg(target_os = "windows")]
             {
                 use tauri::Manager;

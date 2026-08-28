@@ -3,8 +3,10 @@
  * @file 窗口控制（自定义标题栏配套）。
  *
  * Windows：tauri-plugin-decorum 注入带贴靠布局浮窗的原生按钮
- * （#decorum-tb-minimize/maximize/close），本模块不再画按钮，只做样式
- * 层面的重绘（styles/app.css）。
+ * （#decorum-tb-minimize/maximize/close），保留其点击与 Win11 贴靠浮窗；
+ * 但 decorum 默认用 Segoe Fluent Icons / Segoe MDL2 Assets 私用区字形，
+ * 部分 Win10 缺字会显示成方块。本模块把按钮内容换成内置 Fluent SVG
+ * （.fi），观感与 styles/app.css 重绘规则对齐。
  *
  * Linux / macOS：decorum 不支持，本模块自绘 最小化 / 最大化还原 / 关闭 三按钮
  * （与 Windows 侧共享同一套 CSS 观感），并在四边+四角放透明热区调
@@ -25,6 +27,102 @@ const RESIZE_DIRECTIONS = /** @type {const} */ ({
   SouthEast: 'se-resize',
   SouthWest: 'sw-resize',
 });
+
+/**
+ * 把 decorum 注入的 Segoe 字形换成内置 .fi SVG；保留原按钮节点与事件
+ * （含 Win11 最大化贴靠浮窗）。decorum 在 resize 时会改写 maximize 的
+ * innerHTML，故用 MutationObserver 再刷回 SVG。
+ * @param {{ isMaximized: () => Promise<boolean>, onResized: (cb: () => void) => unknown }} appWindow
+ */
+function restyleDecorumButtons(appWindow) {
+  /** @type {boolean} */
+  let painting = false;
+  /** @type {boolean} */
+  let watching = false;
+
+  /**
+   * @param {HTMLElement} btn
+   * @param {string} icon
+   * @param {string} label
+   */
+  const setIcon = (btn, icon, label) => {
+    const existing = btn.querySelector(':scope > .fi');
+    if (existing && existing.classList.contains(`fi-${icon}`) && btn.childNodes.length === 1) {
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      return;
+    }
+    painting = true;
+    try {
+      const i = document.createElement('i');
+      i.className = `fi fi-${icon}`;
+      i.setAttribute('aria-hidden', 'true');
+      btn.replaceChildren(i);
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+    } finally {
+      queueMicrotask(() => {
+        painting = false;
+      });
+    }
+  };
+
+  const syncMaximized = async (maxBtn) => {
+    try {
+      const maximized = await appWindow.isMaximized();
+      setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? '还原' : '最大化');
+      document.documentElement.classList.toggle('is-maximized', maximized);
+    } catch {
+      setIcon(maxBtn, 'maximize', '最大化');
+    }
+  };
+
+  const paint = () => {
+    if (painting) return false;
+    const minBtn = document.getElementById('decorum-tb-minimize');
+    const maxBtn = document.getElementById('decorum-tb-maximize');
+    const closeBtn = document.getElementById('decorum-tb-close');
+    if (!minBtn || !maxBtn || !closeBtn) return false;
+
+    setIcon(minBtn, 'subtract', '最小化');
+    setIcon(closeBtn, 'dismiss', '关闭');
+    // decorum 可能刚写入 \uE923/\uE922；先按字形占位，再以 isMaximized 校准
+    const fromGlyph = maxBtn.textContent.includes('\uE923');
+    const fromFi = !!maxBtn.querySelector('.fi-restore');
+    if (!maxBtn.querySelector('.fi') || fromGlyph) {
+      setIcon(maxBtn, fromGlyph || fromFi ? 'restore' : 'maximize', fromGlyph || fromFi ? '还原' : '最大化');
+    }
+    void syncMaximized(maxBtn);
+    return true;
+  };
+
+  const watch = () => {
+    if (watching) return;
+    watching = true;
+    const tb = document.querySelector('[data-tauri-decorum-tb]');
+    if (tb) {
+      new MutationObserver(() => {
+        if (!painting) paint();
+      }).observe(tb, { childList: true, subtree: true, characterData: true });
+    }
+    void appWindow.onResized(() => {
+      if (!painting) paint();
+    });
+  };
+
+  if (paint()) {
+    watch();
+    return;
+  }
+
+  const boot = new MutationObserver(() => {
+    if (paint()) {
+      boot.disconnect();
+      watch();
+    }
+  });
+  boot.observe(document.body, { childList: true, subtree: true });
+}
 
 /** 初始化标题栏拖拽与窗口控制。窗口按钮在非 Windows 上自绘。 */
 export function initWindowControls() {
@@ -47,7 +145,10 @@ export function initWindowControls() {
     });
   }
 
-  if (document.documentElement.getAttribute('data-os') === 'windows') return;
+  if (document.documentElement.getAttribute('data-os') === 'windows') {
+    restyleDecorumButtons(appWindow);
+    return;
+  }
 
   const container = document.getElementById('titlebar-controls');
   if (!container) return;
