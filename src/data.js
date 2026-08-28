@@ -579,7 +579,14 @@ function foldRangePoint(cache, i) {
   const dt = (cols.x.buf[i] - cols.x.buf[i - 1]) / 3600;
   const currentAbs = Math.abs(c);
   const powerAbs = Math.abs(p);
-  if (dt < 0 || dt > MAX_ENERGY_STEP_S / 3600 || !Number.isFinite(dt) || !Number.isFinite(currentAbs) || !Number.isFinite(powerAbs)) return;
+  if (
+    dt < 0 ||
+    dt > MAX_ENERGY_STEP_S / 3600 ||
+    !Number.isFinite(dt) ||
+    !Number.isFinite(currentAbs) ||
+    !Number.isFinite(powerAbs)
+  )
+    return;
   cache.wh += powerAbs * dt;
   cache.mah += currentAbs * 1000 * dt;
 }

@@ -47,7 +47,7 @@ function restyleDecorumButtons(appWindow) {
    */
   const setIcon = (btn, icon, label) => {
     const existing = btn.querySelector(':scope > .fi');
-    if (existing && existing.classList.contains(`fi-${icon}`) && btn.childNodes.length === 1) {
+    if (existing?.classList.contains(`fi-${icon}`) && btn.childNodes.length === 1) {
       btn.title = label;
       btn.setAttribute('aria-label', label);
       return;
