@@ -839,11 +839,22 @@ fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[cfg_attr(target_os = "macos", allow(unused_mut))]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    // decorum injects a native traffic-light positioner on macOS even though
+    // this app uses its own HTML window controls there. That positioner can
+    // dereference a missing Cocoa superview during window creation, so keep
+    // the plugin on the platforms where its overlay titlebar is supported.
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.plugin(tauri_plugin_decorum::init());
+    }
+
+    builder
         .manage(AppState::default())
         .setup(|app| {
             // 自定义标题栏：Windows 由 decorum 注入带贴靠布局浮窗的窗口控制按钮
