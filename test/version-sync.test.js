@@ -60,3 +60,15 @@ test('member crates inherit the workspace version', () => {
     `这些 crate 没有继承工作区版本（应写 version.workspace = true）: ${offenders.join(', ')}`,
   );
 });
+
+test('tauri macOS private API feature stays aligned with tauri.conf.json', () => {
+  const tauriCargo = read('src-tauri/Cargo.toml');
+  const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'));
+  const hasMacosPrivateApiFeature = /tauri\s*=\s*\{[^}]*features\s*=\s*\[[^\]]*"macos-private-api"/s.test(tauriCargo);
+  const macosPrivateApiEnabledInConfig = tauriConfig?.app?.macOSPrivateApi === true;
+  assert.equal(
+    hasMacosPrivateApiFeature,
+    macosPrivateApiEnabledInConfig,
+    '若 tauri 依赖启用 macos-private-api，需在 tauri.conf.json 的 app.macosPrivateApi 同步开启（反之亦然）',
+  );
+});
