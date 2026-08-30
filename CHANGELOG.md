@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **CI allowlist**：`macos-private-api` 与 `tauri.conf.json` 的 `macOSPrivateApi` 对齐，Linux / Windows 上 `cargo clippy` / `cargo test` 不再被 tauri-build 拦下
+
+### Changed
+- **macOS 构建文档**：从仓库根目录迁入 [`docs/MACOS_BUILD.md`](docs/MACOS_BUILD.md)，README 与开发文档增加引用
+
 ## [0.2.1] - 2026-08-29
 
 ### Added

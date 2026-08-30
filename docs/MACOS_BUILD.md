@@ -1,4 +1,8 @@
+← 返回 [README](../README.md)
+
 # WITRN-RS macOS ARM64 构建记录
+
+自行编译步骤的摘要见 [开发与构建 · macOS 自行编译](DEVELOPMENT.md#-macos-自行编译)。下文是一次 Apple Silicon 上的完整打包记录。
 
 ## 基本信息
 
@@ -17,7 +21,7 @@
 
 源码本身已经包含 macOS HID 分支（非独占打开）和自绘窗口控制，不需要重写协议或前端。实际启动测试发现，`tauri-plugin-decorum` 在 macOS 创建窗口时仍会进入 Cocoa 交通灯定位器，并因缺少预期的原生 superview 触发空指针崩溃。因此只做了以下平台限定修改：
 
-1. 在 `src-tauri/Cargo.toml` 启用 Tauri 的 `macos-private-api`，并新增 `src-tauri/tauri.macos.conf.json`，使透明窗口在 macOS 上使用所需的私有 API 配置。
+1. 在 `src-tauri/Cargo.toml` 启用 Tauri 的 `macos-private-api`，并在 `src-tauri/tauri.conf.json` 与 `src-tauri/tauri.macos.conf.json` 同时设置 `app.macOSPrivateApi: true`。`cargo test` / `clippy` 只读主配置、不合并平台 overlay，两边必须一致，否则 Linux/Windows CI 会在 tauri-build 的 allowlist 校验处失败。
 2. 在 `src-tauri/src/lib.rs` 中仅对 macOS 跳过 `tauri-plugin-decorum` 初始化。Windows/Linux 路径保持原有初始化和行为；Windows 的 overlay titlebar 代码仍只在 Windows 编译。
 
 现有 Tauri commands、事件名、事件载荷、设置结构、USB-PD 协议、采样算法和 CSV/PD 文件格式均未调整。
@@ -34,7 +38,7 @@ cargo tauri build
 本次 release 编译和 `.app` 打包成功。第一次 DMG 运行在锁屏桌面上，Tauri 的 Finder AppleScript 美化步骤失败；没有改变全局代理或源码行为，改用 Tauri 自带脚本的无 Finder 美化模式重新封装：
 
 ```bash
-cd target/release/bundle/macos
+cd src-tauri/target/release/bundle/macos
 ./../dmg/bundle_dmg.sh --skip-jenkins \
   --volname WITRN-RS \
   --icon WITRN-RS.app 200 200 \
@@ -50,15 +54,15 @@ mv WITRN-RS_0.2.1_aarch64.dmg ../dmg/WITRN-RS_0.2.1_aarch64.dmg
 
 ```bash
 codesign --force --deep --sign - --timestamp=none \
-  target/release/bundle/macos/WITRN-RS.app
+  src-tauri/target/release/bundle/macos/WITRN-RS.app
 ```
 
 如果源码或 app 内容改变，应先重新构建、签名，再重新生成 DMG。
 
 ## 产物
 
-- App：[target/release/bundle/macos/WITRN-RS.app](/Users/xueweixun/Documents/工具类/WITRN-RS/target/release/bundle/macos/WITRN-RS.app)
-- DMG：[target/release/bundle/dmg/WITRN-RS_0.2.1_aarch64.dmg](/Users/xueweixun/Documents/工具类/WITRN-RS/target/release/bundle/dmg/WITRN-RS_0.2.1_aarch64.dmg)
+- App：`src-tauri/target/release/bundle/macos/WITRN-RS.app`
+- DMG：`src-tauri/target/release/bundle/dmg/WITRN-RS_0.2.1_aarch64.dmg`
 - 产物大小：App 约 `15M`；DMG `5,357,026` bytes
 - DMG SHA-256：`38439f97f4b2b74e38b931e919976959b51b73af46dcc1d0e4015f31379aff82`
 - App 主二进制：`Contents/MacOS/witrn-rs`

@@ -60,3 +60,26 @@ test('member crates inherit the workspace version', () => {
     `这些 crate 没有继承工作区版本（应写 version.workspace = true）: ${offenders.join(', ')}`,
   );
 });
+
+/**
+ * tauri-build 在 `cargo test` / `clippy` 时只读 `tauri.conf.json`，不合并
+ * `tauri.macos.conf.json`。Cargo feature 与主配置必须同时开或同时关，
+ * 否则 Linux / Windows CI 会在 allowlist 校验处失败。
+ */
+test('macos-private-api Cargo feature matches tauri.conf.json', () => {
+  const defaultDependencies = read('src-tauri/Cargo.toml')
+    .split(/^\[/m)
+    .find((chunk) => chunk.startsWith('dependencies]'));
+  assert.ok(defaultDependencies, 'src-tauri/Cargo.toml 缺少 [dependencies] 段');
+
+  const hasMacosPrivateApiFeature = /tauri\s*=\s*\{[^}]*features\s*=\s*\[[^\]]*"macos-private-api"/s.test(
+    defaultDependencies,
+  );
+  const macosPrivateApiEnabledInConfig = JSON.parse(read('src-tauri/tauri.conf.json')).app?.macOSPrivateApi === true;
+
+  assert.equal(
+    hasMacosPrivateApiFeature,
+    macosPrivateApiEnabledInConfig,
+    '若 tauri 依赖启用 macos-private-api，需在 tauri.conf.json 的 app.macOSPrivateApi 同步开启（反之亦然）',
+  );
+});

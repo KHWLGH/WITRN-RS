@@ -7,6 +7,7 @@
 - [质量检查](#质量检查)
 - [CI 门禁](#-ci-门禁)
 - [Linux 自行编译](#-linux-自行编译)
+- [macOS 自行编译](#-macos-自行编译)
 - [参与贡献](#参与贡献)
 
 ## 环境要求
@@ -16,6 +17,7 @@
 | Rust | 1.75+ | 工作区 `rust-version`；建议用最新稳定版 |
 | Tauri CLI | v2 | `cargo install tauri-cli --version "^2"` |
 | Windows | 10 / 11 | 当前的开发与验证平台 |
+| macOS | 12+（Apple Silicon 已验证） | 可自行编译，见 [macOS 自行编译](#-macos-自行编译) |
 | MSVC Build Tools | — | Windows 上编译 Rust 需要 |
 | Node.js | 20+ | **仅**用于 lint / typecheck / test |
 
@@ -67,7 +69,7 @@ cargo tauri build
 | `Cargo.toml` | `[workspace.package]` 的 `version`（三个成员 crate 通过 `version.workspace = true` 继承） |
 | `src-tauri/tauri.conf.json` | `"version"` |
 
-漏改一处不会有任何构建或测试报错 —— 装出来的包和源码对不上，但一切看起来都正常。所以这条不变量由 **`test/version-sync.test.js`** 守着：它断言三处一致、格式为 `X.Y.Z`，且成员 crate 仍在继承而不是各写各的。该测试随 `npm test` 运行，因此 CI 每次 push / PR 都会检查。
+漏改一处不会有任何构建或测试报错 —— 装出来的包和源码对不上，但一切看起来都正常。所以这条不变量由 **`test/version-sync.test.js`** 守着：它断言三处一致、格式为 `X.Y.Z`，成员 crate 仍在继承而不是各写各的，以及 `macos-private-api` Cargo feature 与 `tauri.conf.json` 的 `macOSPrivateApi` 同步。该测试随 `npm test` 运行，因此 CI 每次 push / PR 都会检查。
 
 发版步骤：
 
@@ -87,7 +89,7 @@ cargo tauri build
 
 ```bash
 npm ci
-npm test                    # node --test，18 个文件 / 110 个用例
+npm test                    # node --test，17 个文件 / 110 个用例
 npm run typecheck           # tsc --noEmit -p jsconfig.json
 npm run lint                # biome check --error-on-warnings .
 cargo fmt --check --all
@@ -120,7 +122,7 @@ CI 的 `crate-features` job 跑的就是这一组。注意各组合的用例数*
 
 ## 🔁 CI 门禁
 
-`.github/workflows/ci.yml` 在**每次 push 和 PR** 时运行（无分支或路径过滤），两个 job：
+`.github/workflows/ci.yml` 在**每次 push 和 PR** 时运行（无分支或路径过滤），三个 job：
 
 | Job | 平台 | 内容 |
 | --- | --- | --- |
@@ -196,6 +198,23 @@ ls -l /dev/hidraw*        # 应能看到你的用户可读写的设备节点
 - WebKitGTK 用原生 GTK 控件渲染展开的 `<select>`，CSS 管不到（暗色主题下永远是白底黑字）。因此下拉框是自绘组件（`src/dropdown.js`），并设置了 `color-scheme: dark`。
 - 标题栏按钮在 Linux 上自绘（`decorum` 插件只支持 Windows），边缘与四角是透明的命中区，调用 `startResizeDragging()`；另外补了 1px 描边来补偿缺失的窗口阴影。
 - 对缺少 `HTMLDialogElement` 的旧版 WebKitGTK 有透明度回退。
+
+## 🍎 macOS 自行编译
+
+> 预构建安装包不含 macOS。Apple Silicon 上已有一次完整的 `.app` / DMG 打包记录，见 [macOS ARM64 构建记录](MACOS_BUILD.md)。CI 在 `macos-latest` 上只做 `cargo check`，不跑 GUI，也不接触真机。
+
+需要 Xcode Command Line Tools、Rust 稳定版和 Tauri CLI v2。在仓库根目录：
+
+```bash
+npm ci
+cargo tauri build
+```
+
+产物在 `src-tauri/target/release/bundle/`（`.app` / `.dmg`）。
+
+透明无边框窗口依赖 Tauri 的 macOS private API：`src-tauri/Cargo.toml` 启用 `macos-private-api`，且 `tauri.conf.json` 与 `tauri.macos.conf.json` 均设置 `app.macOSPrivateApi: true`。两边必须一致——`cargo test` / `clippy` 不合并平台 overlay。`tauri-plugin-decorum` 在 macOS 上会因缺少 Cocoa superview 空指针崩溃，因此 `src-tauri/src/lib.rs` 仅在非 macOS 上初始化该插件；窗口按钮由前端自绘。
+
+本仓库不提供 Developer ID 签名或 Apple 公证。本地包可用 ad-hoc `codesign`；首次打开可能被 Gatekeeper 拦截。DMG 若在锁屏桌面上失败，可用 `--skip-jenkins` 跳过 Finder 美化。命令、校验和与验收边界以 [macOS ARM64 构建记录](MACOS_BUILD.md) 为准。
 
 ## 参与贡献
 

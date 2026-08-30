@@ -17,7 +17,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES%20Modules-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
 [![uPlot](https://img.shields.io/badge/charts-uPlot-6E7B8B?style=flat-square)](https://github.com/leeoniya/uPlot)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square&logo=windows&logoColor=white)](#-下载与安装)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4?style=flat-square)](#-下载与安装)
 
 </div>
 
@@ -29,7 +29,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 
 除了常规的电压 / 电流 / 功率 / 温度，WITRN-RS 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**——这是它和一般图表软件的主要区别：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
 
-> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；Linux 可自行编译，但未经持续验证，详见 [开发与构建](docs/DEVELOPMENT.md#-linux-自行编译)。
+> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；macOS 与 Linux 可自行编译，分别见 [macOS 自行编译](docs/DEVELOPMENT.md#-macos-自行编译)、[Linux 自行编译](docs/DEVELOPMENT.md#-linux-自行编译)，以及 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
 
 > **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/WITRN-RS/issues) 反馈。
 
@@ -97,6 +97,8 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 
 **Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/WITRN-RS/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。仪表走标准 USB HID，**不需要安装驱动**。
 
+**macOS** —— 不提供预构建包（无 Developer ID / 公证）。Apple Silicon 可自行编译，见 [开发与构建 · macOS 自行编译](docs/DEVELOPMENT.md#-macos-自行编译)。一次已验证的 ARM64 打包步骤、ad-hoc 签名与 Gatekeeper 边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+
 **Linux** —— 不提供预构建包，但可以自行编译。请参考 [开发与构建 · Linux 自行编译](docs/DEVELOPMENT.md#-linux-自行编译)，其中包含必需的系统依赖和访问 `hidraw` 所需的 udev 规则（缺少规则会导致扫不到任何设备）。
 
 ## 🚀 快速上手
@@ -114,7 +116,8 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 | --- | --- |
 | [使用指南](docs/USAGE.md) | 界面逐项说明、全部设置项、CSV 与 PD 捕获文件格式、常见问题 |
 | [技术架构](docs/ARCHITECTURE.md) | 线程模型、Tauri 命令、数据流、HID 报文布局、测试与安全边界 |
-| [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux 自行编译、参与贡献 |
+| [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux / macOS 自行编译、参与贡献 |
+| [macOS ARM64 构建记录](docs/MACOS_BUILD.md) | Apple Silicon 打包步骤、ad-hoc 签名、DMG 与验收边界 |
 | [外部温度服务](docs/TEMPERATURE.md) | TCP 温度源协议、应用内配置、Python 示例服务器 |
 | [更新日志](CHANGELOG.md) | 完整版本历史 |
 
