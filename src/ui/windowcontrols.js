@@ -1,19 +1,9 @@
 // @ts-check
 /**
- * @file 窗口控制（自定义标题栏配套）。
- *
- * Windows：tauri-plugin-decorum 注入带贴靠布局浮窗的原生按钮
- * （#decorum-tb-minimize/maximize/close），保留其点击与 Win11 贴靠浮窗；
- * 但 decorum 默认用 Segoe Fluent Icons / Segoe MDL2 Assets 私用区字形，
- * 部分 Win10 缺字会显示成方块。本模块把按钮内容换成内置 Fluent SVG
- * （.fi），观感与 styles/app.css 重绘规则对齐。
- *
- * Linux / macOS：decorum 不支持，本模块自绘 最小化 / 最大化还原 / 关闭 三按钮
- * （与 Windows 侧共享同一套 CSS 观感），并在四边+四角放透明热区调
- * startResizeDragging() 实现无边框窗口的边缘调整大小（Linux 无 shadow
- * 装饰，窗口管理器不提供拉伸边）。
- *
- * 关闭按钮走 appWindow.close() → 触发既有 onCloseRequested 退出确认流程。
+ * 窗口动作始终按真实 data-os 分发，data-window-style 只负责 CSS 皮肤。
+ * Windows 保留 decorum 原节点、ID、class、click/hover 监听和 Snap（macOS 皮肤下由 guardDecorumSnap 常驻拦下）；
+ * Mac/Linux 单次创建自绘按钮。Mac 不注册 decorum，也不创建 Tao 未实现的缩放热区。
+ * close() 继续进入现有 onCloseRequested 确认流程。
  */
 
 /** 边缘热区方向 → CSS 光标。 */
@@ -28,175 +18,177 @@ const RESIZE_DIRECTIONS = /** @type {const} */ ({
   SouthWest: 'sw-resize',
 });
 
-/**
- * 把 decorum 注入的 Segoe 字形换成内置 .fi SVG；保留原按钮节点与事件
- * （含 Win11 最大化贴靠浮窗）。decorum 在 resize 时会改写 maximize 的
- * innerHTML，故用 MutationObserver 再刷回 SVG。
- * @param {{ isMaximized: () => Promise<boolean>, onResized: (cb: () => void) => unknown }} appWindow
- */
-function restyleDecorumButtons(appWindow) {
-  /** @type {boolean} */
-  let painting = false;
-  /** @type {boolean} */
-  let watching = false;
+let initialized = false;
 
-  /**
-   * @param {HTMLElement} btn
-   * @param {string} icon
-   * @param {string} label
-   */
-  const setIcon = (btn, icon, label) => {
-    const existing = btn.querySelector(':scope > .fi');
-    if (existing?.classList.contains(`fi-${icon}`) && btn.childNodes.length === 1) {
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
-      return;
-    }
-    painting = true;
-    try {
-      const i = document.createElement('i');
-      i.className = `fi fi-${icon}`;
-      i.setAttribute('aria-hidden', 'true');
-      btn.replaceChildren(i);
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
-    } finally {
-      queueMicrotask(() => {
-        painting = false;
-      });
-    }
-  };
+/** @param {HTMLElement} btn @param {string} icon @param {string} label */
+function setIcon(btn, icon, label) {
+  const existing = btn.querySelector(':scope > .fi');
+  if (!existing?.classList.contains(`fi-${icon}`) || btn.childNodes.length !== 1) {
+    const i = document.createElement('i');
+    i.className = `fi fi-${icon}`;
+    i.setAttribute('aria-hidden', 'true');
+    btn.replaceChildren(i);
+  }
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
 
-  const syncMaximized = async (maxBtn) => {
-    try {
-      const maximized = await appWindow.isMaximized();
-      setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? '还原' : '最大化');
-      document.documentElement.classList.toggle('is-maximized', maximized);
-    } catch {
-      setIcon(maxBtn, 'maximize', '最大化');
-    }
-  };
-
+/** 保留按钮本身，仅替换缺字的 Segoe 图标；插件 resize 写字形后重新绘制。 */
+function restyleDecorumButtons() {
   const paint = () => {
-    if (painting) return false;
     const minBtn = document.getElementById('decorum-tb-minimize');
     const maxBtn = document.getElementById('decorum-tb-maximize');
     const closeBtn = document.getElementById('decorum-tb-close');
     if (!minBtn || !maxBtn || !closeBtn) return false;
-
     setIcon(minBtn, 'subtract', '最小化');
     setIcon(closeBtn, 'dismiss', '关闭');
-    // decorum 可能刚写入 \uE923/\uE922；先按字形占位，再以 isMaximized 校准
-    const fromGlyph = maxBtn.textContent.includes('\uE923');
-    const fromFi = !!maxBtn.querySelector('.fi-restore');
-    if (!maxBtn.querySelector('.fi') || fromGlyph) {
-      setIcon(maxBtn, fromGlyph || fromFi ? 'restore' : 'maximize', fromGlyph || fromFi ? '还原' : '最大化');
-    }
-    void syncMaximized(maxBtn);
+    const maximized = document.documentElement.classList.contains('is-maximized');
+    setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? '还原' : '最大化');
+    attachSnapGuard(maxBtn);
     return true;
   };
-
   const watch = () => {
-    if (watching) return;
-    watching = true;
     const tb = document.querySelector('[data-tauri-decorum-tb]');
-    if (tb) {
-      new MutationObserver(() => {
-        if (!painting) paint();
-      }).observe(tb, { childList: true, subtree: true, characterData: true });
-    }
-    void appWindow.onResized(() => {
-      if (!painting) paint();
-    });
+    if (tb) new MutationObserver(paint).observe(tb, { childList: true, subtree: true, characterData: true });
   };
-
   if (paint()) {
     watch();
-    return;
-  }
-
-  const boot = new MutationObserver(() => {
-    if (paint()) {
+  } else {
+    const boot = new MutationObserver(() => {
+      if (!paint()) return;
       boot.disconnect();
       watch();
-    }
-  });
-  boot.observe(document.body, { childList: true, subtree: true });
+    });
+    boot.observe(document.body, { childList: true, subtree: true });
+  }
+  return paint;
 }
 
-/** 初始化标题栏拖拽与窗口控制。窗口按钮在非 Windows 上自绘。 */
+/**
+ * decorum 1.1.1 的贴取布局：#decorum-tb-maximize 上 mouseenter 武装 620ms timer，到点才 setFocus + invoke，
+ * mouseleave 里 clearTimeout。插件用 `const invoke = tauri.core.invoke` 一次性捕获，而
+ * __TAURI_INTERNALS__.invoke 是只读属性，IPC 边界拦不了（赋值抛 TypeError，曾连带把整个初始化打断）。
+ * 只能挂在同一个节点上：Blink 把 mouseenter/mouseleave 只派发给目标元素，祖先的捕获监听器收不到，
+ * 所以委托到 document 不成立。同节点上注册顺序即调用顺序，我们晚于插件，此时 timer 已写入，同步补发即可。
+ */
+function attachSnapGuard(btn) {
+  if (btn.getAttribute('data-snap-guarded')) return;
+  btn.setAttribute('data-snap-guarded', '1');
+  btn.addEventListener('mouseenter', () => {
+    if (document.documentElement.getAttribute('data-window-style') !== 'macos') return;
+    btn.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+}
+
+/** 切到 macOS 皮肤时，取消切换前已武装的那次 timer。 */
+function guardDecorumSnap() {
+  const root = document.documentElement;
+  new MutationObserver(() => {
+    if (root.getAttribute('data-window-style') !== 'macos') return;
+    document.getElementById('decorum-tb-maximize')?.dispatchEvent(new MouseEvent('mouseleave'));
+  }).observe(root, { attributes: true, attributeFilter: ['data-window-style'] });
+}
+
+/** 初始化一次；后续风格切换只更新 CSS，不新增按钮、监听器或热区。 */
 export function initWindowControls() {
-  const appWindow = window.__TAURI__.window.getCurrentWindow();
-
-  // decorum/无边框窗口下，显式调用 startDragging 比依赖 HTML 属性更稳定。
-  // 交互控件不参与拖拽，避免点击按钮或下拉框时同时移动窗口。
+  if (initialized) return;
   const titlebar = document.getElementById('titlebar');
-  if (titlebar) {
-    titlebar.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('button, select, input, textarea, a, .titlebar-connect, .titlebar-tabs, .titlebar-controls'))
-        return;
-      event.preventDefault();
-      void appWindow.startDragging().catch(() => {
-        /* 窗口销毁或平台不支持时忽略 */
-      });
-    });
-  }
-
-  if (document.documentElement.getAttribute('data-os') === 'windows') {
-    restyleDecorumButtons(appWindow);
-    return;
-  }
-
   const container = document.getElementById('titlebar-controls');
-  if (!container) return;
+  if (!titlebar || !container) return;
+  const appWindow = window.__TAURI__.window.getCurrentWindow();
+  const root = document.documentElement;
+  const os = root.getAttribute('data-os');
+  const isMac = os === 'macos';
+  initialized = true;
 
-  /**
-   * @param {string} icon @param {string} label @param {() => void} onClick
-   * @returns {HTMLButtonElement}
-   */
-  const mkBtn = (icon, label, onClick) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'wc-btn';
-    btn.title = label;
-    btn.setAttribute('aria-label', label);
-    btn.innerHTML = `<i class="fi fi-${icon}" aria-hidden="true"></i>`;
-    btn.addEventListener('click', onClick);
-    container.appendChild(btn);
-    return btn;
-  };
+  titlebar.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (
+      target.closest(
+        'button, select, input, textarea, a, [role="button"], [contenteditable], .titlebar-connect, .titlebar-tabs, .titlebar-controls, [data-tauri-decorum-tb]',
+      )
+    )
+      return;
+    event.preventDefault();
+    void appWindow.startDragging().catch(() => {});
+  });
 
-  mkBtn('subtract', '最小化', () => void appWindow.minimize().catch(() => {}));
-  const maxBtn = mkBtn('maximize', '最大化', () => void appWindow.toggleMaximize().catch(() => {}));
-  const closeBtn = mkBtn('dismiss', '关闭', () => void appWindow.close().catch(() => {}));
-  closeBtn.classList.add('wc-btn-close');
-
-  const syncMaximized = async () => {
+  /** @type {HTMLElement|null} */
+  let maxBtn = null;
+  /** @type {() => void} */
+  let paint = () => {};
+  let syncing = false;
+  let syncAgain = false;
+  const syncWindowState = async () => {
+    if (syncing) {
+      syncAgain = true;
+      return;
+    }
+    syncing = true;
     try {
-      const maximized = await appWindow.isMaximized();
-      const icon = maxBtn.querySelector('.fi');
-      if (icon) icon.className = `fi ${maximized ? 'fi-restore' : 'fi-maximize'}`;
-      maxBtn.title = maximized ? '还原' : '最大化';
-      maxBtn.setAttribute('aria-label', maxBtn.title);
-      document.documentElement.classList.toggle('is-maximized', maximized);
+      do {
+        syncAgain = false;
+        const [maximized, fullscreen] = await Promise.all([appWindow.isMaximized(), appWindow.isFullscreen()]);
+        root.classList.toggle('is-maximized', maximized);
+        root.classList.toggle('is-fullscreen', fullscreen);
+        if (maxBtn) {
+          const expanded = isMac ? fullscreen : maximized;
+          setIcon(
+            maxBtn,
+            expanded ? 'restore' : 'maximize',
+            isMac ? (fullscreen ? '退出全屏' : '进入全屏') : maximized ? '还原' : '最大化',
+          );
+        }
+        paint();
+      } while (syncAgain);
     } catch {
-      /* 窗口销毁竞态，忽略 */
+      /* 窗口销毁期间不再刷新。 */
+    } finally {
+      syncing = false;
     }
   };
-  appWindow.onResized(() => void syncMaximized());
-  void syncMaximized();
 
-  // 边缘调整大小热区（最大化时由 CSS .is-maximized 隐藏）
+  if (os === 'windows') {
+    guardDecorumSnap();
+    paint = restyleDecorumButtons();
+  } else {
+    /** @param {string} action @param {string} icon @param {string} label @param {() => Promise<unknown>} onClick */
+    const mkBtn = (action, icon, label, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `wc-btn wc-btn-${action}`;
+      setIcon(btn, icon, label);
+      btn.addEventListener('click', () => {
+        void onClick().catch(() => {});
+      });
+      container.appendChild(btn);
+      return btn;
+    };
+    mkBtn('minimize', 'subtract', '最小化', () => appWindow.minimize());
+    maxBtn = mkBtn('maximize', 'maximize', isMac ? '进入全屏' : '最大化', async () => {
+      if (isMac) await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
+      else await appWindow.toggleMaximize();
+      await syncWindowState();
+    });
+    mkBtn('close', 'dismiss', '关闭', () => appWindow.close());
+  }
+
+  // 全屏切换也会触发 resize；合并并发状态读取，避免较旧结果覆盖最新状态。
+  void appWindow.onResized(() => void syncWindowState());
+  void syncWindowState();
+
+  // Windows 沿用原生边缘缩放；Mac 不添加会阻挡原生边缘命中的无效热区。
+  if (os !== 'linux') return;
   for (const direction of Object.keys(RESIZE_DIRECTIONS)) {
     const zone = document.createElement('div');
     zone.className = `resize-zone resize-${direction.toLowerCase()}`;
     zone.style.cursor = RESIZE_DIRECTIONS[/** @type {keyof typeof RESIZE_DIRECTIONS} */ (direction)];
-    zone.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
+    zone.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || root.classList.contains('is-maximized') || root.classList.contains('is-fullscreen'))
+        return;
+      event.preventDefault();
       void appWindow.startResizeDragging(direction).catch(() => {});
     });
     document.body.appendChild(zone);

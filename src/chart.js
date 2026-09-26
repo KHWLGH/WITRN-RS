@@ -11,15 +11,24 @@
  * - scheduleChartUpdate() rAF 节流刷新（流式追加数据用）
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
- * 可见窗口超过 1×绘图宽度时 setData 送增量 min/max 桶，全量仍在 chartSeries。
- * 拖动导航条只改 X 窗（setScale）；松手后再按窗口单遍重建显示桶。
+ * 「画什么」只由可见窗口决定：窗口超过 1×绘图宽度时按 stripePpb(窗口, 宽度) 折叠 min/max 桶，
+ * 全量仍在 chartSeries；拖动中与松手后走同一句，没有低质量的预览态。
+ * 极值金字塔只作为速度选择器（见 extremaForStripes），换慢路径不改变产出值。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
- * - setRangeDragging()    手柄拖动期间走窗口快路径，推迟窗口级重建
+ * - setRangeDragging()    手柄拖动中推迟导航图重建与 Y 轴重算（不改变曲线内容）
  * - setSeriesVisible()    显示 / 隐藏某条曲线（对应 Y 轴自动跟随显隐）
  * - setSeriesFill()       设置某条曲线的填充不透明度（0 = 关闭填充）
  */
 
-import { bucketCap, firstIndexAfter, firstIndexAtOrAfter, nearestIndex, SeriesBuckets } from './chart-buckets.js';
+import {
+  bucketCap,
+  firstIndexAfter,
+  firstIndexAtOrAfter,
+  nearestIndex,
+  SeriesBuckets,
+  stripePpb,
+} from './chart-buckets.js';
+import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { wheelZoomFactor } from './chart-window.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
@@ -95,17 +104,19 @@ let scannedLen = 0;
 
 /** 主图窗口级显示桶：可见窗口点数超过 1×宽度后启用，存储仍走全量列。 */
 const displayBuckets = new SeriesBuckets();
-/** 全历史概览桶：不随 X 窗口重置，拖动扩大窗口时作 O(宽度) 兜底。 */
-const overviewBuckets = new SeriesBuckets();
-let usingDisplayBuckets = false;
-/** @typedef {'raw'|'window'|'overview'} BoundKind */
+/**
+ * 金字塔冷建是 O(全量) 的一次性开销（实测 1M ≈ 26ms / 5M ≈ 118ms），只为这么密的条带付。
+ * 已 warm 之后每个新块只有微秒级增量，所以下限可以放到 BLOCK_SIZE。
+ */
+const COLD_BUILD_PPB = 128;
+const extremaIndex = new ExactExtremaIndex();
+/** @typedef {'raw'|'window'} BoundKind */
 /** @type {BoundKind} */
 let boundKind = 'raw';
-/** 范围手柄是否正在拖动（只改 X 窗，不重建窗口级桶）。 */
+/** 范围手柄是否正在拖动（推迟导航图重建与 Y 轴重算，不改变曲线内容）。 */
 let rangeDragging = false;
-/** 上次完整 apply 时的数据代数 / 绘图宽度桶上限。 */
+/** 上次完整 apply 时的数据代数；主图绑定的正确性由 bindingCovers 判断，不记宽度。 */
 let appliedMainGen = -1;
-let appliedCap = -1;
 
 /** 数据代数 — 序列数组被整体替换（清空 / 导入）时递增，用于跳过导航图不必要的重建。 */
 let dataGen = 0;
@@ -113,17 +124,21 @@ let dataGen = 0;
 let appliedNavGen = -1;
 let appliedNavLen = -1;
 
-/** 上一帧绘制超过该预算则暂缓下一张图，数据照收。点数少时绘制远低于此值，行为与逐点刷新相同。 */
-const PAINT_BUDGET_MS = 10;
-/** 录制中超预算时按约 30fps 让帧，避免大画布连续掉帧。 */
-const LIVE_PAINT_GAP_MS = 33;
-let skipUntil = 0;
-/** @type {ReturnType<typeof setTimeout>|null} */
-let skipWakeTimer = null;
 let chartDirty = false;
+const tooltipThemeGen = 0;
+/** @type {number|null} */
+let chartFrame = null;
+let flushingChart = false;
+let paintBatchId = 0;
+/** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null }} PaintRequest */
+/** @type {PaintRequest|null} */
+let paintRequest = null;
+/** @type {WeakMap<object, { first: PaintRequest, last: PaintRequest, count: number }>} */
+const pendingDraws = new WeakMap();
+let chartListenersRegistered = false;
 
 function monitorVisible() {
-  return state.settings.activeView === 'monitor';
+  return state.settings.activeView === 'monitor' && !document.hidden;
 }
 
 /**
@@ -300,12 +315,10 @@ function bindMainViews() {
 
 export function syncChartSeries() {
   bindMainViews();
+  extremaIndex.reset();
   displayBuckets.reset(0);
-  overviewBuckets.reset(0);
-  usingDisplayBuckets = false;
   boundKind = 'raw';
   appliedMainGen = -1;
-  appliedCap = -1;
   resetNavBuckets();
   bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
@@ -369,11 +382,22 @@ function sourceRange() {
   return { start, end };
 }
 
+/**
+ * 绘图区 CSS 宽度，`bucketCap` 由它定条带密度。
+ * `bbox.width` 是设备像素，而换算比在建图时就被烘进每张图 —— vendor 包里 dppx 监听只改静态
+ * `uPlot.pxRatio`，没有 `setPxRatio`。拿静态值去除会在改系统缩放 / 换屏后得到一个既不是旧宽也不是
+ * 新宽的宽度。后备宽 ÷ CSS 宽 才是渲染真正在用的比值：画布陈旧时它一起陈旧，条带密度就仍匹配正在显示的画面。
+ */
 function plotCssWidth() {
   const chart = state.mainChart;
-  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-  const pxRatio = typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr;
-  if (chart?.bbox?.width) return chart.bbox.width / pxRatio;
+  const bboxWidth = chart?.bbox?.width;
+  if (bboxWidth) {
+    const backing = chart.over?.width;
+    const css = chart.width;
+    if (backing && css && backing > 0 && css > 0) return bboxWidth / (backing / css);
+    const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+    return bboxWidth / (typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr);
+  }
   return document.getElementById('main-chart')?.clientWidth || 600;
 }
 
@@ -387,37 +411,46 @@ function bindFlattenedBuckets(buckets, kind) {
   const flat = buckets.flatten();
   mainData = [flat.x, ...flat.ys];
   boundKind = kind;
-  usingDisplayBuckets = true;
-}
-
-/** @param {number} cap */
-function syncOverviewBuckets(cap) {
-  const cs = state.chartSeries;
-  const n = cs.x.length;
-  const series = channelBufs();
-  if (n === 0) {
-    overviewBuckets.reset(0);
-    overviewBuckets.cap = cap;
-    return;
-  }
-  if (overviewBuckets.cap !== cap || overviewBuckets.srcStart !== 0 || overviewBuckets.srcEnd > n) {
-    overviewBuckets.rebuild(cs.x.buf, series, 0, n, cap);
-    return;
-  }
-  if (overviewBuckets.srcEnd < n) {
-    overviewBuckets.appendThrough(cs.x.buf, series, n);
-  }
 }
 
 /**
- * 当前绑定的顶点是否覆盖新窗口，因而只需 setScale。
+ * 条带折叠的**速度选择器**：只决定耗时，不决定产出值 —— 金字塔 fold 与逐样本扫描对同一条带
+ * 得到同一组 min/max（`test/chart-extrema.test.js` 的 `compare()` 逐桶钉着这条等价）。
+ * 所以拖动中 / 松手后 / 冷启动走到不同分支，画出来的曲线也必须一模一样。
+ * @param {ArrayLike<number>[]} series @param {number} end @param {number} ppb
+ * @returns {ExactExtremaIndex|null}
+ */
+function extremaForStripes(series, end, ppb) {
+  // 条带不超过一个块时，fold 的 head/tail 暴力扫就等于整条，金字塔省不下读取。
+  if (ppb <= BLOCK_SIZE) return null;
+  // 窗口内已完成的块都建好了才算 warm；冷建是 O(全量) 的一次性开销，只留给足够密的窗口付。
+  const warm = extremaIndex.blocks >= Math.floor(end / BLOCK_SIZE);
+  if (!warm && ppb < COLD_BUILD_PPB) return null;
+  extremaIndex.sync(series, state.chartSeries.x.length);
+  return extremaIndex;
+}
+
+/**
+ * 现有条带是否正好是窗口 `(start,end)` 在该密度下应当画出的那批（不含绑定状态）。
+ * 密度也是判据：复用的前提是先缩放进来、松手后重建会算出同一批条带。
+ * @param {number} start @param {number} end @param {number} windowCount @param {number} cap
+ */
+function stripesMatch(start, end, windowCount, cap) {
+  return (
+    displayBuckets.ppb === stripePpb(windowCount, cap) &&
+    displayBuckets.srcStart === start &&
+    displayBuckets.srcEnd === end &&
+    displayBuckets.list.length > 0
+  );
+}
+
+/**
+ * 当前绑定的顶点是否已经就是本窗口该画的那批，因而只需 setScale。
  * @param {number} start @param {number} end @param {number} windowCount @param {number} cap
  */
 function bindingCovers(start, end, windowCount, cap) {
-  if (windowCount <= cap) return boundKind === 'raw' && !usingDisplayBuckets;
-  if (boundKind === 'raw' || !usingDisplayBuckets) return false;
-  if (boundKind === 'overview') return overviewBuckets.covers(start, end) && overviewBuckets.cap === cap;
-  return displayBuckets.covers(start, end) && displayBuckets.cap === cap;
+  if (windowCount <= cap) return boundKind === 'raw';
+  return boundKind === 'window' && stripesMatch(start, end, windowCount, cap);
 }
 
 function applyXScale() {
@@ -427,8 +460,8 @@ function applyXScale() {
 }
 
 /**
- * 可见窗口超过 1×宽度时改送像素桶；否则继续零拷贝全量视图。
- * 缩进时不扔掉已有窗口桶，扩大时由调用方改绑概览桶。
+ * 「画什么」的唯一定义：把主图绑到窗口 `[start,end)` 在 `stripePpb(windowCount, cap)` 密度下的
+ * min/max 条带；窗口不超过 1×绘图宽度时继续零拷贝全量视图。拖动中与松手后都只经过这里。
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
@@ -436,60 +469,72 @@ function bindDisplayData(args) {
   const cs = state.chartSeries;
 
   if (windowCount <= cap) {
-    usingDisplayBuckets = false;
     boundKind = 'raw';
     bindMainViews();
     return;
   }
 
+  const ppb = stripePpb(windowCount, cap);
   const series = channelBufs();
-  const exact =
-    displayBuckets.cap === cap &&
-    displayBuckets.srcStart === start &&
-    displayBuckets.srcEnd === end &&
-    displayBuckets.list.length > 0;
 
-  if (exact) {
+  if (stripesMatch(start, end, windowCount, cap)) {
     if (boundKind !== 'window') bindFlattenedBuckets(displayBuckets, 'window');
     return;
   }
 
-  if (
-    !force &&
-    displayBuckets.canAppend(start, end) &&
-    displayBuckets.cap === cap &&
-    displayBuckets.srcEnd > displayBuckets.srcStart
-  ) {
+  // 左边界与密度都没动、只是窗口向右延长：追加比整表重扫便宜得多（流式跟随常用）。
+  if (!force && ppb === displayBuckets.ppb && displayBuckets.canAppend(start, end)) {
     displayBuckets.appendThrough(cs.x.buf, series, end);
     bindFlattenedBuckets(displayBuckets, 'window');
     return;
   }
 
-  displayBuckets.rebuild(cs.x.buf, series, start, end, cap);
+  displayBuckets.rebuild(cs.x.buf, series, start, end, cap, extremaForStripes(series, end, ppb));
   bindFlattenedBuckets(displayBuckets, 'window');
 }
 
-function clearPaintSkip() {
-  skipUntil = 0;
-  if (skipWakeTimer != null) {
-    clearTimeout(skipWakeTimer);
-    skipWakeTimer = null;
+function requestPaint() {
+  if (paintRequest == null) {
+    paintRequest = { batchId: ++paintBatchId, requestedAt: performance.now(), prepareMs: null };
   }
+  return paintRequest;
 }
 
-/** @param {number} t0 @param {boolean} preview */
-function finishPaint(t0, preview) {
-  const dt = performance.now() - t0;
-  if (preview) {
-    skipUntil = 0;
-  } else if (dt > PAINT_BUDGET_MS && state.isRecording) {
-    skipUntil = performance.now() + LIVE_PAINT_GAP_MS;
-  } else if (dt > PAINT_BUDGET_MS) {
-    skipUntil = performance.now() + Math.min(dt, 16);
-  } else {
-    skipUntil = 0;
-  }
-  chartDirty = false;
+/** @param {any} chart @param {PaintRequest} request */
+function expectChartDraw(chart, request) {
+  if (!chart) return;
+  const pending = pendingDraws.get(chart);
+  if (pending?.last === request) return;
+  pendingDraws.set(chart, { first: pending?.first ?? request, last: request, count: (pending?.count ?? 0) + 1 });
+}
+
+/**
+ * uPlot 的 setData/setScale 通常在微任务中合并绘制；draw 才是实际绘制终点。
+ * 这里只报告请求到 draw 的延迟（含排队 / 准备），不是 draw 执行耗时。
+ * 绘制执行耗时不单列：终点 hook 拿不到 uPlot 那次绘制的起点，它本来就在合并后的 requestToDrawMs 里。
+ * @param {any} chart
+ */
+function finishChartDraw(chart) {
+  const pending = pendingDraws.get(chart);
+  if (!pending) return;
+  const drawEndedAt = performance.now();
+  pendingDraws.delete(chart);
+  chart.__chartPaintTiming = {
+    firstBatchId: pending.first.batchId,
+    batchId: pending.last.batchId,
+    coalescedRequests: pending.count,
+    requestedAt: pending.first.requestedAt,
+    drawEndedAt,
+    requestToDrawMs: drawEndedAt - pending.first.requestedAt,
+    prepareMs: pending.last.prepareMs,
+  };
+}
+
+/** 同步准备耗时仅作诊断，不据此猜测 GPU / Canvas 耗时或固定降帧。
+ * @param {number} t0 @param {PaintRequest} request
+ */
+function finishPreparation(t0, request) {
+  request.prepareMs = performance.now() - t0;
 }
 
 /**
@@ -502,7 +547,11 @@ function applyData(opts = {}) {
     return;
   }
 
+  const request = requestPaint();
+  paintRequest = null;
   const t0 = performance.now();
+  chartDirty = false;
+  expectChartDraw(state.mainChart, request);
   const srcLen = state.chartSeries.x.length;
   const appended = srcLen > scannedLen;
   const yChanged = trackNewPoints();
@@ -511,28 +560,12 @@ function applyData(opts = {}) {
   const { start, end } = sourceRange();
   const cap = bucketCap(plotCssWidth());
   const windowCount = end - start;
+  // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
   const preview = rangeDragging && !force;
 
-  if (!dataChanged && !force && appliedCap === cap && bindingCovers(start, end, windowCount, cap)) {
+  if (!dataChanged && !force && bindingCovers(start, end, windowCount, cap)) {
     applyXScale();
-    finishPaint(t0, preview);
-    return;
-  }
-
-  if (preview && windowCount > cap) {
-    syncOverviewBuckets(cap);
-    if (bindingCovers(start, end, windowCount, cap)) {
-      applyXScale();
-      finishPaint(t0, true);
-      return;
-    }
-    bindFlattenedBuckets(overviewBuckets, 'overview');
-    if (state.mainChart) {
-      state.mainChart.setData(/** @type {any} */ (mainData), false);
-      applyXScale();
-    }
-    appliedCap = cap;
-    finishPaint(t0, true);
+    finishPreparation(t0, request);
     return;
   }
 
@@ -556,6 +589,7 @@ function applyData(opts = {}) {
     const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
     if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       bindNavData();
+      expectChartDraw(nav, request);
       nav.setData(/** @type {any} */ (navData));
       appliedNavGen = dataGen;
       appliedNavLen = srcLen;
@@ -564,14 +598,13 @@ function applyData(opts = {}) {
   }
 
   appliedMainGen = dataGen;
-  appliedCap = cap;
-  finishPaint(t0, preview);
+  finishPreparation(t0, request);
 }
 
-/** 立即刷新两个图表（忽略绘制预算，隐藏时只打脏标记）。 */
+/** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
 export function updateCharts() {
-  clearPaintSkip();
-  applyData({ force: true });
+  cancelChartFrame();
+  flushChart(true);
 }
 
 /**
@@ -581,60 +614,70 @@ export function updateCharts() {
  */
 export function refreshChartScales() {
   dataGen++;
-  applyData();
+  chartDirty = true;
+  cancelChartFrame();
+  flushChart();
 }
 
-/**
- * 监控视图重新显示时的尺寸补偿。
- * 监控 hidden 时仍保几何，通常不必 setSize；宽高真变了才对齐。
- * 隐藏期间跳过的绘制用 chartDirty 补一帧，不再无条件 updateCharts。
- */
+/** 恢复可见性时把尺寸补偿、积累的数据和已有请求合到同一帧。 */
 export function handleMonitorShown() {
-  /** @param {string} hostId @param {any} chart */
-  const fit = (hostId, chart) => {
-    const host = document.getElementById(hostId);
-    if (!host || !chart) return;
-    const width = host.clientWidth;
-    const height = host.clientHeight;
-    if (width <= 0 || height <= 0) return;
-    if (chart.width === width && chart.height === height) return;
-    chart.setSize({ width, height });
-  };
-  fit('main-chart', state.mainChart);
-  fit('navigator-chart', state.navigatorChart);
-  if (chartDirty) {
-    clearPaintSkip();
-    applyData();
-  }
+  resizeDirty = true;
+  scheduleChartUpdate();
 }
 
-function flushChart() {
+function cancelChartFrame() {
+  if (chartFrame != null) cancelAnimationFrame(chartFrame);
+  chartFrame = null;
+  state.__chartUpdatePending = false;
+}
+
+function registerChartListeners() {
+  if (chartListenersRegistered) return;
+  chartListenersRegistered = true;
+  onThemeChange(applyChartTheme);
+  document.addEventListener('visibilitychange', () => {
+    if (!monitorVisible()) {
+      chartDirty = true;
+      paintRequest = null;
+      cancelChartFrame();
+      return;
+    }
+    handleMonitorShown();
+  });
+}
+
+/** @param {boolean} [force=false] */
+function flushChart(force = false) {
   if (!monitorVisible()) {
     chartDirty = true;
+    paintRequest = null;
     return;
   }
-  const now = performance.now();
-  if (!rangeDragging && now < skipUntil) {
-    chartDirty = true;
-    if (skipWakeTimer == null) {
-      skipWakeTimer = setTimeout(
-        () => {
-          skipWakeTimer = null;
-          scheduleChartUpdate();
-        },
-        Math.max(0, Math.ceil(skipUntil - performance.now())),
-      );
+  flushingChart = true;
+  try {
+    flushResizes();
+    if (divisionSyncPending) {
+      divisionSyncPending = false;
+      dataGen++;
+      chartDirty = true;
     }
-    return;
+    if (chartDirty || force || forceResizePaint) applyData({ force: force || forceResizePaint });
+    forceResizePaint = false;
+  } finally {
+    flushingChart = false;
+    paintRequest = null;
   }
-  applyData();
 }
 
-/** 使用 requestAnimationFrame 调度图表更新，避免每个数据点都触发重绘。 */
+/** 使用 requestAnimationFrame 合帧；后台数据照收，图表只记 dirty。 */
 export function scheduleChartUpdate() {
-  if (state.__chartUpdatePending) return;
+  chartDirty = true;
+  if (!monitorVisible() || flushingChart) return;
+  requestPaint();
+  if (chartFrame != null) return;
   state.__chartUpdatePending = true;
-  requestAnimationFrame(() => {
+  chartFrame = requestAnimationFrame(() => {
+    chartFrame = null;
     state.__chartUpdatePending = false;
     flushChart();
   });
@@ -809,15 +852,12 @@ function yDivisions(u) {
  */
 let appliedYDivisions = 0;
 
-/** 绘图区高度变了 → 等分数可能变，安排一次量程重算，让刻度值回到整齐步长。 */
+/** 绘图区高度变了 → 等分数可能变，与尺寸 / 数据提交共用一帧。 */
 let divisionSyncPending = false;
 function syncDivisionsAfterResize(/** @type {any} */ u) {
   if (divisionSyncPending || yDivisions(u) === appliedYDivisions) return;
   divisionSyncPending = true;
-  requestAnimationFrame(() => {
-    divisionSyncPending = false;
-    refreshChartScales();
-  });
+  scheduleChartUpdate();
 }
 
 /** 量化步长的候选尾数。比常见的 1/2/5 更细，用于压低量化引入的额外余量。 */
@@ -1203,7 +1243,7 @@ function realIndexFromCursor(u, hoveredIdx) {
   if (hoveredIdx == null) return null;
   const xVal = u.data[0]?.[hoveredIdx];
   if (xVal == null || !Number.isFinite(xVal)) return null;
-  if (!usingDisplayBuckets) return hoveredIdx;
+  if (boundKind === 'raw') return hoveredIdx;
   return nearestIndex(state.chartSeries.x.buf, state.chartSeries.x.length, Number(xVal));
 }
 
@@ -1225,6 +1265,114 @@ function cursorDataIdx(u, seriesIdx, hoveredIdx) {
 function tooltipPlugin() {
   /** @type {HTMLDivElement|null} */
   let tt = null;
+  /** @type {HTMLDivElement|null} */
+  let title = null;
+  /** @type {{ row: HTMLDivElement, swatch: HTMLSpanElement, text: Text }[]} */
+  const rows = [];
+  /** @type {number|null} */
+  let frame = null;
+  /** @type {ResizeObserver|null} */
+  let observer = null;
+  let lastIndex = -1;
+  let lastGen = -1;
+  let lastMask = -1;
+  let lastTheme = -1;
+  let visibleRows = 0;
+  let shown = false;
+  let sizeDirty = true;
+  let overDirty = true;
+  let width = 0;
+  let height = 0;
+  let overWidth = 0;
+  let overHeight = 0;
+  /** @type {(() => void)|null} */
+  let invalidate = null;
+
+  function hide() {
+    if (shown && tt) tt.style.display = 'none';
+    shown = false;
+  }
+
+  /** @param {any} u */
+  function commit(u) {
+    if (!tt || !title || !monitorVisible()) return;
+    const { idx, left, top } = u.cursor;
+    if (idx == null || left == null || left < 0 || top == null || top < 0) {
+      hide();
+      return;
+    }
+    // idx 可能是桶顶点；只用其 X 二分回查原始列，绝不显示桶的 min/max 值。
+    const realIdx = realIndexFromCursor(u, idx);
+    const xVal = realIdx == null ? null : state.chartSeries.x.buf[realIdx];
+    if (realIdx == null || xVal == null || !Number.isFinite(xVal)) {
+      hide();
+      return;
+    }
+    let mask = 0;
+    for (let i = 0; i < FIELDS.length; i++) {
+      if (u.series[i + 1]?.show) mask |= 1 << i;
+    }
+    if (realIdx !== lastIndex || dataGen !== lastGen || mask !== lastMask || tooltipThemeGen !== lastTheme) {
+      const heading = formatRelativeHMS(Number(xVal));
+      if (title.textContent !== heading) title.textContent = heading;
+      visibleRows = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const { row, swatch, text } = rows[i];
+        const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[i]);
+        const value = state.chartSeries[field]?.buf[realIdx];
+        const show = !!(mask & (1 << i)) && Number.isFinite(value);
+        const display = show ? '' : 'none';
+        if (row.style.display !== display) row.style.display = display;
+        if (show) {
+          const label = `${LABELS[i]}: ${Number(value).toFixed(3)}${UNITS[i]}`;
+          if (text.nodeValue !== label) text.nodeValue = label;
+          visibleRows++;
+        }
+        if (lastTheme !== tooltipThemeGen) swatch.style.background = /** @type {any} */ (chartTheme)[FIELDS[i]];
+      }
+      lastIndex = realIdx;
+      lastGen = dataGen;
+      lastMask = mask;
+      lastTheme = tooltipThemeGen;
+      sizeDirty = true;
+    }
+    if (visibleRows === 0) {
+      hide();
+      return;
+    }
+    if (!shown) {
+      tt.style.display = 'block';
+      shown = true;
+      sizeDirty = true;
+      overDirty = true;
+    }
+    // 只在内容 / 显隐 / 主题 / 字体 / 尺寸变化后读几何；纯移动只写 transform。
+    if (overDirty) {
+      overWidth = u.over.clientWidth;
+      overHeight = u.over.clientHeight;
+      overDirty = false;
+    }
+    if (sizeDirty) {
+      width = tt.offsetWidth;
+      height = tt.offsetHeight;
+      sizeDirty = false;
+    }
+    let x = left + 12;
+    if (x + width > overWidth) x = left - width - 12;
+    let y = top + 12;
+    if (y + height > overHeight) y = top - height - 12;
+    const transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`;
+    if (tt.style.transform !== transform) tt.style.transform = transform;
+  }
+
+  /** @param {any} u */
+  function schedule(u) {
+    if (!tt || frame != null || !monitorVisible()) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      commit(u);
+    });
+  }
 
   return {
     hooks: {
@@ -1232,64 +1380,45 @@ function tooltipPlugin() {
         tt = document.createElement('div');
         tt.className = 'chart-tooltip';
         tt.style.display = 'none';
-        u.over.appendChild(tt);
-      },
-      setCursor: (/** @type {any} */ u) => {
-        if (!tt) return;
-        const { idx, left, top } = u.cursor;
-        if (idx == null || left == null || left < 0 || top == null || top < 0) {
-          tt.style.display = 'none';
-          return;
-        }
-        const realIdx = realIndexFromCursor(u, idx);
-        if (realIdx == null) {
-          tt.style.display = 'none';
-          return;
-        }
-        const xVal = state.chartSeries.x.buf[realIdx];
-        if (xVal == null || !Number.isFinite(xVal)) {
-          tt.style.display = 'none';
-          return;
-        }
-
-        const fragment = document.createDocumentFragment();
-        const title = document.createElement('div');
+        title = document.createElement('div');
         title.className = 'chart-tooltip-title';
-        title.textContent = formatRelativeHMS(Number(xVal));
-        fragment.appendChild(title);
-
-        let rows = 0;
-        for (let si = 1; si < u.series.length; si++) {
-          if (!u.series[si].show) continue;
-          const field = FIELDS[si - 1];
-          const yVal = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.buf[realIdx];
-          if (yVal == null || !Number.isFinite(yVal)) continue;
+        tt.appendChild(title);
+        for (let i = 0; i < FIELDS.length; i++) {
           const row = document.createElement('div');
           row.className = 'chart-tooltip-row';
           const swatch = document.createElement('span');
           swatch.className = 'chart-tooltip-swatch';
-          swatch.style.background = /** @type {any} */ (chartTheme)[FIELDS[si - 1]];
+          const text = document.createTextNode('');
           row.appendChild(swatch);
-          row.appendChild(document.createTextNode(`${LABELS[si - 1]}: ${Number(yVal).toFixed(3)}${UNITS[si - 1]}`));
-          fragment.appendChild(row);
-          rows++;
+          row.appendChild(text);
+          tt.appendChild(row);
+          rows.push({ row, swatch, text });
         }
-        if (rows === 0) {
-          tt.style.display = 'none';
-          return;
-        }
-
-        tt.replaceChildren(fragment);
-        tt.style.display = 'block';
-
-        // 跟随光标，靠近边缘时翻转到另一侧
-        const overW = u.over.clientWidth;
-        const overH = u.over.clientHeight;
-        let x = left + 12;
-        if (x + tt.offsetWidth > overW) x = left - tt.offsetWidth - 12;
-        let y = top + 12;
-        if (y + tt.offsetHeight > overH) y = top - tt.offsetHeight - 12;
-        tt.style.transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`;
+        u.over.appendChild(tt);
+        invalidate = () => {
+          sizeDirty = true;
+          overDirty = true;
+          schedule(u);
+        };
+        observer = new ResizeObserver(invalidate);
+        observer.observe(u.over);
+        observer.observe(tt);
+        document.fonts?.addEventListener('loadingdone', invalidate);
+      },
+      setCursor: schedule,
+      setData: schedule,
+      setSeries: schedule,
+      draw: schedule,
+      setSize: () => invalidate?.(),
+      destroy: () => {
+        if (frame != null) cancelAnimationFrame(frame);
+        frame = null;
+        observer?.disconnect();
+        if (invalidate) document.fonts?.removeEventListener('loadingdone', invalidate);
+        tt?.remove();
+        tt = null;
+        title = null;
+        rows.length = 0;
       },
     },
   };
@@ -1327,29 +1456,54 @@ function bindChartWheel(u) {
   );
 }
 
+let resizeDirty = false;
+let forceResizePaint = false;
+/** @type {Map<any, { host: HTMLElement, onSize: (() => void)|null }>} */
+const resizeTargets = new Map();
+
+function flushResizes() {
+  if (!resizeDirty || state.__layoutResizing) return;
+  resizeDirty = false;
+  // 先集中读取，再写 setSize，避免两张图交替读写布局。
+  const sizes = [];
+  for (const [chart, { host, onSize }] of resizeTargets) {
+    const width = host.clientWidth;
+    const height = host.clientHeight;
+    if (width > 0 && height > 0 && (chart.width !== width || chart.height !== height)) {
+      sizes.push({ chart, width, height, onSize });
+    }
+  }
+  for (const { chart, width, height, onSize } of sizes) {
+    expectChartDraw(chart, requestPaint());
+    chart.setSize({ width, height });
+    onSize?.();
+    forceResizePaint = true;
+  }
+}
+
 /**
- * 监听宿主元素尺寸变化并同步图表大小。
+ * ResizeObserver 只标脏，尺寸与流式刷新在同一 rAF 提交。
  * @param {HTMLElement} host
  * @param {any} chart
  * @param {(() => void)|null} [onSize]
  */
 function observeResize(host, chart, onSize = null) {
+  if (resizeTargets.has(chart)) return;
+  resizeTargets.set(chart, { host, onSize });
+  chart.hooks.draw ??= [];
+  chart.hooks.draw.push(finishChartDraw);
   const ro = new ResizeObserver(() => {
-    if (state.__layoutResizing) return;
-    if (!monitorVisible()) {
-      chartDirty = true;
-      return;
-    }
-    const width = host.clientWidth;
-    const height = host.clientHeight;
-    if (width > 0 && height > 0) {
-      if (chart.width !== width || chart.height !== height) {
-        chart.setSize({ width, height });
-        onSize?.();
-      }
-    }
+    resizeDirty = true;
+    chartDirty = true;
+    if (!state.__layoutResizing) scheduleChartUpdate();
   });
   ro.observe(host);
+  chart.hooks.destroy ??= [];
+  chart.hooks.destroy.push(() => {
+    ro.disconnect();
+    resizeTargets.delete(chart);
+    pendingDraws.delete(chart);
+  });
 }
 
 // ─── Chart initialization ────────────────────────────────────────────────────
@@ -1460,7 +1614,7 @@ export function initChart() {
     applyData({ force: true });
   });
   renderLegend();
-  onThemeChange(applyChartTheme);
+  registerChartListeners();
 
   initNavigatorChart();
 

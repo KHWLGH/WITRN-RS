@@ -12,7 +12,14 @@ import {
   resolveChartWindow,
   zoomTimeWindow,
 } from './chart-window.js';
-import { MAX_ENERGY_STEP_S, nextRecordingX, niceCeiling } from './measurement.js';
+import { deviceStream } from './device-stream.js';
+import { energyMaxStepS, isRecordingBoundary, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
+
+deviceStream.configure({
+  getColumns: () => state.chartSeries,
+  onSample: (sample, segment) => addDataPoint(sample, segment),
+});
+
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { syncRecordUI } from './ui/controlbar.js';
@@ -129,10 +136,15 @@ export function refreshRecordButton() {
 
 /**
  * 接收一条设备数据，更新存储、统计、图表。
- * @param {import('./state.js').DeviceData} data
+ * @param {import('./state.js').DeviceData | import('./device-stream.js').StreamSample} data
+ * @param {import('./device-stream.js').RecordingSegment|null} [segment] Native null means preview only.
  */
-export function addDataPoint(data) {
-  const now = new Date();
+export function addDataPoint(data, segment) {
+  const native = 'received_us' in data;
+  const time = native ? streamSampleTime(data, segment?.baseSeconds ?? 0) : null;
+  const nowMs = time?.wallMs ?? Date.now();
+  const record = native ? !!segment : state.isRecording;
+  if (native && Number.isFinite(data.rate_ms) && data.rate_ms > 0) state.dataIntervalMs = data.rate_ms;
 
   // 有符号电流：开启后保留方向（正=正向 / 负=反向）；关闭时按旧行为记录绝对值。
   // 功率恒取绝对值（电压非负，功率符号与电流一致，不损失信息）。
@@ -147,11 +159,9 @@ export function addDataPoint(data) {
   const realtime = { ...data, current: currentValue, power: powerAbs, temp: tempValue };
   lastRealtime = realtime;
 
-  // 仅录制模式：未录制时只更新实时显示
-  if (!state.isRecording) {
-    updateRealtimeDisplay(realtime);
-    const el = document.getElementById('data-count');
-    if (el) el.textContent = String(state.chartSeries.timestamps.length);
+  // Live preview coalesces too; native segment gating is independent of arrival-time UI state.
+  if (!record) {
+    scheduleRangeUi();
     return;
   }
 
@@ -166,11 +176,17 @@ export function addDataPoint(data) {
   const cc2Value = Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN;
 
   const cols = state.chartSeries;
-  const nowMs = now.getTime();
   const activeElapsed = state.recordingStartTime === null ? 0 : (nowMs - state.recordingStartTime) / 1000;
-  let relSeconds = state.recordingBaseSeconds + Math.max(0, activeElapsed);
   const prevX = cols.x.length > 0 ? cols.x.at(-1) : Number.NaN;
-  relSeconds = nextRecordingX(prevX, relSeconds, state.settings.sampleRate);
+  const relSeconds = time
+    ? time.seconds
+    : nextRecordingX(prevX, state.recordingBaseSeconds + Math.max(0, activeElapsed), state.settings.sampleRate);
+  const beginsSegment = segment ? segment.first : state.energy.lastX === null;
+  const previousSegment = cols.recordingSegments.at(-1);
+  cols.recordingSegments.push(
+    beginsSegment ? (Number.isFinite(previousSegment) ? previousSegment + 1 : 1) : previousSegment,
+  );
+  if (segment) segment.first = false;
 
   cols.timestamps.push(nowMs);
   cols.voltage.push(data.voltage);
@@ -191,19 +207,27 @@ export function addDataPoint(data) {
   }
 
   // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
-  if (state.energy.lastX !== null) {
-    const stepS = relSeconds - state.energy.lastX;
+  // 与 integrateEnergy 一致：跳过非有限值，避免单个缺失样本把整条累计污染成 NaN。
+  const lastX = segment ? segment.lastX : state.energy.lastX;
+  const currentAbs = Math.abs(currentValue);
+  if (lastX !== null) {
+    const stepS = relSeconds - lastX;
     const dt = stepS / 3600;
-    if (dt >= 0 && stepS <= MAX_ENERGY_STEP_S) {
+    if (
+      dt >= 0 &&
+      stepS <= energyMaxStepS(state.dataIntervalMs ?? state.settings.sampleRate) &&
+      Number.isFinite(dt) &&
+      Number.isFinite(currentAbs) &&
+      Number.isFinite(powerAbs)
+    ) {
       state.energy.wh += powerAbs * dt;
-      state.energy.mah += Math.abs(currentValue) * 1000 * dt;
+      state.energy.mah += currentAbs * 1000 * dt;
     }
   }
-  state.energy.lastX = relSeconds;
+  if (segment) segment.lastX = relSeconds;
+  state.energy.lastX = state.isRecording ? relSeconds : null;
 
   scheduleStatsUpdate();
-  // 全量模式的能量读数是 O(1)，逐点刷新更跟手；范围模式要重扫可见区间，交给上面的节流路径。
-  if (!state.settings.statsRange) updateEnergyDisplay();
 
   scheduleRangeUi();
 
@@ -218,16 +242,17 @@ export function addDataPoint(data) {
       value = powerAbs;
     }
 
+    const triggerMs = native ? data.received_us / 1000 : nowMs;
     if (value <= state.autoPauseSettings.condition) {
       if (state.autoPauseSettings.duration <= 0) {
-        stopRecording();
+        void stopRecording({ discard: true }).catch(() => {});
         state.autoPauseSettings.triggerStartTime = null;
-      } else if (!state.autoPauseSettings.triggerStartTime) {
-        state.autoPauseSettings.triggerStartTime = Date.now();
+      } else if (state.autoPauseSettings.triggerStartTime === null) {
+        state.autoPauseSettings.triggerStartTime = triggerMs;
       } else {
-        const elapsed = (Date.now() - state.autoPauseSettings.triggerStartTime) / 1000;
+        const elapsed = (triggerMs - state.autoPauseSettings.triggerStartTime) / 1000;
         if (elapsed >= state.autoPauseSettings.duration) {
-          stopRecording();
+          void stopRecording({ discard: true }).catch(() => {});
           state.autoPauseSettings.triggerStartTime = null;
         }
       }
@@ -538,8 +563,8 @@ export function getVisibleDataRange() {
 
 /**
  * @typedef {{
- *   rangeStart: number, rangeEnd: number,
- *   startIndex: number, endIndex: number, len: number,
+ *   columns: import('./state.js').ChartSeriesColumns, revision: number,
+ *   startIndex: number, endIndex: number, len: number, maxStepS: number,
  *   minV: number, maxV: number, minC: number, maxC: number,
  *   minP: number, maxP: number, minT: number, maxT: number,
  *   sumV: number, countV: number, sumC: number, countC: number,
@@ -550,38 +575,46 @@ export function getVisibleDataRange() {
 /** @type {RangeStatsCache|null} */
 let rangeStatsCache = null;
 
-/** @param {RangeStatsCache} cache @param {number} i */
-function foldRangePoint(cache, i) {
+/** @param {RangeStatsCache} cache @param {number} i @param {number} maxStepS */
+function foldRangePoint(cache, i, maxStepS) {
   const cols = state.chartSeries;
   const v = cols.voltage.buf[i];
   const c = cols.current.buf[i];
   const p = cols.power.buf[i];
   const t = cols.temp.buf[i];
-  if (v < cache.minV) cache.minV = v;
-  if (v > cache.maxV) cache.maxV = v;
-  cache.sumV += v;
-  cache.countV += 1;
-  if (c < cache.minC) cache.minC = c;
-  if (c > cache.maxC) cache.maxC = c;
-  cache.sumC += c;
-  cache.countC += 1;
-  if (p < cache.minP) cache.minP = p;
-  if (p > cache.maxP) cache.maxP = p;
-  cache.sumP += p;
-  cache.countP += 1;
+  // 导入按设计保留 NaN / ±Infinity，所以最值与均值只能折入有限值，
+  // 否则一个缺失样本会把整条统计污染成 NaN（与 updateStats 的全量口径一致）。
+  if (Number.isFinite(v)) {
+    if (v < cache.minV) cache.minV = v;
+    if (v > cache.maxV) cache.maxV = v;
+    cache.sumV += v;
+    cache.countV += 1;
+  }
+  if (Number.isFinite(c)) {
+    if (c < cache.minC) cache.minC = c;
+    if (c > cache.maxC) cache.maxC = c;
+    cache.sumC += c;
+    cache.countC += 1;
+  }
+  if (Number.isFinite(p)) {
+    if (p < cache.minP) cache.minP = p;
+    if (p > cache.maxP) cache.maxP = p;
+    cache.sumP += p;
+    cache.countP += 1;
+  }
   if (Number.isFinite(t)) {
     if (t < cache.minT) cache.minT = t;
     if (t > cache.maxT) cache.maxT = t;
     cache.sumT += t;
     cache.countT += 1;
   }
-  if (i <= cache.startIndex) return;
+  if (i <= cache.startIndex || isRecordingBoundary(cols.recordingSegments.buf, i)) return;
   const dt = (cols.x.buf[i] - cols.x.buf[i - 1]) / 3600;
   const currentAbs = Math.abs(c);
   const powerAbs = Math.abs(p);
   if (
     dt < 0 ||
-    dt > MAX_ENERGY_STEP_S / 3600 ||
+    dt > maxStepS / 3600 ||
     !Number.isFinite(dt) ||
     !Number.isFinite(currentAbs) ||
     !Number.isFinite(powerAbs)
@@ -592,46 +625,54 @@ function foldRangePoint(cache, i) {
 }
 
 /** 范围统计：窗口未变则复用；全历史窗口增长时只折入新尾段。 */
-function getRangeStats() {
+export function getRangeStats() {
   const cols = state.chartSeries;
   const len = cols.x.length;
   if (len === 0) return null;
   const { startIndex, endIndex } = getVisibleDataRange();
-  const rs = state.settings.rangeStart;
-  const re = state.settings.rangeEnd;
+  const maxStepS = energyMaxStepS(state.dataIntervalMs ?? state.settings.sampleRate);
+  const revision =
+    cols.x.revision +
+    cols.voltage.revision +
+    cols.current.revision +
+    cols.power.revision +
+    cols.temp.revision +
+    cols.recordingSegments.revision;
   const cache = rangeStatsCache;
   if (
     cache &&
-    cache.rangeStart === rs &&
-    cache.rangeEnd === re &&
+    cache.columns === cols &&
+    cache.revision === revision &&
     cache.startIndex === startIndex &&
     cache.endIndex === endIndex &&
-    cache.len === len
-  ) {
+    cache.maxStepS === maxStepS &&
+    len >= cache.len
+  )
     return cache;
-  }
   if (
     cache &&
-    cache.rangeStart === rs &&
-    cache.rangeEnd === re &&
+    cache.columns === cols &&
+    cache.revision === revision &&
     cache.startIndex === 0 &&
     startIndex === 0 &&
     cache.endIndex === cache.len - 1 &&
     endIndex === len - 1 &&
+    cache.maxStepS === maxStepS &&
     len > cache.len
   ) {
-    for (let i = cache.len; i < len; i++) foldRangePoint(cache, i);
+    for (let i = cache.len; i < len; i++) foldRangePoint(cache, i, maxStepS);
     cache.endIndex = endIndex;
     cache.len = len;
     return cache;
   }
   /** @type {RangeStatsCache} */
   const next = {
-    rangeStart: rs,
-    rangeEnd: re,
+    columns: cols,
+    revision,
     startIndex,
     endIndex,
     len,
+    maxStepS,
     minV: Infinity,
     maxV: -Infinity,
     minC: Infinity,
@@ -651,7 +692,7 @@ function getRangeStats() {
     wh: 0,
     mah: 0,
   };
-  for (let i = startIndex; i <= endIndex; i++) foldRangePoint(next, i);
+  for (let i = startIndex; i <= endIndex; i++) foldRangePoint(next, i, maxStepS);
   rangeStatsCache = next;
   return next;
 }
@@ -663,10 +704,17 @@ export function updateStatsDisplay() {
   let tempAvg = state.stats.temp.count > 0 ? state.stats.temp.sum / state.stats.temp.count : null;
   let displayPowerAvg = powerAvg;
   let displayTempAvg = tempAvg;
+  /** 范围模式下被跳过的非有限样本数，用于在均值上留一条 tooltip 说明。 */
+  const skipped = { voltage: 0, current: 0, power: 0, temp: 0 };
 
   if (state.settings.statsRange && state.chartSeries.x.length > 0) {
     const range = getRangeStats();
     if (range) {
+      const span = range.endIndex - range.startIndex + 1;
+      skipped.voltage = span - range.countV;
+      skipped.current = span - range.countC;
+      skipped.power = span - range.countP;
+      skipped.temp = span - range.countT;
       displayStats = {
         voltage: { min: range.minV, max: range.maxV, sum: range.sumV, count: range.countV },
         current: { min: range.minC, max: range.maxC, sum: range.sumC, count: range.countC },
@@ -683,7 +731,7 @@ export function updateStatsDisplay() {
   /** @param {string} id @param {number} val @param {number} [decimals=3] */
   const setText = (id, val, decimals = 3) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = val === Infinity || val === -Infinity ? '--' : val.toFixed(decimals);
+    if (el) el.textContent = Number.isFinite(val) ? val.toFixed(decimals) : '--';
   };
 
   setText('min-voltage', displayStats.voltage.min);
@@ -693,22 +741,35 @@ export function updateStatsDisplay() {
   setText('min-power', displayStats.power.min);
   setText('max-power', displayStats.power.max);
 
+  /** @param {number|null} val @returns {val is number} */
+  const isAvg = (val) => val !== null && Number.isFinite(val);
+
   const avgVoltage = displayStats.voltage.count > 0 ? displayStats.voltage.sum / displayStats.voltage.count : null;
   const avgCurrent = displayStats.current.count > 0 ? displayStats.current.sum / displayStats.current.count : null;
   const avgVoltageEl = document.getElementById('avg-voltage');
   const avgCurrentEl = document.getElementById('avg-current');
-  if (avgVoltageEl) avgVoltageEl.textContent = avgVoltage !== null ? avgVoltage.toFixed(3) : '--';
-  if (avgCurrentEl) avgCurrentEl.textContent = avgCurrent !== null ? Math.abs(avgCurrent).toFixed(3) : '--';
+  if (avgVoltageEl) avgVoltageEl.textContent = isAvg(avgVoltage) ? avgVoltage.toFixed(3) : '--';
+  if (avgCurrentEl) avgCurrentEl.textContent = isAvg(avgCurrent) ? Math.abs(avgCurrent).toFixed(3) : '--';
 
   const avgPowerEl = document.getElementById('avg-power');
-  if (avgPowerEl) avgPowerEl.textContent = displayPowerAvg !== null ? displayPowerAvg.toFixed(3) : '--';
+  if (avgPowerEl) avgPowerEl.textContent = isAvg(displayPowerAvg) ? displayPowerAvg.toFixed(3) : '--';
 
   const tempStats = displayStats.temp || state.stats.temp;
   setText('min-temp', tempStats.min, 1);
   setText('max-temp', tempStats.max, 1);
 
   const avgTempEl = document.getElementById('avg-temp');
-  if (avgTempEl) avgTempEl.textContent = displayTempAvg !== null ? displayTempAvg.toFixed(1) : '--';
+  if (avgTempEl) avgTempEl.textContent = isAvg(displayTempAvg) ? displayTempAvg.toFixed(1) : '--';
+
+  /** 「(N点)」标签仍是原始行数，这里说明均值实际只折入了有限值。 */
+  const setSkipTip = (id, count) => {
+    const el = document.getElementById(id);
+    if (el) el.title = count > 0 ? `${count} 个样本值缺失，未计入` : '';
+  };
+  setSkipTip('avg-voltage', skipped.voltage);
+  setSkipTip('avg-current', skipped.current);
+  setSkipTip('avg-power', skipped.power);
+  setSkipTip('avg-temp', skipped.temp);
 }
 
 /** 更新能量显示（支持范围模式）。 */
@@ -814,9 +875,11 @@ export function resetRealtimeCards() {
 
 /** 清空图表数据和相关状态。 */
 export function clearChart() {
-  if (state.isRecording) stopRecording();
+  void stopRecording({ discard: true }).catch(() => {});
+  deviceStream.replace();
   setChartColumns(emptyChartColumns());
   rangeStatsCache = null;
+  state.dataIntervalMs = null;
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
   state.chartWindow = emptyChartWindow();
@@ -846,8 +909,9 @@ export function clearChart() {
 
 /** 防止连点在 await PD 门期间重入。 */
 let recordingStartLock = false;
+let recordingEpoch = 0;
 
-/** 开始录制。先打开后端 PD 门再置本地标志，避免点开始后立刻插充电器丢握手。 */
+/** 开始录制。原生段由读线程开启；取消令牌防止异步开始在清空/导入后复活。 */
 export async function startRecording() {
   if (!state.isConnected) {
     console.warn('Attempted to start recording while not connected');
@@ -856,13 +920,15 @@ export async function startRecording() {
   if (state.isRecording || recordingStartLock) return;
 
   recordingStartLock = true;
+  const epoch = ++recordingEpoch;
+  const columns = state.chartSeries;
   try {
-    try {
+    if (deviceStream.enabled) {
+      await deviceStream.settle();
+    } else {
       await invokeCmd('set_pd_capture_enabled', { enabled: true });
-    } catch (e) {
-      console.error(e);
     }
-    if (!state.isConnected || state.isRecording) return;
+    if (epoch !== recordingEpoch || columns !== state.chartSeries || !state.isConnected || state.isRecording) return;
 
     state.isRecording = true;
     const now = Date.now();
@@ -892,15 +958,25 @@ export async function startRecording() {
 
     // 通知 PD 视图等订阅方（可选调用：node 测试的 document stub 没有 dispatchEvent）
     document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
+    if (deviceStream.enabled) await deviceStream.begin(state.recordingBaseSeconds);
+  } catch (error) {
+    console.error('Recording start failed:', error);
+    if (epoch === recordingEpoch) void stopRecording({ discard: true }).catch(() => {});
   } finally {
-    recordingStartLock = false;
+    if (epoch === recordingEpoch) recordingStartLock = false;
   }
 }
 
-/** 停止（暂停）录制。 */
-export function stopRecording() {
+/** UI state changes synchronously; the returned promise fences the retained tail.
+ * @param {{discard?:boolean}} [options]
+ */
+export function stopRecording({ discard = false } = {}) {
+  recordingEpoch++;
   recordingStartLock = false;
-  if (!state.isRecording) return;
+  const paused = deviceStream.enabled
+    ? deviceStream.pause({ discard, pdEnabled: !state.settings.pdFollowRecording })
+    : Promise.resolve();
+  if (!state.isRecording) return paused;
 
   state.isRecording = false;
   state.recordingStartTime = null;
@@ -921,10 +997,15 @@ export function stopRecording() {
   updateCharts();
 
   // 跟随记录关闭时采集门保持开；开启时与本地 isRecording 一起关掉。
-  void invokeCmd('set_pd_capture_enabled', { enabled: !state.settings.pdFollowRecording });
+  if (!deviceStream.enabled) {
+    void invokeCmd('set_pd_capture_enabled', { enabled: !state.settings.pdFollowRecording }).catch(console.error);
+  }
+  updateStatsDisplay();
+  updateEnergyDisplay();
 
   // 单一咽喉点：手动停止 / 自动暂停 / 拔设备 / CSV 导入引发的停止都会走到这里
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
+  return paused;
 }
 
 /** 清空图表并重置统计和能量。 */

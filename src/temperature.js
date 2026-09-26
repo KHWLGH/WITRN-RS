@@ -115,6 +115,18 @@ export function setTempConnected(connected) {
   updateTempUIVisibility();
 }
 
+/**
+ * 仪表断开时注销「本机」温度源。
+ *
+ * 后端只在 TCP 读取任务里发 `temp-disconnected`，本机源没有可关闭的会话，
+ * 因此必须由连接状态变化显式复位，否则读数会冻结在最后一个值上。
+ * 外部 TCP 会话与仪表流相互独立，这里不能碰。
+ */
+export function resetTempForDevice() {
+  if (currentTempSource() !== 'device' || !state.isTempConnected) return;
+  setTempConnected(false);
+}
+
 // ─── UI visibility ───────────────────────────────────────────────────────────
 
 /** 根据当前是否有温度数据来显示/隐藏温度相关的 UI 元素。 */

@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <script src="theme-boot.js"></script>
+    <!-- defer: registers the webview half of cold-start timing without becoming one more parser-blocking request. -->
+    <script src="boot-timing.js" defer></script>
     <link rel="stylesheet" href="vendor/uPlot.min.css" />
     <link rel="stylesheet" href="styles/tokens.css" />
     <link rel="stylesheet" href="styles/base.css" />
@@ -51,6 +53,7 @@
             <span class="cmd-sep"></span>
             <span class="cmd-label">采样率</span>
             <select id="sample-rate" class="ribbon-select" title="采样率（显示为 每秒次数；值为毫秒）">
+              <option value="10">100 次/秒</option>
               <option value="100">10 次/秒</option>
               <option value="250" selected>4 次/秒</option>
               <option value="500">2 次/秒</option>
@@ -400,6 +403,28 @@
                           <label class="seg-item">
                             <input type="radio" name="theme-choice" id="theme-choice-system" />
                             <span>跟随系统</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-row" id="window-style-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title" id="window-style-label">窗口风格</div>
+                        <div class="settings-row-desc" id="window-style-hint">仅改变标题栏外观，不改变系统窗口行为；Mac 绿钮切换全屏，其他平台最大化/还原。</div>
+                      </div>
+                      <div class="settings-row-control">
+                        <div class="seg" role="radiogroup" aria-labelledby="window-style-label" aria-describedby="window-style-hint">
+                          <label class="seg-item">
+                            <input type="radio" name="window-style" id="window-style-auto" value="auto" checked />
+                            <span>跟随平台</span>
+                          </label>
+                          <label class="seg-item">
+                            <input type="radio" name="window-style" id="window-style-windows" value="windows" />
+                            <span>Windows 风格</span>
+                          </label>
+                          <label class="seg-item">
+                            <input type="radio" name="window-style" id="window-style-macos" value="macos" />
+                            <span>macOS 风格</span>
                           </label>
                         </div>
                       </div>

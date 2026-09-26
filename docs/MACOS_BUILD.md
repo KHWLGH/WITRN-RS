@@ -38,7 +38,7 @@ cargo tauri build
 本次 release 编译和 `.app` 打包成功。第一次 DMG 运行在锁屏桌面上，Tauri 的 Finder AppleScript 美化步骤失败；没有改变全局代理或源码行为，改用 Tauri 自带脚本的无 Finder 美化模式重新封装：
 
 ```bash
-cd src-tauri/target/release/bundle/macos
+cd target/release/bundle/macos
 ./../dmg/bundle_dmg.sh --skip-jenkins \
   --volname WITRN-RS \
   --icon WITRN-RS.app 200 200 \
@@ -54,15 +54,15 @@ mv WITRN-RS_0.2.1_aarch64.dmg ../dmg/WITRN-RS_0.2.1_aarch64.dmg
 
 ```bash
 codesign --force --deep --sign - --timestamp=none \
-  src-tauri/target/release/bundle/macos/WITRN-RS.app
+  target/release/bundle/macos/WITRN-RS.app
 ```
 
 如果源码或 app 内容改变，应先重新构建、签名，再重新生成 DMG。
 
 ## 产物
 
-- App：`src-tauri/target/release/bundle/macos/WITRN-RS.app`
-- DMG：`src-tauri/target/release/bundle/dmg/WITRN-RS_0.2.1_aarch64.dmg`
+- App：`target/release/bundle/macos/WITRN-RS.app`
+- DMG：`target/release/bundle/dmg/WITRN-RS_0.2.1_aarch64.dmg`
 - 产物大小：App 约 `15M`；DMG `5,357,026` bytes
 - DMG SHA-256：`38439f97f4b2b74e38b931e919976959b51b73af46dcc1d0e4015f31379aff82`
 - App 主二进制：`Contents/MacOS/witrn-rs`

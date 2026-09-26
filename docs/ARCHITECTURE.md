@@ -61,6 +61,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 
 `shutdown` 命令标注 `#[tauri::command(async)]`，这样它不会在主线程上 join 那些正在 `emit` 的工作线程（否则互相等待会死锁）。停完线程后 `destroy` 主窗口，而不是 `close` —— Tauri v2 的 `close()` 会重新派发 `close-requested`，造成退出回环。
 
+退出前必须先「消费完并 ACK 末包」，这条校验只在 `shutdown` 上；一旦流进入终态（`seq` 空洞、背压超限、屏障超时），`fail()` 已经把生产端 drain 停掉，屏障保护的样本不可能再出现，此时继续坚持校验只会让**断开 / 重连 / 退出永久全部失败**。前端因此改走 `abandon_device_stream`：它只接受「已停止 + 线程已 join + 已有末包回执 + 同 generation」的会话并退休该槽位，**且不写 `consumed`**，所以空洞依旧算未消费。`shutdown` 的谓词一字未改，放宽只发生在这条显式路径上。
+
 ### Tauri 命令
 
 | 命令 | 作用 |
@@ -75,6 +77,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `pd_log_after` | 增量拉取 `seq` 大于给定值的报文 |
 | `pd_log_replace` | 用导入的报文替换日志，并盖上新 generation |
 | `decode_pd_at` | 按 `seq` 单帧解码，O(1)，用于点击某行时才展开详情 |
+| `drain_device_stream` | 停止该连接的后台线程并取回末包回执（幂等，可重复调用） |
+| `abandon_device_stream` | 退休一个终态会话，让断开 / 重连 / 退出重新可达；不改写 `consumed` |
 | `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源 |
 | `shutdown` | 停止全部后台线程后销毁主窗口 |
 
@@ -130,6 +134,8 @@ WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责
 | `wh` | `f32` | Wh（仪表内部累加器） |
 
 > 仪表自己的 `ah` / `wh` 累加器会一路转发到前端，但**界面上的「累计能量 / 累计容量」并不使用它们** —— 前端对采样点自行积分，这样才能实现「暂停期间不计入积分」和「仅统计选中范围」，并由 `一键重置` 统一归零。
+>
+> 积分跳过「相邻点间隔过大」的空档（休眠 / NTP 前跳 / 漏采），阈值是 `max(2 s, 8 × 标称采样间隔)`，与 x 轴 `nextRecordingX` 放行点数用的是同一个倍数 —— 固定 2 秒会让 5 s / 10 s 档的每一步都被当成空档，能量恒为 `0.0000`。标称间隔的来源依次是：原生流的 `rate_ms`、导入 CSV 的 `SampTime(ms)`（旧文件从相对秒反推中位数）、`settings.sampleRate`；三者都拿不到时阈值退回 2 秒。
 
 ## 前端
 
@@ -191,7 +197,7 @@ WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责
 
 ## 测试
 
-### 前端 —— `test/`，18 个文件 / 110 个用例
+### 前端 —— `test/`
 
 用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑，以及跨文件的契约断言：
 
@@ -200,7 +206,7 @@ chart-buckets  chart-columns  chart-window  ids       ingest      measurement
 pd-batch       pd-capture-file          pd-capture-state
 pd-clear-linkage         pd-model       pd-recording
 recording      security-csp   theme     ui-scale    utils
-version-sync
+version-sync   temp-disconnect          settings-persistence
 ```
 
 其中有四个是**契约测试** —— 它们不测某个函数的行为，而是断言分散在多个文件里的事实必须彼此一致：
@@ -213,16 +219,16 @@ version-sync
 其余是纯逻辑测试，例如：
 
 - **`chart-window.test.js`** —— 滚轮缩放钳位、follow 保 duration、frozen 窗口不随 `lastX` 漂移。
-- **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分（跳过过大空档）。
+- **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分（跳过随标称采样间隔定标的空档）。
 - **`pd-model.test.js`** —— 报文摘要提取（SOP / 角色 / 速览）、GoodCRC 过滤、缓冲回绕。
 
-### Rust —— 149 个 `#[test]`
+### Rust —— 171 个 `#[test]`
 
 | 位置 | 数量 |
 | --- | --- |
 | `crates/usbpd-parser`（12 个模块 + `tests/conversation.rs` 完整会话回放） | 104 |
 | `crates/witrn-hid`（`device.rs`、`general.rs`） | 23 |
-| `src-tauri`（`lib.rs`、`pd_capture.rs`、`usb_port.rs`） | 22 |
+| `src-tauri`（`lib.rs`、`pd_capture.rs`、`usb_port.rs`） | 44 |
 
 另有 17 个文档测试（`crates/usbpd-parser` 13 个、`crates/witrn-hid` 4 个），随 `cargo test --workspace` 一并运行。
 

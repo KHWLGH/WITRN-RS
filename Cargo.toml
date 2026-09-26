@@ -23,3 +23,36 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hidapi = "2.6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Profiles live in this root manifest: the workspace is virtual, so anything written in
+# src-tauri/Cargo.toml would be ignored.
+#
+# Measured on this host (release, lib-only relink after touching src-tauri/src/lib.rs / resulting
+# witrn-rs.exe size):
+#   no profile block at all      52.6s      14,306,816
+#   lto=false  codegen-units=16  93.8/69.9s  14,238,720
+#   lto=false  codegen-units=1   127.3s      13,069,312   <- shipped
+#   lto=thin   codegen-units=1   171.1/168.3s 13,421,568
+#   lto=fat    codegen-units=1   cold 240.7s  12,785,664
+# Code size here is driven by codegen-units, not by LTO: cg=1 buys -8.2% image for +55% relink,
+# while lto="thin" is strictly dominated - bigger AND slower than not enabling it at all. fat
+# shrinks a further 2.2% over cg=1/no-LTO for roughly double the build time, under the bar this
+# file sets for paying that. Hence codegen-units=1 stays and lto stays off. If a future change
+# makes release link time matter more than the image, revisit both together with these numbers.
+[profile.release]
+lto = false
+codegen-units = 1
+# Not "abort", on purpose. src-tauri turns a worker panic into a recoverable stop
+# (`join().map_err(|_| "device worker panicked")`), which surfaces as the 采集已停止 toast
+# with recorded data intact. Aborting would kill the process mid-acquisition, silently,
+# because release strips the console. The only upside of abort is unwind-table size.
+panic = "unwind"
+strip = "debuginfo"
+debug = 0
+
+# Dependencies at opt-level 2 under dev. Otherwise serde_json, hidapi, the parser and the
+# whole emit path run unoptimized in `cargo tauri dev`, several times slower than release,
+# and any startup or first-frame number taken from a dev build measures fiction.
+# Costs one full dependency rebuild the first time; every later relink is unaffected.
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,60 @@
+name: Release acceptance gate
+
+# 100 Hz 真机长跑无法在托管 runner 上复现（没有 HID 设备），所以"发版"这一步刻意不自动化到替你切
+# tag。这里做的是另一半：把验收变成机器可查的凭据。回执由本地 `scripts/verify-hardware-receipt.mjs`
+# 从**导出的 CSV** 算出来（不是手填的汇总数字），本 workflow 校验它自洽、且归属于要打的那个 tag 的
+# 代码；通过就打印人工后续步骤，不通过就红。它从不创建 tag、不发布 Release、不构建安装包。
+#
+# 顺序是硬的：回执自带 `provenance.headCommit` 与 `treeClean`，从**脏工作树**里跑出来的 exe 会被直接
+# 拒绝（否则"验收通过的代码"在仓库里根本不存在，2026-09-25 那两次长跑就撞在这上面）。正确流程：
+# 先提交 → 用提交后的构建跑 `npm run accept:hardware -- --seconds 620 --exe target/release/witrn-rs.exe`
+# → 把产出的回执原样粘贴到这里。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要发版的 tag（含 v 前缀），例如 v0.2.2
+        required: true
+        type: string
+      receipt:
+        description: 粘贴 verify-hardware-receipt.mjs 生成的 JSON 回执
+        required: true
+        type: string
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      # 粘贴内容经环境变量落地，绝不拼进命令行 —— 回执里是别人写的 JSON，直接插值等于允许注入。
+      RECEIPT: ${{ inputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要解析 tag 与回执里那个 commit，不能是 depth=1。
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Write the receipt to disk
+        run: |
+          set -euo pipefail
+          printf '%s' "$RECEIPT" > acceptance.json
+          node -e "JSON.parse(require('node:fs').readFileSync('acceptance.json','utf8'))" \
+            || { echo "::error::粘贴的内容不是合法 JSON 回执"; exit 1; }
+
+      - name: Tag versions agree, and the receipt belongs to this tag
+        run: node scripts/check-release-tag.mjs --tag "$TAG" --receipt acceptance.json
+
+      - name: Hardware receipt re-check
+        run: node scripts/verify-hardware-receipt.mjs --receipt acceptance.json
+
+      - name: What happens next (manual, on purpose)
+        run: |
+          echo "前置检查已过。以下仍由人执行，本 workflow 刻意不做："
+          echo "  1. 本地 cargo tauri build --bundles nsis"
+          echo "  2. 装出来的包再跑一次短时真机抽查"
+          echo "  3. 由人推 tag 并创建 Release（README 承诺 .msi 与 .exe 两条下载渠道，都要附上）"

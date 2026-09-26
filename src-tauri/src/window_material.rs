@@ -1,37 +1,48 @@
-//! Win11 Mica 窗口材质。非 Windows 或 DWM 不支持时全部命令空操作并报告不可用。
+//! Windows Mica / Tabbed 与 macOS Vibrancy；不可用或失败时使用不透明底色。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{window::Color, AppHandle, Manager, State, WebviewWindow};
 
 use crate::AppState;
 
-/// WebView2 在 alpha≠0 时会把底色打成不透明；Mica 必须用全透明画布。
+/// WebView2 不支持半透明画布；仅在原生材质成功后使用全透明底色。
 const WEBVIEW_TRANSPARENT: Color = Color(0, 0, 0, 0);
-/// Fluent grey-12，关 Mica 时的深色回退，避免看穿桌面。
 const WEBVIEW_FALLBACK_DARK: Color = Color(0x1f, 0x1f, 0x1f, 0xff);
-/// Fluent grey-98，关 Mica 时的浅色回退。
 const WEBVIEW_FALLBACK_LIGHT: Color = Color(0xfa, 0xfa, 0xfa, 0xff);
 
-/// 与 AppState.window_material_enabled 同步，供 WM_NCACTIVATE 子类读取。
+/// 实际应用状态，不是用户持久化偏好。供 WM_NCACTIVATE 子类读取。
 static MATERIAL_ENABLED: AtomicBool = AtomicBool::new(false);
-/// 用户偏好：非聚焦时仍按激活态绘制系统背景（Mica / Tabbed）。
 static KEEP_UNFOCUSED: AtomicBool = AtomicBool::new(false);
+static MATERIAL_DARK: AtomicBool = AtomicBool::new(true);
 
-fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
-    app.get_webview_window("main")
+fn platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unsupported"
+    }
 }
 
-fn sync_webview_background(window: &WebviewWindow, mica: bool, dark: bool) {
-    let color = if mica {
+fn sync_webview_background(
+    window: &WebviewWindow,
+    applied: bool,
+    dark: bool,
+) -> Result<(), String> {
+    let color = if applied {
         WEBVIEW_TRANSPARENT
     } else if dark {
         WEBVIEW_FALLBACK_DARK
     } else {
         WEBVIEW_FALLBACK_LIGHT
     };
-    if let Err(error) = window.set_background_color(Some(color)) {
-        eprintln!("设置窗口背景色失败: {error}");
-    }
+    // macOS 的 WKWebView 背景设置不受支持；原生窗口底色与前端不透明 CSS 共同回退。
+    window
+        .set_background_color(Some(color))
+        .map_err(|error| error.to_string())
 }
 
 fn store_enabled(state: &AppState, enabled: bool) {
@@ -41,49 +52,134 @@ fn store_enabled(state: &AppState, enabled: bool) {
     MATERIAL_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
+// 所有原生 apply/clear 调用仅由下方主线程闭包执行。
 #[cfg(windows)]
-fn apply_mica_on(window: &WebviewWindow, dark: bool) -> Result<(), String> {
-    match window_vibrancy::apply_tabbed(window, Some(dark)) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            window_vibrancy::apply_mica(window, Some(dark)).map_err(|error| error.to_string())
-        }
-    }
+fn apply_material_on(window: &WebviewWindow, dark: bool) -> Result<(), String> {
+    window_vibrancy::apply_tabbed(window, Some(dark))
+        .or_else(|_| window_vibrancy::apply_mica(window, Some(dark)))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
-fn clear_mica_on(window: &WebviewWindow) -> Result<(), String> {
-    let _ = window_vibrancy::clear_tabbed(window);
-    let _ = window_vibrancy::clear_mica(window);
+fn clear_material_on(window: &WebviewWindow) -> Result<(), String> {
+    // 两种效果使用同一 DWM backdrop；任一成功即可，不能吞掉两者均失败。
+    window_vibrancy::clear_tabbed(window)
+        .or_else(|_| window_vibrancy::clear_mica(window))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn apply_material_on(window: &WebviewWindow, dark: bool) -> Result<(), String> {
+    use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState};
+
+    window
+        .set_theme(Some(if dark {
+            tauri::Theme::Dark
+        } else {
+            tauri::Theme::Light
+        }))
+        .map_err(|error| error.to_string())?;
+    // 0.6 每次 apply 都添加一个 NSVisualEffectView，重应用前先清理，避免叠加。
+    clear_material_on(window)?;
+    let active_state = if KEEP_UNFOCUSED.load(Ordering::Relaxed) {
+        NSVisualEffectState::Active
+    } else {
+        NSVisualEffectState::FollowsWindowActiveState
+    };
+    window_vibrancy::apply_vibrancy(
+        window,
+        NSVisualEffectMaterial::WindowBackground,
+        Some(active_state),
+        None,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn clear_material_on(window: &WebviewWindow) -> Result<(), String> {
+    // Ok(false) 表示尚无该材质视图，同样是成功清理状态。
+    window_vibrancy::clear_vibrancy(window)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn apply_material_on(_window: &WebviewWindow, _dark: bool) -> Result<(), String> {
+    Err("当前平台不支持原生窗口材质".into())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn clear_material_on(_window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(windows))]
-fn apply_mica_on(_window: &WebviewWindow, _dark: bool) -> Result<(), String> {
-    Err("当前平台不支持 Mica".into())
+fn fallback_on(window: &WebviewWindow, state: &AppState, dark: bool) -> Result<(), String> {
+    store_enabled(state, false);
+    // 先遮住透明画布，即使清理原生材质失败也不能留下透底窗口。
+    let background = sync_webview_background(window, false, dark);
+    let cleared = clear_material_on(window);
+    #[cfg(windows)]
+    ncactivate::sync_appearance(window);
+    background.and(cleared)
 }
 
-#[cfg(not(windows))]
-fn clear_mica_on(_window: &WebviewWindow) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(windows)]
-pub fn try_enable_on_setup(window: &WebviewWindow, state: &AppState, dark: bool) {
-    match apply_mica_on(window, dark) {
-        Ok(()) => {
+fn set_enabled_on_main(
+    window: &WebviewWindow,
+    state: &AppState,
+    enabled: bool,
+    dark: bool,
+) -> Result<WindowMaterialInfo, String> {
+    MATERIAL_DARK.store(dark, Ordering::Relaxed);
+    if !cfg!(any(windows, target_os = "macos")) {
+        state
+            .window_material_available
+            .store(false, Ordering::Relaxed);
+        fallback_on(window, state, dark)?;
+    } else if enabled {
+        let applied = apply_material_on(window, dark)
+            .and_then(|_| sync_webview_background(window, true, dark));
+        if let Err(error) = applied {
             state
                 .window_material_available
-                .store(true, Ordering::Relaxed);
-            store_enabled(state, true);
-            sync_webview_background(window, true, dark);
-            #[cfg(windows)]
+                .store(false, Ordering::Relaxed);
+            if let Err(fallback_error) = fallback_on(window, state, dark) {
+                return Err(format!("{error}; 不透明回退: {fallback_error}"));
+            }
+            return Err(error);
+        }
+        state
+            .window_material_available
+            .store(true, Ordering::Relaxed);
+        store_enabled(state, true);
+        #[cfg(windows)]
+        {
             ncactivate::install(window);
+            ncactivate::sync_appearance(window);
         }
-        Err(error) => {
+    } else {
+        fallback_on(window, state, dark)?;
+    }
+    Ok(info(state))
+}
+
+/// setup 也显式调度到主线程；不等待 UI 线程，避免同步通道造成死锁。
+/// lib.rs 应在各桌面平台调用；Linux 会设置不透明底色而不启用材质。
+pub fn try_enable_on_setup(window: &WebviewWindow, state: &AppState, dark: bool) {
+    let target = window.clone();
+    if let Err(error) = window.run_on_main_thread(move || {
+        let state = target.state::<AppState>();
+        if let Err(error) = set_enabled_on_main(&target, &state, true, dark) {
             eprintln!("窗口材质不可用: {error}");
-            sync_webview_background(window, false, dark);
         }
+    }) {
+        state
+            .window_material_available
+            .store(false, Ordering::Relaxed);
+        store_enabled(state, false);
+        if let Err(background_error) = sync_webview_background(window, false, dark) {
+            eprintln!("设置窗口回退底色失败: {background_error}");
+        }
+        eprintln!("调度窗口材质失败: {error}");
     }
 }
 
@@ -92,13 +188,36 @@ pub fn try_enable_on_setup(window: &WebviewWindow, state: &AppState, dark: bool)
 pub struct WindowMaterialInfo {
     pub available: bool,
     pub applied: bool,
+    pub platform: &'static str,
 }
 
 fn info(state: &AppState) -> WindowMaterialInfo {
     WindowMaterialInfo {
         available: state.window_material_available.load(Ordering::Relaxed),
         applied: state.window_material_enabled.load(Ordering::Relaxed),
+        platform: platform(),
     }
+}
+
+/// 命令异步等待一个容量为 1 的回执，不阻塞主线程，也不引入额外依赖。
+async fn on_main_thread<T, F>(app: AppHandle, action: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&WebviewWindow, &AppState) -> Result<T, String> + Send + 'static,
+{
+    let window = app.get_webview_window("main").ok_or("找不到主窗口")?;
+    let target = window.clone();
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    window
+        .run_on_main_thread(move || {
+            let state = app.state::<AppState>();
+            let _ = sender.try_send(action(&target, &state));
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv()
+        .await
+        .ok_or_else(|| "窗口材质主线程任务已取消".to_string())?
 }
 
 #[tauri::command]
@@ -107,61 +226,45 @@ pub fn get_window_material(state: State<'_, AppState>) -> WindowMaterialInfo {
 }
 
 #[tauri::command]
-pub fn set_window_material_theme(
-    dark: bool,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let window = main_window(&app).ok_or("找不到主窗口")?;
-    let enabled = state.window_material_enabled.load(Ordering::Relaxed);
-    if enabled {
-        apply_mica_on(&window, dark)?;
-    }
-    sync_webview_background(&window, enabled, dark);
-    Ok(())
+pub async fn set_window_material_theme(dark: bool, app: AppHandle) -> Result<(), String> {
+    on_main_thread(app, move |window, state| {
+        let enabled = state.window_material_enabled.load(Ordering::Relaxed);
+        set_enabled_on_main(window, state, enabled, dark).map(|_| ())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_window_material_enabled(
+pub async fn set_window_material_enabled(
     enabled: bool,
     dark: bool,
-    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<WindowMaterialInfo, String> {
-    if !state.window_material_available.load(Ordering::Relaxed) {
-        return Ok(info(&state));
-    }
-    let window = main_window(&app).ok_or("找不到主窗口")?;
-    if enabled {
-        apply_mica_on(&window, dark)?;
-        store_enabled(&state, true);
-        sync_webview_background(&window, true, dark);
-    } else {
-        clear_mica_on(&window)?;
-        store_enabled(&state, false);
-        sync_webview_background(&window, false, dark);
-    }
-    #[cfg(windows)]
-    ncactivate::sync_appearance(&window);
-    Ok(info(&state))
+    // 不因上次失败锁死开关；允许明确的用户请求再次尝试。
+    on_main_thread(app, move |window, state| {
+        set_enabled_on_main(window, state, enabled, dark)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_window_material_unfocused(
+pub async fn set_window_material_unfocused(
     enabled: bool,
-    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<WindowMaterialInfo, String> {
-    KEEP_UNFOCUSED.store(enabled, Ordering::Relaxed);
-    if !state.window_material_available.load(Ordering::Relaxed) {
-        return Ok(info(&state));
-    }
-    let window = main_window(&app).ok_or("找不到主窗口")?;
-    #[cfg(windows)]
-    ncactivate::sync_appearance(&window);
-    #[cfg(not(windows))]
-    let _ = window;
-    Ok(info(&state))
+    on_main_thread(app, move |window, state| {
+        KEEP_UNFOCUSED.store(enabled, Ordering::Relaxed);
+        #[cfg(target_os = "macos")]
+        if state.window_material_enabled.load(Ordering::Relaxed) {
+            return set_enabled_on_main(window, state, true, MATERIAL_DARK.load(Ordering::Relaxed));
+        }
+        #[cfg(windows)]
+        ncactivate::sync_appearance(window);
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let _ = window;
+        Ok(info(state))
+    })
+    .await
 }
 
 /// DWM 根据 `WM_NCACTIVATE` 把系统背景收成纯色。拦截失活消息并报告仍为激活，

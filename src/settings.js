@@ -9,14 +9,19 @@ import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { applyThemePreference, echoThemeUI } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
+import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
 import { echoWindowMaterialUI, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
+import { applyWindowStyle, echoWindowStyleUI, normalizeWindowStyle } from './window-style.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
 /** @type {any} */
 let settingsStore = null;
+
+/** 当前是否处于「已经告诉过一次用户持久化坏了」的故障期。 */
+let persistenceFaultReported = false;
 
 /** 正在加载时禁止自动保存 */
 let isLoadingSettings = false;
@@ -66,6 +71,7 @@ function normalizeSettings(saved) {
   if (merged.theme !== 'dark' && merged.theme !== 'light' && merged.theme !== 'system') {
     merged.theme = defaultSettings.theme;
   }
+  merged.windowStyle = normalizeWindowStyle(merged.windowStyle);
   merged.windowMaterial = merged.windowMaterial !== false;
   merged.windowMaterialUnfocused = merged.windowMaterialUnfocused === true;
   merged.realtimePanelWidth = Math.round(
@@ -82,6 +88,8 @@ function normalizeSettings(saved) {
 export async function applySampleRate(rate) {
   const clamped = Math.round(Math.min(60_000, Math.max(10, Number(rate) || defaultSettings.sampleRate)));
   state.settings.sampleRate = clamped;
+  // 能量空档阈值跟着新间隔走；设备回来的 rate_ms 会立刻覆盖成实际值。
+  state.dataIntervalMs = clamped;
   const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (rateSelect) setSampleRateOption(rateSelect, clamped);
   if (state.isConnected) {
@@ -225,15 +233,47 @@ function normalizeAutoPause(saved) {
 
 /**
  * 获取 / 懒创建 LazyStore 实例。
+ *
+ * 只有 `init()` 成功才发布单例：LazyStore 会把首次 `Store.load` 的 promise 缓存下来，
+ * 一旦先发布了再失败，本进程后续每次读写都会复用那个已拒绝的 promise，持久化就静默坏死。
  * @returns {Promise<any>}
  */
 export async function getStore() {
   if (!settingsStore) {
     const { LazyStore } = await import('./vendor/plugin-store.js');
-    settingsStore = new LazyStore('settings.json', { autoSave: 500 });
-    await settingsStore.init();
+    const store = new LazyStore('settings.json', { autoSave: 500 });
+    try {
+      await store.init();
+    } catch (error) {
+      /** @type {Error & {persistenceStage?: string}} */
+      const tagged = error instanceof Error ? error : new Error(String(error));
+      tagged.persistenceStage = 'load';
+      throw tagged;
+    }
+    settingsStore = store;
   }
   return settingsStore;
+}
+
+/**
+ * 每个故障期只说一次：防抖保存几乎每个控件变化都会触发，逐次弹提示本身就是干扰。
+ * @param {unknown} error
+ * @param {'load'|'write'} stage
+ */
+function reportPersistenceFault(error, stage) {
+  console.error(`设置持久化失败 (${stage}):`, error);
+  if (persistenceFaultReported) return;
+  persistenceFaultReported = true;
+  toast.error(
+    stage === 'load'
+      ? `配置存储不可用，本次会话的设置不会被保存：${error}`
+      : '配置写入失败，重启后将回到当前值（settings.json 在应用数据目录，可能被杀毒软件或同步盘占用）',
+  );
+}
+
+/** 一次成功读写即结束故障期，之后的失败要重新提示。 */
+function clearPersistenceFault() {
+  persistenceFaultReported = false;
 }
 
 // ─── Load ────────────────────────────────────────────────────────────────────
@@ -253,10 +293,14 @@ export async function loadSettings() {
     }
     echoSettingsUI();
   } catch (e) {
-    console.error('Failed to load settings:', e);
+    // 只有 store 真的没起来才说持久化；回显 UI 抛的错不该冒领这个结论。
+    if (/** @type {any} */ (e)?.persistenceStage === 'load') reportPersistenceFault(e, 'load');
+    else console.error('Failed to load settings:', e);
   } finally {
     echoUiScaleUI();
     echoThemeUI();
+    echoWindowStyleUI(state.settings.windowStyle);
+    applyWindowStyle(state.settings.windowStyle);
     echoWindowMaterialUI();
     echoRealtimePanelWidth();
     fillUiScaleHint();
@@ -272,12 +316,19 @@ export async function loadSettings() {
 
 // ─── Save ────────────────────────────────────────────────────────────────────
 
-/** 将当前设置写入持久化存储。 */
+/**
+ * 将当前设置写入持久化存储。
+ *
+ * `set()` 成功不代表落盘（插件的 autoSave 失败只在 Rust 侧记日志），所以必须保留
+ * 这次显式 `save()` 并以它的结果为准；失败要说出来，否则用户以为已经存好了。
+ * @returns {Promise<boolean>} 是否已确认落盘
+ */
 export async function saveSettings() {
   try {
     const store = await getStore();
     const settingsToSave = {
       ...state.settings,
+      windowStyle: normalizeWindowStyle(state.settings.windowStyle),
       autoPause: {
         enabled: state.autoPauseSettings.enabled,
         basis: state.autoPauseSettings.basis,
@@ -287,8 +338,11 @@ export async function saveSettings() {
     };
     await store.set('appSettings', settingsToSave);
     await store.save();
+    clearPersistenceFault();
+    return true;
   } catch (e) {
-    console.error('Failed to save settings:', e);
+    reportPersistenceFault(e, /** @type {any} */ (e)?.persistenceStage === 'load' ? 'load' : 'write');
+    return false;
   }
 }
 
@@ -316,7 +370,10 @@ export function debouncedSaveSettings(delay = 500) {
 
 // ─── Reset ───────────────────────────────────────────────────────────────────
 
-/** 恢复默认设置并更新 UI。 */
+/**
+ * 恢复默认设置并更新 UI。
+ * @returns {Promise<boolean>} 默认值是否已确认落盘（UI 复位是尽力而为，不影响该结果）
+ */
 export async function resetSettings() {
   try {
     state.settings = { ...defaultSettings };
@@ -325,6 +382,8 @@ export async function resetSettings() {
     echoSettingsUI();
     echoUiScaleUI();
     echoThemeUI();
+    echoWindowStyleUI(state.settings.windowStyle);
+    applyWindowStyle(state.settings.windowStyle);
     echoWindowMaterialUI();
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
@@ -355,12 +414,20 @@ export async function resetSettings() {
     updateStatsDisplay();
     updateEnergyDisplay();
     updateTempUIVisibility();
+  } catch (e) {
+    // UI 复位与写盘是两件事：这里的异常不能冒充「持久化失败」。
+    console.error('Failed to reset settings UI:', e);
+  }
 
-    // Clear saved settings from store
+  // Clear saved settings from store
+  try {
     const store = await getStore();
     await store.delete('appSettings');
     await store.save();
+    clearPersistenceFault();
+    return true;
   } catch (e) {
-    console.error('Failed to reset settings:', e);
+    reportPersistenceFault(e, /** @type {any} */ (e)?.persistenceStage === 'load' ? 'load' : 'write');
+    return false;
   }
 }

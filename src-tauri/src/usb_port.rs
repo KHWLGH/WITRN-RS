@@ -1,4 +1,13 @@
-use hidapi::{DeviceInfo, HidApi};
+use hidapi::{DeviceInfo, HidApi, HidDevice, HidError};
+use std::ffi::CStr;
+
+/// Both port discovery and acquisition use the same shared-access policy.
+/// On macOS, Cargo's macos-shared-device feature sets non-exclusive access
+/// once during HidApi initialization. Never toggle/restore that global setting
+/// around an open: enumeration and connection can run concurrently.
+pub(crate) fn open_device_nonexclusive(api: &HidApi, path: &CStr) -> Result<HidDevice, HidError> {
+    api.open_path(path)
+}
 
 pub(crate) fn format_device_display_name(
     model_name: &str,
@@ -116,10 +125,7 @@ pub(crate) fn usb_port_for_device(_api: &HidApi, device_info: &DeviceInfo) -> Op
 
 #[cfg(target_os = "macos")]
 pub(crate) fn usb_port_for_device(api: &HidApi, device_info: &DeviceInfo) -> Option<String> {
-    // macOS opens HID devices exclusively by default. A non-exclusive probe lets
-    // enumeration keep working while another interface is already connected.
-    api.set_open_exclusive(false);
-    let device = api.open_path(device_info.path()).ok()?;
+    let device = open_device_nonexclusive(api, device_info.path()).ok()?;
     parse_macos_location_id(device.get_location_id().ok()?)
 }
 

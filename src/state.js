@@ -51,6 +51,7 @@
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
+ * @property {'auto'|'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
  * @property {boolean} windowMaterial - Win11 Mica 窗口材质（不可用时由运行时忽略）
  * @property {boolean} windowMaterialUnfocused - 非聚焦时仍使用窗口材质（需 windowMaterial）
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
@@ -89,6 +90,8 @@
  * 采集时倍增扩容，避免普通数组周期性整列拷贝与装箱。
  */
 export class F64Col {
+  revision = 0;
+
   /** @param {number} [capacity=4096] */
   constructor(capacity = 4096) {
     const cap = Math.max(1, capacity | 0);
@@ -123,6 +126,7 @@ export class F64Col {
     if (n > this.buf.length) this.buf = new Float64Array(n);
     this.buf.set(values);
     this.length = n;
+    this.revision++;
   }
 
   /** @returns {Float64Array} */
@@ -146,6 +150,7 @@ export class F64Col {
  * @property {F64Col} dn
  * @property {F64Col} cc1
  * @property {F64Col} cc2
+ * @property {F64Col} recordingSegments
  */
 
 /** @param {number} [capacity=4096] @returns {ChartSeriesColumns} */
@@ -161,6 +166,7 @@ export function emptyChartColumns(capacity = 4096) {
     dn: new F64Col(capacity),
     cc1: new F64Col(capacity),
     cc2: new F64Col(capacity),
+    recordingSegments: new F64Col(capacity),
   };
 }
 
@@ -211,6 +217,7 @@ export const defaultSettings = {
   signedCurrent: false,
   uiScalePercent: 100,
   theme: 'dark',
+  windowStyle: 'auto',
   windowMaterial: true,
   windowMaterialUnfocused: false,
   realtimePanelWidth: 250,
@@ -260,7 +267,8 @@ export const state = {
   __clearMonitorData: null,
   /** @type {(() => void)|null} 手动或拔线断开时在 PD 日志插入分隔行 */
   __markPdDisconnect: null,
-  /** @type {boolean} 读数栏分栏拖动中：图表的 ResizeObserver 跳过，松手再定尺 */
+  /** @type {boolean} 读数栏分栏拖动中：图表的 ResizeObserver 跳过，松手再定尺。
+   *  释放路径为 pointerup / pointercancel / lostpointercapture，处理函数须先清标志再做提交。 */
   __layoutResizing: false,
   /** @type {boolean} 范围手柄或滚轮缩放跟手中：录制 tick 不改写选区 */
   __rangeDragging: false,
@@ -280,6 +288,16 @@ export const state = {
 
   /** @type {Energy} */
   energy: { wh: 0, mah: 0, lastX: null },
+
+  /**
+   * 当前数据实际的标称采样间隔（毫秒），不持久化。
+   *
+   * 能量积分的空档阈值由它推导，所以原生流取设备回报的 rate_ms、导入取 CSV 的
+   * SampTime；两者都不知道时为 null，退回 `settings.sampleRate`。刻意不放进
+   * `settings`，导入历史文件才不会改写用户的采样率设置。
+   * @type {number|null}
+   */
+  dataIntervalMs: null,
 
   /**
    * 主图 X 窗会话态（不持久化）。

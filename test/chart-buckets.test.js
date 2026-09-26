@@ -7,6 +7,7 @@ import {
   firstIndexAtOrAfter,
   nearestIndex,
   SeriesBuckets,
+  stripePpb,
 } from '../src/chart-buckets.js';
 
 test('bucketCap is at least 64 and scales with width', () => {
@@ -77,18 +78,35 @@ test('rebuild then appendThrough only folds new tail samples', () => {
   assert.ok(buckets.list.length >= before);
 });
 
-test('covers reports whether a rebuilt window contains a range', () => {
-  const buckets = new SeriesBuckets();
-  assert.equal(buckets.covers(0, 0), true);
-  assert.equal(buckets.covers(0, 1), false);
+test('stripePpb is the density both rebuild and the reuse check agree on', () => {
+  assert.equal(stripePpb(1, 64), 1);
+  assert.equal(stripePpb(1000, 64), 16);
+  // cap 低于 BUCKET_MIN 时按 64 算；调用方若自己算一遍就会与桶内实际密度不一致。
+  assert.equal(stripePpb(1000, 8), stripePpb(1000, BUCKET_MIN));
 
-  const xs = Float64Array.from({ length: 20 }, (_, i) => i);
-  const ys = Float64Array.from({ length: 20 }, (_, i) => i);
-  buckets.rebuild(xs, channels(xs, ys), 4, 16, 32);
-  assert.equal(buckets.covers(4, 16), true);
-  assert.equal(buckets.covers(6, 12), true);
-  assert.equal(buckets.covers(0, 16), false);
-  assert.equal(buckets.covers(4, 20), false);
+  const n = 1000;
+  const xs = Float64Array.from({ length: n }, (_, i) => i);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, xs), 0, n, 8);
+  assert.equal(buckets.ppb, stripePpb(n, 8));
+});
+
+test('rebuild leaves merge headroom so an appended sample cannot halve resolution', () => {
+  // 条带数正好等于 cap 的窗口：旧实现里 cap 原样留着，落一个样本就 mergeDown，
+  // 画面会在没人操作时自己变稀一档。
+  const n = 128 * 64;
+  const xs = Float64Array.from({ length: n }, (_, i) => i);
+  const ys = Float64Array.from({ length: n }, (_, i) => i);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, ys), 0, n, 64);
+  assert.equal(buckets.list.length, 64);
+  const ppb = buckets.ppb;
+  const zeros = new Array(8).fill(0);
+  buckets.pushSample(n, zeros);
+  buckets.pushSample(n + 1, zeros);
+  assert.equal(buckets.ppb, ppb, '追加样本不得改变条带宽度');
+  // 第二个样本折进新建的半空桶，所以只多出一个桶，而不是整表腰斩成 33。
+  assert.equal(buckets.list.length, 65);
 });
 
 test('rebuild folds a window in one pass and stays within cap', () => {

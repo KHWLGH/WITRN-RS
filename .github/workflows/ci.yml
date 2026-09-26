@@ -24,6 +24,12 @@ jobs:
       - name: Install JavaScript tooling
         run: npm ci
 
+      # frontendDist points at out/, which tauri-codegen embeds at macro-expansion time. Without
+      # it `generate_context!` fails inside every cargo invocation, including the Rust steps below
+      # -- so this is a cargo prerequisite, not a frontend step.
+      - name: Build the frontend distribution
+        run: npm run build
+
       - name: Test JavaScript pure logic
         run: npm test
 
@@ -74,6 +80,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # cargo cannot even expand here without out/: tauri-codegen embeds frontendDist at compile
+      # time, so the Rust-only jobs still need the Node build step.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build the frontend distribution
+        run: npm ci && npm run build
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -121,3 +137,114 @@ jobs:
             cargo test $combo
             echo "::endgroup::"
           done
+
+  # Two kinds of check, split by whether they can lie.
+  #
+  # Deterministic and therefore hard-gated: the shipped shape (byte counts, request counts,
+  # unreferenced assets that tauri-codegen would embed anyway) and the structural baseline check
+  # (input fingerprints, gated-metric set, run/pass counts). Neither reads a duration, so neither
+  # can be flapped by a noisy neighbour on a shared runner.
+  #
+  # Timing is reported, not gated: measured on one host, three back-to-back runs of UNCHANGED code
+  # spread from 1.12x to 1.50x across every gated op, and a single-pass verdict produced a false
+  # regression at adjusted x1.20 that did not repeat. bench:core --compare already defends itself
+  # against that (drift normalisation + 3-pass corroboration) but the margin is not yet known on
+  # runner hardware, so it reports for now. Flip the continue-on-error off only once it has been
+  # observed quiet, and keep --verify-baseline in `validate` so a hand-edited baseline stays red.
+  perf-shape:
+    name: Perf gate (deterministic shape + timing report)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JavaScript tooling
+        run: npm ci
+
+      - name: Shipped shape assertions
+        run: |
+          npm run build
+          node bench/packaging.mjs
+
+      - name: Verify the committed baseline still describes this bench
+        run: node bench/core.mjs --verify-baseline --output bench/results/verify.json
+
+      - name: Algorithm timings (report only)
+        continue-on-error: true
+        # stderr goes into the summary on purpose. `2>/dev/null` here once hid the only message that
+        # explains a missing/invalid baseline ("找不到 ... 先用 --baseline 生成它"), so the step
+        # produced an empty summary and looked like "nothing to report" instead of "did not run".
+        run: |
+          node bench/core.mjs --compare --output bench/results/core-ci.json 2>&1 \
+            | tee "$GITHUB_STEP_SUMMARY"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install HID dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo bench (report only)
+        continue-on-error: true
+        timeout-minutes: 20
+        # Report-only, and not promotable to a gate as measured: three runs of an UNCHANGED tree at
+        # these settings (3s measurement, 30 samples) put decode/general_sample at +11.7% "regressed"
+        # and then -2.5% "improved", and selection/offer_select_retain at +8.4% then +19.9% -- all
+        # with criterion reporting p < 0.05. Its significance test covers sampling within a run, not
+        # host state, so the sign flips. See CHANGELOG for the same numbers.
+        run: |
+          cargo bench -p witrn-rs --bench stream -- --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+            2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: bench/results/
+          if-no-files-found: ignore
+
+  # bench:ui's *timings* are not gateable on shared runners (headful Edge + CDP round trips), but
+  # its hard assertions already are, and they are the ones that catch real data corruption: SHA-256
+  # over all eleven columns, lastSeq == count, energy integration, a concurrent CSV export
+  # round-trip, and zero runtime exceptions. Gate on those, publish the timings.
+  ui-integrity:
+    name: UI integrity assertions (Windows, headful Edge)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JavaScript tooling
+        run: npm ci
+
+      - name: Frontend distribution builds
+        run: npm run build
+
+      - name: Sustained-run integrity assertions
+        timeout-minutes: 20
+        # --shipped-csp serves the app's real Content-Security-Policy instead of the harness's
+        # permissive one, so this also gates CSP regressions. Strictly dominates the loose mode:
+        # the fixture stub is a same-origin served file, so `script-src 'self'` still allows it,
+        # and a blocked icon mask would otherwise fail silently with no request and no exception.
+        run: >-
+          node bench/ui-runner.mjs --duration 20 --sizes 10000 --emit-window-ms 40 --shipped-csp
+          --output bench/results/ui-ci.json
+
+      - name: Shipped artifact boots (out/, not src/)
+        timeout-minutes: 10
+        # Everything above serves raw src/, so a broken build-dist.mjs -- a mis-rewritten url(), a
+        # stylesheet that never made it into the bundle -- used to pass CI and ship a blank icon.
+        # This loads out/index.html and asserts 1 stylesheet, its rule count, and that every CSS
+        # url() it declares resolves over HTTP. Timings here are not comparable to the src run.
+        run: >-
+          node bench/ui-runner.mjs --dist out --shipped-csp --sizes 10000 --runs 3 --warmup 1
+          --duration 3 --output bench/results/ui-dist.json

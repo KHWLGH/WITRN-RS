@@ -32,7 +32,7 @@ export function createMenu(trigger, items) {
     btn.setAttribute('role', 'menuitem');
     if (item.icon) {
       const icon = document.createElement('i');
-      const name = item.icon.startsWith('fi-') ? item.icon.slice(3) : item.icon.replace(/^codicon-/, '');
+      const name = item.icon.replace(/^fi-/, '');
       icon.className = `fi fi-${name}`;
       icon.setAttribute('aria-hidden', 'true');
       btn.appendChild(icon);

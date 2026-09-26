@@ -16,13 +16,25 @@ license = "GPL-3.0-only"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "witrn_rs_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only. staticlib + cdylib are the mobile link forms, and no gen/android or gen/apple
+# scaffolding exists, no mobile target is installed, and main.rs only ever calls
+# witrn_rs_lib::run(). Measured on this host: a lib-only `cargo build` relink 4.35s as rlib vs
+# 6.34s with all three (the first build after switching to three costs ~19s while the extra
+# link forms are built cold). Modest, but it is on the daily path and buys nothing here.
+# Revisit if mobile ever becomes real.
+crate-type = ["rlib"]
+
+# criterion drives its own harness; without this cargo would also try to build it as a
+# libtest bench and reject criterion_main.
+[[bench]]
+name = "stream"
+harness = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
 hidapi.workspace = true
@@ -31,6 +43,12 @@ tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+window-vibrancy = "0.6"
+# Set the process-wide policy once during hidapi initialization, before any opens.
+hidapi = { workspace = true, features = ["macos-shared-device"] }
 
 [target.'cfg(windows)'.dependencies]
 window-vibrancy = "0.6"
@@ -41,3 +59,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+criterion = "0.5"

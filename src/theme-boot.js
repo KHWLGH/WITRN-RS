@@ -25,4 +25,21 @@
     'data-os',
     ua.includes('Windows') ? 'windows' : ua.includes('Mac OS') ? 'macos' : 'linux',
   );
+
+  // 与 window-style.js 的归一化规则及镜像键保持一致；异步 LazyStore 最终覆盖。
+  let windowStyle = 'auto';
+  try {
+    const stored = localStorage.getItem('witrn-window-style');
+    if (stored === 'windows' || stored === 'macos') windowStyle = stored;
+  } catch {
+    /* 镜像不可用时跟随真实平台。 */
+  }
+  document.documentElement.setAttribute(
+    'data-window-style',
+    windowStyle === 'auto'
+      ? document.documentElement.getAttribute('data-os') === 'macos'
+        ? 'macos'
+        : 'windows'
+      : windowStyle,
+  );
 })();

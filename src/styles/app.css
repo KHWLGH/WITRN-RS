@@ -31,8 +31,8 @@ html[data-ui-scale-css] .app-shell {
 }
 
 /* 无边框窗口在 Linux/macOS 没有 shadow 装饰，加 1px 描边补偿轮廓 */
-:root[data-os="linux"]:not(.is-maximized) .app-shell,
-:root[data-os="macos"]:not(.is-maximized) .app-shell {
+:root[data-os="linux"]:not(.is-maximized):not(.is-fullscreen) .app-shell,
+:root[data-os="macos"]:not(.is-maximized):not(.is-fullscreen) .app-shell {
   border: 1px solid var(--stroke-divider);
 }
 
@@ -48,9 +48,18 @@ html[data-ui-scale-css] .app-shell {
   flex-shrink: 0;
 }
 
-/* Windows：右上角给 decorum 注入的窗口按钮留出空间 */
+/* decorum 固定定位，按风格预留对应一侧；自绘按钮通过 flex 自行占位。 */
 :root[data-os="windows"] .titlebar {
-  padding-right: 162px;
+  padding-right: calc(3 * var(--window-control-width));
+}
+
+:root[data-os="windows"][data-window-style="macos"] .titlebar {
+  padding-left: var(--window-mac-controls-width);
+}
+
+/* 窗口控制挪到左侧后设置钮成为最右一项，补上与之对称的右内缩。 */
+:root[data-window-style="macos"] .titlebar {
+  padding-right: var(--window-mac-control-inset);
 }
 
 .titlebar-tabs {
@@ -141,16 +150,24 @@ html[data-ui-scale-css] .app-shell {
   max-width: 240px;
 }
 
-/* ── 窗口控制按钮（Linux 自绘；Windows 由 decorum 注入并被下方规则重绘） ── */
+/* ── 窗口按钮：同一批节点切换皮肤，真实 OS 仅决定节点来源 ── */
 
 .titlebar-controls {
   display: flex;
   align-items: stretch;
+  flex-shrink: 0;
+  width: calc(3 * var(--window-control-width));
+}
+
+/* Windows 的自绘占位为空，真正按钮仍为 decorum 原节点。 */
+:root[data-os="windows"] .titlebar-controls {
+  display: none;
 }
 
 .wc-btn {
-  width: 54px;
-  flex: 0 0 54px;
+  width: var(--window-control-width);
+  flex: 0 0 var(--window-control-width);
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -184,12 +201,10 @@ html[data-ui-scale-css] .app-shell {
   font-size: 17px;
 }
 
-/* decorum 注入的标题栏（仅 Windows）：约束到右上角按钮区，拖拽由我们自己的
-   .titlebar-drag 承担；按钮观感对齐 .wc-btn */
 :root[data-os="windows"] div[data-tauri-decorum-tb] {
   left: auto !important;
   right: 0 !important;
-  width: auto !important;
+  width: calc(3 * var(--window-control-width)) !important;
   height: var(--titlebar-height) !important;
   background: transparent !important;
   display: flex !important;
@@ -197,9 +212,14 @@ html[data-ui-scale-css] .app-shell {
   pointer-events: none !important;
 }
 
+/* 拖拽仍由标题栏负责，不让插件的空白填充项挤占按钮。 */
+:root[data-os="windows"] [data-tauri-decorum-tb] > [data-tauri-drag-region] {
+  display: none !important;
+}
+
 :root[data-os="windows"] .decorum-tb-btn {
-  width: 54px !important;
-  flex: 0 0 54px !important;
+  width: var(--window-control-width) !important;
+  flex: 0 0 var(--window-control-width) !important;
   height: 100% !important;
   border: none !important;
   background: transparent !important;
@@ -225,15 +245,105 @@ html[data-ui-scale-css] .app-shell {
   color: var(--text-on-danger) !important;
 }
 
-/* ── Linux 边缘调整大小热区（windowcontrols.js 创建；最大化时隐藏） ── */
+:root :is(.wc-btn, .decorum-tb-btn):focus-visible {
+  outline: 2px solid var(--stroke-focus-outer) !important;
+  outline-offset: -3px;
+}
+
+/* macOS 风格：左侧红黄绿，24px 命中区包住 12px 色点；非原生交通灯。 */
+:root[data-window-style="macos"] .titlebar-controls {
+  order: -1;
+  width: var(--window-mac-controls-width);
+  padding: 0 var(--window-mac-control-inset);
+  align-items: center;
+  justify-content: center;
+}
+
+:root[data-window-style="macos"] div[data-tauri-decorum-tb] {
+  left: 0 !important;
+  right: auto !important;
+  width: var(--window-mac-controls-width) !important;
+  padding: 0 var(--window-mac-control-inset) !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box;
+}
+
+:root[data-window-style="macos"] #decorum-tb-close:hover,
+:root[data-window-style="macos"] :is(.wc-btn, #decorum-tb-minimize, #decorum-tb-maximize, #decorum-tb-close) {
+  position: relative;
+  width: var(--window-mac-control-target) !important;
+  flex: 0 0 var(--window-mac-control-target) !important;
+  height: var(--window-mac-control-target) !important;
+  border-radius: var(--radius-full) !important;
+  background: transparent !important;
+  color: var(--window-control-symbol) !important;
+  /* decorum 会往按钮里写 \uE9xx 私用区文本并注入 font-size:10px；
+     交通灯皮肤下这颗字形按黑色绘制，10px 方框半对角线 7.07px > 色点半径 6px，四角会戳出圆外。
+     置零只压掉按钮自身文本，.fi 用的是自己的显式 font-size。 */
+  font-size: 0;
+}
+
+:root[data-window-style="macos"] :is(.wc-btn-close, #decorum-tb-close) {
+  order: -3;
+  --window-control-dot-fill: var(--window-close-fill);
+}
+
+:root[data-window-style="macos"] :is(.wc-btn-minimize, #decorum-tb-minimize) {
+  order: -2;
+  --window-control-dot-fill: var(--window-minimize-fill);
+}
+
+:root[data-window-style="macos"] :is(.wc-btn-maximize, #decorum-tb-maximize) {
+  order: -1;
+  --window-control-dot-fill: var(--window-maximize-fill);
+}
+
+:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn)::before {
+  content: "";
+  position: absolute;
+  /* 四边归零 + auto 外边距居中：abspos flex 子项的静态位置规则 WebKit 并不遵守。 */
+  inset: 0;
+  margin: auto;
+  width: var(--window-mac-control-dot);
+  height: var(--window-mac-control-dot);
+  border-radius: var(--radius-full);
+  background: var(--window-control-dot-fill);
+  box-shadow: inset 0 0 0 1px var(--black-alpha-20);
+  pointer-events: none;
+}
+
+:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):active::before {
+  filter: brightness(0.88);
+}
+
+:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn) .fi {
+  position: relative;
+  font-size: var(--window-mac-control-symbol);
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root[data-window-style="macos"] :is(.titlebar-controls, [data-tauri-decorum-tb]):hover .fi,
+:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):focus-visible .fi {
+  opacity: 1;
+}
+
+/* ── Linux 边缘调整大小热区（最大化 / 全屏时隐藏） ── */
 
 .resize-zone {
   position: fixed;
   z-index: 4000;
 }
 
-:root.is-maximized .resize-zone {
+:root.is-maximized .resize-zone,
+:root.is-fullscreen .resize-zone,
+:root[data-os="macos"] .resize-zone {
   display: none;
+}
+
+:root.is-fullscreen .app-shell {
+  border: none;
 }
 
 .resize-north {

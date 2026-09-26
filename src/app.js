@@ -16,7 +16,6 @@ import {
 import { panPermilleWindow } from './chart-window.js';
 import { exportCSV, importCSV } from './csv.js';
 import {
-  addDataPoint,
   adoptWindowFromPermille,
   clearAndResetStats,
   refreshRecordButton,
@@ -31,7 +30,14 @@ import {
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
-import { connectDevice, disconnectDevice, onDeviceSelect, refreshDeviceList } from './device.js';
+import {
+  connectDevice,
+  disconnectDevice,
+  initializeDeviceStream,
+  onDeviceSelect,
+  refreshDeviceList,
+  shutdownDeviceStream,
+} from './device.js';
 import { enhanceSelects } from './dropdown.js';
 import {
   applyRealtimePanelWidth,
@@ -70,6 +76,7 @@ import {
 } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
 import { initWindowMaterial, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
+import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -80,37 +87,63 @@ let __isClosingWindow = false;
 let __closeConfirmOpen = false;
 
 /**
- * 退出确认。确认后由后端 `shutdown` 停止后台任务并 destroy 主窗口。
+ * 退出流程唯一实现：确认 → 保存 → 排空并 ACK 末包 → 后端 destroy。
  *
- * destroy 不会重新派发 close-requested，因此这里既不需要注销监听器，也不需要备用关闭路径。
- * 自定义标题栏的 ✕ 按钮调用 `appWindow.close()`（capability 已授予 allow-close），
- * 它只会触发本监听器；真正的销毁动作仍走后端 `shutdown`，以保证先停 HID/温度线程。
+ * destroy 不会重新派发 close-requested，因此既不需要注销监听器，也不需要备用关闭路径。
+ * 自定义标题栏 ✕、⌘W/⌘Q 和 macOS 原生菜单退出都会汇聚到这里：
+ * - 窗口关闭 / 快捷键走 onCloseRequested（先 preventDefault）；
+ * - 原生退出（菜单 Quit 等不经窗口的路径）由 Rust 拦下首次 ExitRequested 后
+ *   派发 `app-exit-requested`，同样进入本函数，末包校验通过后 shutdown 置位
+ *   shutting_down，二次 ExitRequested 才真正放行。
  */
+async function confirmAndExit() {
+  // 重复触发时不再叠加弹窗：确认框是模态的，焦点已在其中
+  if (__isClosingWindow || __closeConfirmOpen) return;
+
+  __closeConfirmOpen = true;
+  const confirmed = await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' });
+  __closeConfirmOpen = false;
+  if (!confirmed) return;
+  __isClosingWindow = true;
+
+  // 设置里可能还压着一次未触发的防抖保存；saveSettings 自身已吞掉写盘异常。
+  await saveSettings();
+
+  try {
+    await shutdownDeviceStream();
+  } catch (e) {
+    // 退出失败必须复位，否则窗口再也关不掉；只写 console 的话用户看到的是「点了没反应」。
+    console.error('退出失败:', e);
+    __isClosingWindow = false;
+    toast.error(`退出失败: ${e}`);
+  }
+}
+
 async function setupCloseConfirm() {
   const appWindow = window.__TAURI__.window.getCurrentWindow();
 
-  await appWindow.onCloseRequested(async (/** @type {any} */ event) => {
+  await appWindow.onCloseRequested((/** @type {any} */ event) => {
     event.preventDefault();
-    // 重复点关闭时不再叠加弹窗：确认框是模态的，焦点已在其中
-    if (__isClosingWindow || __closeConfirmOpen) return;
-
-    __closeConfirmOpen = true;
-    const confirmed = await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' });
-    __closeConfirmOpen = false;
-    if (!confirmed) return;
-    __isClosingWindow = true;
-
-    // 设置里可能还压着一次未触发的防抖保存；saveSettings 自身已吞掉写盘异常。
-    await saveSettings();
-
-    try {
-      await invoke('shutdown');
-    } catch (e) {
-      // 退出失败必须复位，否则窗口再也关不掉。
-      console.error('退出失败:', e);
-      __isClosingWindow = false;
-    }
+    void confirmAndExit();
   });
+  await listen('app-exit-requested', () => {
+    void confirmAndExit();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (document.documentElement.dataset.os !== 'macos' || !event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key.toLowerCase() !== 'w' && event.key.toLowerCase() !== 'q') return;
+    event.preventDefault();
+    void appWindow.close().catch(console.error);
+  });
+}
+
+/**
+ * 手动停止记录：UI 立即同步落定，读线程排空屏障在后台完成。
+ * stopRecording 现返回可拒绝的屏障 Promise（暂停边界超时 / 代次切换），
+ * 但停止动作本身不应向点击处冒泡为未处理的 rejection，这里统一吞掉并记录。
+ */
+function stopRecordingSafe() {
+  void stopRecording().catch((error) => console.error('停止记录屏障失败:', error));
 }
 
 // ─── Chart toggles ───────────────────────────────────────────────────────────
@@ -217,7 +250,7 @@ function setupControls() {
    * @param {number|string} nextStart
    * @param {number|string} nextEnd
    * @param {'start'|'end'} leader
-   * @param {boolean} [preview=false] 手柄拖动中：只改 X 窗，不刷范围统计、不强制重建显示桶
+   * @param {boolean} [preview=false] 手柄拖动中：走 rAF 节流刷新，不立即提交绘制
    */
   function applyRangeValues(nextStart, nextEnd, leader, preview = false) {
     let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
@@ -236,11 +269,12 @@ function setupControls() {
 
     updateSliderFill();
     updateChartRange();
+    // 拖动中曲线已经换窗，数字不能停在旧窗口；scheduleStatsUpdate 自带 250ms 节流。
+    if (state.settings.statsRange) scheduleStatsUpdate();
     if (preview) {
       scheduleChartUpdate();
       return;
     }
-    if (state.settings.statsRange) scheduleStatsUpdate();
     updateCharts();
   }
 
@@ -408,12 +442,12 @@ function setupControls() {
   const deviceSelect = document.getElementById('device-select');
   if (deviceSelect) deviceSelect.addEventListener('change', onDeviceSelect);
 
-  btn('btn-record-toggle', () => (state.isRecording ? stopRecording() : startRecording()));
+  btn('btn-record-toggle', () => (state.isRecording ? stopRecordingSafe() : void startRecording()));
 
   const statusRecord = document.getElementById('status-record');
   const toggleRecording = () => {
     if (!state.isConnected) return;
-    if (state.isRecording) stopRecording();
+    if (state.isRecording) stopRecordingSafe();
     else void startRecording();
   };
   statusRecord?.addEventListener('click', () => toggleRecording());
@@ -425,7 +459,7 @@ function setupControls() {
 
   // PD 视图在「跟随记录」开启时需要触发这几个监控侧动作。用注入而非让 pd.js
   // 直接 import data.js：那条边会把 chart.js / temperature.js 拖进 PD 的单元测试环境。
-  state.__toggleRecording = () => (state.isRecording ? stopRecording() : startRecording());
+  state.__toggleRecording = () => (state.isRecording ? stopRecordingSafe() : startRecording());
   state.__clearMonitorData = () => clearAndResetStats();
   state.__markPdDisconnect = () => markPdDisconnect();
 
@@ -466,10 +500,10 @@ function setupControls() {
 
   btn('btn-reset-settings', async () => {
     const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
-    if (yes) {
-      await resetSettings();
-      applyPdSplitLayout();
-    }
+    if (!yes) return;
+    // 只有真的落盘才算「已恢复默认」；写盘失败由 settings.js 说明，这里不再报成功。
+    if (await resetSettings()) toast.success('已恢复默认设置');
+    applyPdSplitLayout();
   });
 
   // 主题（设置页 外观 卡）
@@ -491,6 +525,16 @@ function setupControls() {
   themeSystem?.addEventListener('change', () => {
     if (themeSystem.checked) applyThemeChoice('system');
   });
+
+  // 窗口风格只更新 CSS 属性；动作始终由真实 OS 决定。
+  for (const choice of ['auto', 'windows', 'macos']) {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`window-style-${choice}`));
+    input?.addEventListener('change', () => {
+      if (!input.checked) return;
+      state.settings.windowStyle = applyWindowStyle(choice);
+      debouncedSaveSettings();
+    });
+  }
 
   // 界面缩放（设置页 外观 卡）
   // 拖动只改读数：整页缩放会改滑条几何，原生 range 再跟指针就会抽搐。
@@ -699,6 +743,8 @@ function initMonitorSplitter() {
 
   const endDrag = () => {
     if (!state.__layoutResizing) return;
+    // 先释放再提交：图表的 ResizeObserver 只认这个标志，晚一行清掉就可能永久不再定尺。
+    state.__layoutResizing = false;
     pointer = null;
     if (raf) {
       cancelAnimationFrame(raf);
@@ -713,7 +759,6 @@ function initMonitorSplitter() {
       applyRealtimePanelWidth(visual);
       debouncedSaveSettings();
     }
-    state.__layoutResizing = false;
     handleMonitorShown();
   };
 
@@ -735,6 +780,8 @@ function initMonitorSplitter() {
   });
   handle.addEventListener('pointerup', endDrag);
   handle.addEventListener('pointercancel', endDrag);
+  // 捕获被第二个指针或其他手柄抢走时浏览器只发这个，与 :337 / :407 两个时间轴手柄保持一致。
+  handle.addEventListener('lostpointercapture', endDrag);
   handle.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
@@ -790,6 +837,7 @@ function setupShell() {
   wireFlyout('btn-flyout-autopause', 'flyout-autopause');
   wireFlyout('btn-flyout-temp', 'flyout-temp');
 
+  applyWindowStyle(state.settings.windowStyle);
   initWindowControls();
 
   // 恢复上次的工作区（默认监控）
@@ -799,9 +847,7 @@ function setupShell() {
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 async function setupEventListener() {
-  await listen('device-data', (/** @type {{ payload: import('./state.js').DeviceData }} */ event) => {
-    addDataPoint(event.payload);
-  });
+  await initializeDeviceStream();
 
   // PD 报文启动即监听（插拔瞬间的握手最有价值，不等用户打开 PD Tab）
   await listen('pd-data-batch', (/** @type {{ payload: unknown }} */ event) => {
@@ -833,12 +879,15 @@ async function setupEventListener() {
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
-  // 平台标记（CSS / windowcontrols 依据它分发 Windows decorum 或 Linux 自绘路径）
-  const ua = navigator.userAgent;
-  document.documentElement.setAttribute(
-    'data-os',
-    ua.includes('Windows') ? 'windows' : ua.includes('Mac OS') ? 'macos' : 'linux',
-  );
+  // theme-boot 已按 UA 同步写入 data-os；这里用原生探测覆盖为权威值。
+  // 探测失败不能阻断后续初始化（否则关闭确认、设置加载全部跳过），回退到 UA 值。
+  try {
+    const platform = await invoke('get_runtime_platform');
+    window.__WITRN_BOOT__?.mark('platformProbed');
+    if (platform) document.documentElement.setAttribute('data-os', platform);
+  } catch (error) {
+    console.error('运行时平台探测失败，沿用首屏 UA 判定:', error);
+  }
 
   // 禁用右键菜单
   document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -864,6 +913,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await setupEventListener();
   await refreshDeviceList();
+  window.__WITRN_BOOT__?.mark('appReady');
 
   updateTempUIVisibility();
 });

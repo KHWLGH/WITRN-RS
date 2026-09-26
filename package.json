@@ -7,10 +7,22 @@
     "test": "node --test",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "lint": "biome check --error-on-warnings .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "build": "node scripts/build-dist.mjs",
+    "build:dist": "node scripts/build-dist.mjs --minify",
+    "bench:core": "node bench/core.mjs",
+    "bench:gate": "node bench/core.mjs --compare",
+    "bench:extrema": "node bench/extrema.mjs",
+    "bench:ui": "node bench/ui-runner.mjs",
+    "bench:startup": "node bench/startup.mjs",
+    "bench:packaging": "node bench/packaging.mjs",
+    "accept:hardware": "node scripts/hardware-acceptance.mjs",
+    "verify:hardware": "node scripts/verify-hardware-receipt.mjs",
+    "check:release-tag": "node scripts/check-release-tag.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.4",
+    "esbuild": "^0.25.10",
     "typescript": "^5.8.2"
   }
 }

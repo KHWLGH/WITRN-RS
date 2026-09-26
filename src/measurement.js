@@ -36,8 +36,59 @@ export function niceCeiling(value) {
   return nice * mag;
 }
 
-/** 相邻采样点超过该秒数视为中断（休眠 / NTP / 漏采），不把空档积进 Wh/mAh。 */
+/** 相邻采样点超过该秒数视为中断（休眠 / NTP / 漏采），不把空档积进 Wh/mAh。
+ * 这是**下限**：慢采样档必须按标称间隔放宽，否则每一步都会被当成空档，能量恒为 0。 */
 export const MAX_ENERGY_STEP_S = 2;
+
+/** 空档阈值相对标称采样间隔的倍数，与 {@link nextRecordingX} 放行 x 轴的倍数保持一致，
+ * 否则会出现「点被画进 x 轴、却被积分器拒收」的口径分裂。 */
+export const ENERGY_STEP_INTERVAL_MULTIPLIER = 8;
+
+/** `set_sample_rate` 实际接受的区间，用于夹住从数据里反推出的标称间隔。 */
+const SAMPLE_RATE_BOUNDS_MS = [10, 60000];
+
+/**
+ * 标称采样间隔对应的空档阈值（秒）。未知或非法间隔回落到 {@link MAX_ENERGY_STEP_S}，
+ * 即保持旧的绝对 2 秒口径，绝不因此关闭守卫。
+ * @param {number|null|undefined} intervalMs
+ * @returns {number}
+ */
+export function energyMaxStepS(intervalMs) {
+  const seconds = Number(intervalMs) / 1000;
+  if (!Number.isFinite(seconds) || seconds <= 0) return MAX_ENERGY_STEP_S;
+  return Math.max(MAX_ENERGY_STEP_S, ENERGY_STEP_INTERVAL_MULTIPLIER * seconds);
+}
+
+/**
+ * 从相对秒序列反推标称采样间隔（毫秒）。取前若干个正步长的中位数，
+ * 这样休眠空档与乱序/缺失点都不会把估计值拉高。
+ * @param {ArrayLike<number>} xSeconds
+ * @returns {number|null} 没有可用步长时为 null；否则夹到设备接受的 10–60000 ms
+ */
+export function estimateIntervalMsFromX(xSeconds) {
+  const steps = [];
+  for (let i = 1; i < xSeconds.length && steps.length < 200; i++) {
+    const prev = xSeconds[i - 1];
+    const delta = xSeconds[i] - prev;
+    if (Number.isFinite(delta) && delta > 0) steps.push(delta * 1000);
+  }
+  if (steps.length === 0) return null;
+  steps.sort((a, b) => a - b);
+  const median = steps[(steps.length - 1) >> 1];
+  return Math.min(SAMPLE_RATE_BOUNDS_MS[1], Math.max(SAMPLE_RATE_BOUNDS_MS[0], median));
+}
+
+/** Native monotonic deltas retain real gaps; the existing integration guard skips >2s.
+ * Wall time is reconstructed from one connection anchor, not batch arrival or NTP.
+ * @param {import('./device-stream.js').StreamSample} sample
+ * @param {number} baseSeconds
+ */
+export function streamSampleTime(sample, baseSeconds) {
+  return {
+    wallMs: sample.wall_anchor_ms + sample.received_us / 1000,
+    seconds: baseSeconds + Math.max(0, (sample.received_us - sample.segment_start_us) / 1_000_000),
+  };
+}
 
 /**
  * 把下一点的相对秒限制在采样间隔附近：时钟回拨时前进一个间隔，
@@ -56,54 +107,74 @@ export function nextRecordingX(prevX, relSeconds, sampleRateMs) {
   return relSeconds;
 }
 
-/**
- * 按相邻采样点积分能量和容量。录制会话边界由调用方通过分段重置时间基线保证；
- * 这里跳过倒序、非有限、缺失值，以及超过 {@link MAX_ENERGY_STEP_S} 的空档。
- * @param {number[]} timestamps 毫秒时间戳
- * @param {number[]} current
- * @param {number[]} power
- * @returns {{ wh: number, mah: number }}
- */
-export function calculateEnergy(timestamps, current, power) {
-  return integrateEnergy(timestamps, current, power, 3600000, 0, timestamps.length - 1);
+/** @param {ArrayLike<number>|null} segments @param {number} index */
+export function isRecordingBoundary(segments, index) {
+  return segments != null && Number.isFinite(segments[index]) && segments[index] !== segments[index - 1];
 }
 
 /**
- * 在索引区间 [startIndex, endIndex] 上积分能量和容量。
- * 时间轴取相对秒（chartSeries.x）而非挂钟时间戳：相对秒不含录制暂停留下的空档，
- * 与实时累计口径一致；用时间戳会把暂停时长当作持续放电计入。
- * @param {number[]} seconds 相对秒序列
- * @param {number[]} current
- * @param {number[]} power
- * @param {number} startIndex
- * @param {number} endIndex
- * @returns {{ wh: number, mah: number }}
+ * @param {ArrayLike<number>} timestamps 毫秒时间戳
+ * @param {ArrayLike<number>} current
+ * @param {ArrayLike<number>} power
+ * @param {ArrayLike<number>|null} [segments=null]
+ * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  */
-export function calculateEnergyInRange(seconds, current, power, startIndex, endIndex) {
-  return integrateEnergy(seconds, current, power, 3600, startIndex, endIndex);
+export function calculateEnergy(timestamps, current, power, segments = null, intervalMs = null) {
+  return integrateEnergy(
+    timestamps,
+    current,
+    power,
+    3600000,
+    0,
+    timestamps.length - 1,
+    segments,
+    energyMaxStepS(intervalMs),
+  );
 }
 
 /**
- * @param {number[]} times
- * @param {number[]} current
- * @param {number[]} power
- * @param {number} perHour 时间轴单位换算到小时的除数
+ * @param {ArrayLike<number>} seconds 相对秒序列
+ * @param {ArrayLike<number>} current
+ * @param {ArrayLike<number>} power
  * @param {number} startIndex
  * @param {number} endIndex
- * @returns {{ wh: number, mah: number }}
+ * @param {ArrayLike<number>|null} [segments=null]
+ * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  */
-function integrateEnergy(times, current, power, perHour, startIndex, endIndex) {
+export function calculateEnergyInRange(
+  seconds,
+  current,
+  power,
+  startIndex,
+  endIndex,
+  segments = null,
+  intervalMs = null,
+) {
+  return integrateEnergy(seconds, current, power, 3600, startIndex, endIndex, segments, energyMaxStepS(intervalMs));
+}
+
+/**
+ * @param {ArrayLike<number>} times
+ * @param {ArrayLike<number>} current
+ * @param {ArrayLike<number>} power
+ * @param {number} perHour
+ * @param {number} startIndex
+ * @param {number} endIndex
+ * @param {ArrayLike<number>|null} segments
+ * @param {number} maxStepS 空档阈值（秒）
+ */
+function integrateEnergy(times, current, power, perHour, startIndex, endIndex, segments, maxStepS) {
   let wh = 0;
   let mah = 0;
-  // 区间首点只提供积分起点，第一段区间从 startIndex+1 开始。
   const from = Math.max(0, startIndex) + 1;
   const to = Math.min(endIndex, times.length - 1);
   for (let i = from; i <= to; i++) {
+    if (isRecordingBoundary(segments, i)) continue;
     const dt = (times[i] - times[i - 1]) / perHour;
     const currentValue = Math.abs(current[i]);
     const powerValue = Math.abs(power[i]);
     if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
-    if (dt * 3600 > MAX_ENERGY_STEP_S) continue;
+    if (dt * 3600 > maxStepS) continue;
     wh += powerValue * dt;
     mah += currentValue * 1000 * dt;
   }

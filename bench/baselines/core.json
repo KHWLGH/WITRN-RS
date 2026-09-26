@@ -1,0 +1,85 @@
+{
+  "schema": "witrn-baseline-v1",
+  "bench": "core",
+  "fixture": {
+    "version": "witrn-f64-v1",
+    "seed": 1831565813,
+    "segments": "segments-v1",
+    "layout": "x,timestamps,8 channels; little-endian f64; canonical NaN"
+  },
+  "runs": 20,
+  "warmup": 5,
+  "passes": 3,
+  "sizes": [
+    10000,
+    100000,
+    1000000
+  ],
+  "inputs": {
+    "10000": {
+      "samples": "387a6848f24568130ad51e7ce34f00e4a8e198079691bec598c46947cd3592c1",
+      "segments": "2ce0205240e0f928e92c7c0186d0530dc8dd47dd5b47d60dad02608527e1ebb4"
+    },
+    "100000": {
+      "samples": "882b6a7d1f2c2754c64f2671eef6a52a19018e35c1368d6175e8f49421cf7c60",
+      "segments": "a7f731449d02e6139f7b34da7abf38789aa9ff61a044e549842289c3215f7ab1"
+    },
+    "1000000": {
+      "samples": "811320bca85576a792ea86f912eb823730c1b3c4822f60ed5192516fc78c28fa",
+      "segments": "28362e5e7adfc15d96b4232895e639ebd9fe04e276837b416a5a6b0dcf33aa10"
+    }
+  },
+  "ops": {
+    "F64Col.push.8channels@100000": {
+      "p50": 6.1314,
+      "p95": 10.2136,
+      "repeat": 1
+    },
+    "SeriesBuckets.rebuild.full@100000": {
+      "p50": 5.0888,
+      "p95": 7.3456,
+      "repeat": 1
+    },
+    "SeriesBuckets.flatten.reused@100000": {
+      "p50": 0.00000899658,
+      "p95": 0.0000162415,
+      "repeat": 32768
+    },
+    "integrateEnergy.nullSegments@100000": {
+      "p50": 0.2612,
+      "p95": 0.3088,
+      "repeat": 1
+    },
+    "integrateEnergy.withSegments@100000": {
+      "p50": 0.3305,
+      "p95": 0.3673,
+      "repeat": 1
+    },
+    "F64Col.push.8channels@1000000": {
+      "p50": 55.4958,
+      "p95": 59.3872,
+      "repeat": 1
+    },
+    "SeriesBuckets.rebuild.full@1000000": {
+      "p50": 44.1008,
+      "p95": 49.2378,
+      "repeat": 1
+    },
+    "SeriesBuckets.flatten.reused@1000000": {
+      "p50": 0.00000805054,
+      "p95": 0.0000143402,
+      "repeat": 32768
+    },
+    "integrateEnergy.nullSegments@1000000": {
+      "p50": 2.9095,
+      "p95": 4.5266,
+      "repeat": 1
+    },
+    "integrateEnergy.withSegments@1000000": {
+      "p50": 3.8436,
+      "p95": 5.1601,
+      "repeat": 1
+    }
+  },
+  "provenanceCommit": "fde1f33b665912c2d81ed4fd690030ed097104b0"
+}

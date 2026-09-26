@@ -18,6 +18,7 @@ globalThis.document = {
         disabled: false,
         innerHTML: '',
         title: '',
+        style: {},
         classList: { toggle() {} },
         setAttribute() {},
       });
@@ -118,5 +119,386 @@ test('startRecording is not re-entrant while PD capture is enabling', async () =
   } finally {
     globalThis.window.__TAURI__.core.invoke = invoke;
     stopRecording();
+  }
+});
+
+const { deviceStream } = await import('../src/device-stream.js');
+const { calculateEnergyInRange } = await import('../src/measurement.js');
+const { formatCsvChunks, parseCsv, snapshotCsvColumns } = await import('../src/csv-codec.js');
+const { getRangeStats, updateStatsDisplay } = await import('../src/data.js');
+const frames = new Map();
+let frameId = 0;
+globalThis.requestAnimationFrame = (callback) => {
+  frames.set(++frameId, callback);
+  return frameId;
+};
+globalThis.cancelAnimationFrame = (id) => frames.delete(id);
+let generation = 0;
+let boundary = 0;
+let rejectPause = false;
+
+function openNativeStream() {
+  resetRecordingState();
+  state.settings.sampleRate = 10;
+  state.settings.signedCurrent = true;
+  state.autoPauseSettings.enabled = false;
+  state.energy = { wh: 0, mah: 0, lastX: null };
+  for (const key of ['voltage', 'current', 'power', 'temp']) {
+    state.stats[key] = { min: Infinity, max: -Infinity, sum: 0, count: 0 };
+  }
+  boundary = 0;
+  rejectPause = false;
+  window.__TAURI__.core.invoke = async (command, args) => {
+    if (command === 'set_recording_segment') {
+      if (rejectPause && args.segment === 0) throw new Error('pause rejected');
+      return { generation, after_seq: boundary, segment: args.segment };
+    }
+    if (command === 'drain_device_stream') return { generation, last_seq: deviceStream.lastSeq };
+  };
+  deviceStream.configure({ onError() {}, onEnd() {} });
+  deviceStream.enable();
+  deviceStream.open({ generation: ++generation, wall_anchor_ms: 1704067200000 });
+}
+
+function nativeSample(seq, segment = 1, start = 10000) {
+  return {
+    generation,
+    seq,
+    segment,
+    received_us: seq * 10000,
+    segment_start_us: start,
+    wall_anchor_ms: 1704067200000,
+    rate_ms: 10,
+    voltage: 12 + seq / 7,
+    current: -seq / 13,
+    power: -seq / 11,
+  };
+}
+
+function assertExactEnergy(intervalMs = state.dataIntervalMs ?? state.settings.sampleRate) {
+  const cols = state.chartSeries;
+  const expected = calculateEnergyInRange(
+    cols.x.view(),
+    cols.current.view(),
+    cols.power.view(),
+    0,
+    cols.x.length - 1,
+    cols.recordingSegments.view(),
+    intervalMs,
+  );
+  assert.deepEqual({ wh: state.energy.wh, mah: state.energy.mah }, expected);
+  const range = getRangeStats();
+  assert.deepEqual({ wh: range.wh, mah: range.mah }, expected);
+  const encoded = [
+    ...formatCsvChunks(snapshotCsvColumns(cols, { sampleRate: intervalMs, startTime: 1704067200000 })),
+  ].join('');
+  const decodedFile = parseCsv(encoded, { fallbackStartTime: 0 });
+  const decoded = decodedFile.columns;
+  for (const key of Object.keys(cols)) assert.deepEqual(decoded[key].view(), cols[key].view(), key);
+  assert.deepEqual(
+    calculateEnergyInRange(
+      decoded.x.view(),
+      decoded.current.view(),
+      decoded.power.view(),
+      0,
+      decoded.x.length - 1,
+      decoded.recordingSegments.view(),
+      decodedFile.intervalMs,
+    ),
+    expected,
+  );
+}
+
+test('a 5s preset keeps live, range and CSV-round-trip energy identical', async () => {
+  openNativeStream();
+  state.settings.sampleRate = 5000;
+  /** @param {number} seq @param {number} [extraUs] 额外推进的时钟微秒数，用来造空档 */
+  const slow = (seq, extraUs = 0) => {
+    const sample = nativeSample(seq);
+    sample.rate_ms = 5000;
+    sample.received_us = seq * 5_000_000 + extraUs;
+    return sample;
+  };
+  await startRecording();
+  deviceStream.handleBatch([slow(1), slow(2), slow(3)]);
+  await deviceStream.settle();
+  assert.ok(state.energy.wh > 0, '5 秒档必须积得到自己的节奏，而不是恒为 0');
+  assert.equal(state.dataIntervalMs, 5000);
+  assertExactEnergy(5000);
+
+  // 同一记录段内的 30 分钟空档：x 轴按真实间隔继续，能量把它当休眠跳过
+  const beforeHole = state.energy.wh;
+  deviceStream.handleBatch([slow(4, 1_800_000_000)]);
+  await deviceStream.settle();
+  const x = state.chartSeries.x.view();
+  assert.ok(x[x.length - 1] - x[x.length - 2] > 1800, 'x 轴必须保留真实空档');
+  assert.equal(state.energy.wh, beforeHole, '1800 秒空档不能积进能量');
+  assertExactEnergy(5000);
+  boundary = 4;
+  await stopRecording();
+});
+
+test('native manual pause resolves after retained samples and preserves exact energy across resume', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([nativeSample(1), nativeSample(2)]);
+  boundary = 4;
+  let settled = false;
+  const paused = stopRecording().then(() => {
+    settled = true;
+  });
+  assert.equal(state.isRecording, false);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  deviceStream.handleBatch([nativeSample(3), nativeSample(4), nativeSample(5, 0)]);
+  await paused;
+  assert.equal(state.chartSeries.x.length, 4);
+  assertExactEnergy();
+  boundary = 5;
+  await startRecording();
+  deviceStream.handleBatch([nativeSample(6, 2, 60000), nativeSample(7, 2, 60000)]);
+  assert.deepEqual([...state.chartSeries.recordingSegments.view()], [1, 1, 1, 1, 2, 2]);
+  assertExactEnergy();
+  boundary = 7;
+  await stopRecording();
+  assert.ok(frames.size <= 2, 'sample batches must coalesce instead of queuing one UI callback per point');
+});
+
+test('native auto-pause records the triggering sample but not the rest of its batch', async () => {
+  openNativeStream();
+  await startRecording();
+  state.autoPauseSettings = { enabled: true, basis: 'current', condition: 1, duration: 0, triggerStartTime: null };
+  deviceStream.handleBatch([nativeSample(1), nativeSample(2), nativeSample(3)]);
+  await deviceStream.settle();
+  assert.equal(state.isRecording, false);
+  assert.equal(state.chartSeries.x.length, 1);
+  assert.equal(deviceStream.lastSeq, 3);
+  assertExactEnergy();
+});
+
+test('live energy skips non-finite power/current exactly like the range integrator', async () => {
+  openNativeStream();
+  await startRecording();
+  const bad = nativeSample(2);
+  bad.current = Number.NaN;
+  bad.power = Number.NaN;
+  deviceStream.handleBatch([nativeSample(1), bad, nativeSample(3)]);
+  await deviceStream.settle();
+  assert.ok(Number.isFinite(state.energy.wh), 'a NaN sample must not poison cumulative energy');
+  assert.ok(Number.isFinite(state.energy.mah));
+  assertExactEnergy();
+  boundary = 3;
+  await stopRecording();
+});
+
+test('CSV import waits for the pause boundary and does not replace data if it fails', async () => {
+  const messages = [];
+  window.__TAURI__.dialog = { open: async () => 'C:/记录.csv', save: async () => null, ask: async () => true };
+  window.__TAURI__.fs = {
+    readTextFile: async () => 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),\n00:00:00,5,2,10,\n00:00:01,6,3,18,',
+    writeTextFile: async () => {},
+  };
+  const { toast } = await import('../src/ui/toast.js');
+  const { importCSV } = await import('../src/csv.js');
+  toast.success = (message) => messages.push(['success', message]);
+  toast.error = (message) => messages.push(['error', message]);
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([nativeSample(1)]);
+  const original = state.chartSeries;
+  rejectPause = true;
+  const logError = console.error;
+  console.error = () => {};
+  try {
+    await importCSV();
+  } finally {
+    console.error = logError;
+  }
+  assert.equal(state.chartSeries, original);
+  assert.equal(original.x.length, 1);
+  assert.match(messages.at(-1)[1], /pause rejected/);
+  assert.equal(
+    messages.some(([kind]) => kind === 'success'),
+    false,
+  );
+
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([nativeSample(1)]);
+  const beforeImport = state.chartSeries;
+  boundary = 2;
+  const importing = importCSV();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.chartSeries, beforeImport);
+  deviceStream.handleBatch([nativeSample(2)]);
+  await importing;
+  assert.notEqual(state.chartSeries, beforeImport);
+  assert.deepEqual([...state.chartSeries.voltage.view()], [5, 6]);
+  assert.equal(messages.at(-1)[0], 'success');
+  await deviceStream.settle();
+});
+
+// ─── 范围统计的非有限值口径 ─────────────────────────────────────────────────
+// 导入精确 CSV 时按设计保留 NaN / ±Infinity（见 csv-codec.test.js），所以这些值
+// 会真的进到列缓冲里；范围统计必须像全量统计一样只折入有限值。
+
+/** @param {number} seq */
+function voltageOf(seq) {
+  return 12 + seq / 7;
+}
+
+/** @param {number} seq @param {number} voltage */
+function nativeVoltageSample(seq, voltage) {
+  const sample = nativeSample(seq);
+  sample.voltage = voltage;
+  return sample;
+}
+
+test('range stats skip the non-finite cells the importer keeps', async () => {
+  openNativeStream();
+  await startRecording();
+  const finite = [voltageOf(1), voltageOf(3), voltageOf(4)];
+  deviceStream.handleBatch([
+    nativeVoltageSample(1, finite[0]),
+    nativeVoltageSample(2, Number.NaN),
+    nativeVoltageSample(3, finite[1]),
+    nativeVoltageSample(4, finite[2]),
+  ]);
+  await deviceStream.settle();
+  boundary = 4;
+  state.settings.statsRange = true;
+  try {
+    const range = getRangeStats();
+    assert.equal(range.countV, 3, '一个缺失样本不能把 count 也算进均值');
+    assert.equal(range.sumV, finite[0] + finite[1] + finite[2]);
+    updateStatsDisplay();
+    assert.equal(
+      document.getElementById('avg-voltage').textContent,
+      (finite.reduce((a, b) => a + b, 0) / finite.length).toFixed(3),
+    );
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
+  }
+});
+
+test('range mode and whole-history mode report the same mean', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([
+    nativeVoltageSample(1, voltageOf(1)),
+    nativeVoltageSample(2, Number.NaN),
+    nativeVoltageSample(3, voltageOf(3)),
+  ]);
+  await deviceStream.settle();
+  boundary = 3;
+  updateStatsDisplay();
+  const wholeHistory = document.getElementById('avg-voltage').textContent;
+  state.settings.statsRange = true;
+  try {
+    updateStatsDisplay();
+    assert.equal(document.getElementById('avg-voltage').textContent, wholeHistory, '两种模式必须同口径');
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
+  }
+});
+
+test('an all-NaN channel reads as a dash instead of the literal NaN', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([nativeVoltageSample(1, Number.NaN), nativeVoltageSample(2, Number.NaN)]);
+  await deviceStream.settle();
+  boundary = 2;
+  state.settings.statsRange = true;
+  try {
+    updateStatsDisplay();
+    assert.equal(document.getElementById('avg-voltage').textContent, '--');
+    assert.equal(document.getElementById('min-voltage').textContent, '--');
+    assert.equal(document.getElementById('max-voltage').textContent, '--');
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
+  }
+});
+
+test('infinite cells cannot win min or max', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([
+    nativeVoltageSample(1, 5),
+    nativeVoltageSample(2, Number.POSITIVE_INFINITY),
+    nativeVoltageSample(3, Number.NEGATIVE_INFINITY),
+    nativeVoltageSample(4, 6),
+  ]);
+  await deviceStream.settle();
+  boundary = 4;
+  state.settings.statsRange = true;
+  try {
+    const range = getRangeStats();
+    assert.equal(range.minV, 5);
+    assert.equal(range.maxV, 6);
+    assert.equal(range.countV, 2);
+    updateStatsDisplay();
+    assert.equal(document.getElementById('min-voltage').textContent, '5.000');
+    assert.equal(document.getElementById('max-voltage').textContent, '6.000');
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
+  }
+});
+
+test('the incremental range fold skips non-finite tail points too', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([nativeVoltageSample(1, voltageOf(1)), nativeVoltageSample(2, voltageOf(2))]);
+  await deviceStream.settle();
+  state.settings.statsRange = true;
+  try {
+    assert.equal(getRangeStats().countV, 2);
+    deviceStream.handleBatch([nativeVoltageSample(3, Number.NaN)]);
+    await deviceStream.settle();
+    assert.equal(getRangeStats().countV, 2, '只折入新尾段的复用分支也必须跳过非有限值');
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
+  }
+});
+
+test('a terminal stream error flips the connection state, not just recording', async () => {
+  openNativeStream();
+  await startRecording();
+  window.__TAURI__.event = { listen: async () => () => {} };
+  const { toast } = await import('../src/ui/toast.js');
+  toast.error = () => {};
+  const { initializeDeviceStream } = await import('../src/device.js');
+  await initializeDeviceStream();
+
+  deviceStream.handleBatch([nativeSample(1), nativeSample(3)]);
+  await deviceStream.settle();
+
+  assert.equal(state.isRecording, false);
+  assert.equal(state.isConnected, false, '流已经死了，底栏不能还显示「已连接」');
+  assert.equal(deviceStream.diagnostics().failed, true);
+});
+
+test('a skipped cell is disclosed on the mean instead of silently dropped', async () => {
+  openNativeStream();
+  await startRecording();
+  deviceStream.handleBatch([
+    nativeVoltageSample(1, voltageOf(1)),
+    nativeVoltageSample(2, Number.NaN),
+    nativeVoltageSample(3, voltageOf(3)),
+  ]);
+  await deviceStream.settle();
+  boundary = 3;
+  state.settings.statsRange = true;
+  try {
+    updateStatsDisplay();
+    assert.equal(document.getElementById('avg-voltage').title, '1 个样本值缺失，未计入');
+    assert.equal(document.getElementById('avg-current').title, '', '完整通道不该出现缺失提示');
+  } finally {
+    state.settings.statsRange = false;
+    await stopRecording();
   }
 });

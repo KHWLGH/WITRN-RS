@@ -14,6 +14,12 @@ audit-reports/
 settings.json
 *.csv
 
+# esbuild 产物：由 npm run build / beforeDevCommand 生成，cargo 编译期内嵌它
+out/
+
+# 测量台的原始结果每次运行都变（含 sha256 溯源），不入库；入库的只有 bench/baselines/ 的投影
+bench/results/
+
 # Rust / Tauri
 target/
 src-tauri/target/

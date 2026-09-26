@@ -24,7 +24,7 @@ declare namespace TauriAPI {
     message(message: string, options?: DialogOptions): Promise<void>;
   }
   interface Fs {
-    writeTextFile(path: string, contents: string): Promise<void>;
+    writeTextFile(path: string, contents: string, options?: { append?: boolean }): Promise<void>;
     readTextFile(path: string): Promise<string>;
   }
   interface WindowAPI {
@@ -46,8 +46,29 @@ declare namespace TauriAPI {
   }
 }
 
+// Registered by src/boot-timing.js (a classic script that loads before the module graph),
+// used to stamp page-side milestones onto the cold-start timeline.
+interface BootTiming {
+  mark(name: string): void;
+}
+
+// Registered by src/device.js. Read-only view of the live acquisition, so a hardware acceptance
+// run is judged from what the app saw (see docs/DEVELOPMENT.md "发版前置：真机验收凭据").
+interface StreamDiagnostics {
+  generation: number;
+  seq: number;
+  enabled: boolean;
+  failed: boolean;
+  ended: boolean;
+  streamErrors: number;
+  capacityErrors: number;
+  lastError: string | null;
+}
+
 interface Window {
   __TAURI__: TauriAPI.Tauri;
+  __WITRN_BOOT__?: BootTiming;
+  __WITRN_STREAM__?: (() => StreamDiagnostics) | null;
 }
 
 // uPlot global (loaded via <script> tag from vendor/uPlot.iife.min.js)

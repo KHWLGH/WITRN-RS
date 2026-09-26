@@ -4,10 +4,59 @@
  */
 
 import { refreshRecordButton, stopRecording } from './data.js';
+import { deviceStream } from './device-stream.js';
 import { state } from './state.js';
+import { resetTempForDevice } from './temperature.js';
 import { toast } from './ui/toast.js';
 
 const { invoke } = window.__TAURI__.core;
+
+/** @type {Promise<() => void>|null} */
+let streamInitialization = null;
+
+/** Call once at app startup, before a device can connect. PD listeners remain in app.js. */
+export function initializeDeviceStream() {
+  if (streamInitialization) return streamInitialization;
+  deviceStream.configure({
+    onEnd: () => setConnected(false),
+    onError: (error) => {
+      // 三个 onError 调用点都是终态：流已经不会再有数据了。
+      // 只停记录不改连接状态的话，底栏会永远停在「已连接」盖着一条死流。
+      // setConnected(false) 内部已含 stopRecording 与广播，这里不再单独停。
+      setConnected(false);
+      toast.error(`采集已停止: ${error.error}`);
+    },
+  });
+  deviceStream.enable();
+  // 发版验收要的是"应用自己看到的数字"，不是人转述的数字：`scripts/verify-hardware-receipt.mjs`
+  // 的回执里那两个 declared 字段就是从这里的返回值读的。只读，不影响采集路径。
+  window.__WITRN_STREAM__ = () => deviceStream.diagnostics();
+  streamInitialization = (async () => {
+    const { listen } = window.__TAURI__.event;
+    const unlisten = [];
+    try {
+      unlisten.push(await listen('device-stream-open', (event) => deviceStream.open(event.payload)));
+      unlisten.push(await listen('device-data-batch', (event) => deviceStream.handleBatch(event.payload)));
+      unlisten.push(await listen('stream-error', (event) => deviceStream.handleError(event.payload)));
+      unlisten.push(await listen('device-stream-end', (event) => deviceStream.handleEnd(event.payload)));
+      return () => {
+        for (const stop of unlisten) stop();
+        streamInitialization = null;
+      };
+    } catch (error) {
+      for (const stop of unlisten) stop();
+      streamInitialization = null;
+      throw error;
+    }
+  })();
+  return streamInitialization;
+}
+
+/** Replaces app.js invoke('shutdown'); rejects rather than destroy with a missing tail. */
+export async function shutdownDeviceStream() {
+  await initializeDeviceStream();
+  await deviceStream.shutdown();
+}
 
 /** @param {string} id @param {string} value */
 function setDeviceField(id, value) {
@@ -100,7 +149,10 @@ export async function connectDevice() {
       return;
     }
     connecting = true;
-    await invoke('connect_device_by_path', { path: state.selectedDevicePath });
+    await initializeDeviceStream();
+    if (deviceStream.generation) await deviceStream.drain();
+    const stream = await invoke('connect_device_by_path', { path: state.selectedDevicePath });
+    deviceStream.open(stream);
 
     // 获取连接后的设备信息
     const deviceInfo = await invoke('get_current_device_info');
@@ -111,10 +163,11 @@ export async function connectDevice() {
       setDeviceField('device-sn', di.serial_number || '--');
     }
 
+    if (deviceStream.ended) throw new Error('设备已在连接过程中断开');
     setConnected(true);
 
     try {
-      await invoke('set_sample_rate', { rate: state.settings.sampleRate });
+      await invoke('set_sample_rate', { rate: state.settings.sampleRate, generation: deviceStream.generation });
     } catch (err) {
       console.error('Failed to apply sample rate on connect:', err);
     }
@@ -128,7 +181,7 @@ export async function connectDevice() {
 /** 断开当前设备连接。 */
 export async function disconnectDevice() {
   try {
-    await invoke('disconnect_device');
+    await deviceStream.drain();
     setConnected(false);
   } catch (e) {
     toast.error(`断开失败: ${e}`);
@@ -175,11 +228,13 @@ export function setConnected(connected) {
 
   if (!connected) {
     state.__markPdDisconnect?.();
+    resetTempForDevice();
   }
 
-  if (!connected && state.isRecording) {
-    stopRecording();
-    return; // stopRecording 已广播
+  if (!connected) {
+    const wasRecording = state.isRecording;
+    void stopRecording({ discard: true }).catch(() => {});
+    if (wasRecording) return; // stopRecording 已广播
   }
 
   // PD 视图的采集按钮在「跟随记录」开启时就是记录开关，未连接时要禁用 —— 连接

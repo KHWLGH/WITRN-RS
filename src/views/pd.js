@@ -972,13 +972,19 @@ function initSplitter() {
 
   /** @type {number|null} */
   let pointer = null;
+  /** @param {PointerEvent} e */
+  const endDrag = (e) => {
+    if (pointer === null || e.pointerId !== pointer) return;
+    pointer = null;
+  };
   handle.addEventListener('pointerdown', (e) => {
     pointer = e.pointerId;
     handle.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
   handle.addEventListener('pointermove', (e) => {
-    if (pointer === null) return;
+    // 只认 pointer !== null 不够：捕获被抢走后它仍非空，裸移动鼠标会继续改写分栏。
+    if (pointer === null || !handle.hasPointerCapture(e.pointerId)) return;
     const rect = split.getBoundingClientRect();
     const side = split.classList.contains('pd-split-side');
     if (side) {
@@ -989,9 +995,10 @@ function initSplitter() {
       apply((e.clientY - rect.top) / rect.height);
     }
   });
-  handle.addEventListener('pointerup', () => {
-    pointer = null;
-  });
+  // 捕获被其他元素抢走时浏览器只发 lostpointercapture，漏掉它 pointer 就永不归零。
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+  handle.addEventListener('lostpointercapture', endDrag);
   handle.addEventListener('keydown', (e) => {
     const side = split.classList.contains('pd-split-side');
     const shrink = side ? 'ArrowLeft' : 'ArrowUp';

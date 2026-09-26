@@ -266,6 +266,18 @@
   --dialog-width: 400px;
   --toast-width: 360px;
   --titlebar-height: 40px;
+  --window-control-width: 54px;
+  --window-mac-control-target: 24px;
+  --window-mac-control-dot: 12px;
+  /* .fi 是 mask 染色的 1em 方框；实测 9px 时方框四角会露出黑尖，7px 才收进 12px 色点。
+     再调小先看可读性——墨迹只到 0.42 × font-size（dismiss.svg viewBox 20 中最远不透明点 8.27）。 */
+  --window-mac-control-symbol: 7px;
+  --window-mac-control-inset: 12px;
+  --window-mac-controls-width: calc(3 * var(--window-mac-control-target) + 2 * var(--window-mac-control-inset));
+  --window-close-fill: hsl(3 100% 69%);
+  --window-minimize-fill: hsl(42 100% 59%);
+  --window-maximize-fill: hsl(135 65% 48%);
+  --window-control-symbol: var(--black);
   --statusbar-height: 24px;
   --ui-scale: 1; /* 界面等比缩放因子，src/ui-scale.js 写入；Linux 热区按它反比加厚 */
   --resize-edge: calc(5px / var(--ui-scale));

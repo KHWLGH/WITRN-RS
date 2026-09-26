@@ -3,11 +3,38 @@ import test from 'node:test';
 import {
   calculateEnergy,
   calculateEnergyInRange,
+  energyMaxStepS,
+  estimateIntervalMsFromX,
+  isRecordingBoundary,
   mapCsvColumns,
   nextRecordingX,
   niceCeiling,
   parseRelativeTime,
 } from '../src/measurement.js';
+
+/** An independent re-implementation of the segmented integration rule, written the obvious
+ * way (call the exported helper per point). src/measurement.js inlines nothing today, but this
+ * stays as the oracle so any future hoist of that guard has something to be checked against. */
+function energyViaHelper(times, current, power, perHour, start, end, segments, maxStepS = 2) {
+  let wh = 0;
+  let mah = 0;
+  for (let i = Math.max(0, start) + 1; i <= Math.min(end, times.length - 1); i++) {
+    if (isRecordingBoundary(segments, i)) continue;
+    const dt = (times[i] - times[i - 1]) / perHour;
+    const amps = Math.abs(current[i]);
+    const watts = Math.abs(power[i]);
+    if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(amps) || !Number.isFinite(watts)) continue;
+    if (dt * 3600 > maxStepS) continue;
+    wh += watts * dt;
+    mah += amps * 1000 * dt;
+  }
+  return { wh, mah };
+}
+
+/** 积分顺序不同会带来 1e-17 级的结合律差异，这里只判语义不判浮点顺序。 */
+function assertClose(actual, expected, epsilon = 1e-15, message) {
+  assert.ok(Math.abs(actual - expected) <= epsilon, `${message ?? ''} actual=${actual} expected=${expected}`);
+}
 
 test('parses day-prefixed and fractional relative times', () => {
   assert.equal(parseRelativeTime('0.01:02:03.500'), 3723.5);
@@ -66,6 +93,71 @@ test('skips energy intervals larger than one sample gap', () => {
   assert.equal(result.mah, (2 * 1000) / 3600);
 });
 
+// ─── 空档阈值必须随标称采样间隔定标 ─────────────────────────────────────────
+// x 轴侧 nextRecordingX 早已按 max(间隔×8, 2s) 放行，积分侧若仍用绝对 2 秒，
+// 5s / 10s 档下每个真实采样步长都会被当成空档丢掉，能量恒为 0。
+
+test('energyMaxStepS scales with the sample interval but never drops the 2s floor', () => {
+  assert.equal(energyMaxStepS(10), 2);
+  assert.equal(energyMaxStepS(250), 2);
+  assert.equal(energyMaxStepS(500), 4);
+  assert.equal(energyMaxStepS(1000), 8);
+  assert.equal(energyMaxStepS(5000), 40);
+  assert.equal(energyMaxStepS(60000), 480);
+  // 未知/非法间隔必须回落到今天的行为，不能把守卫整个关掉
+  assert.equal(energyMaxStepS(null), 2);
+  assert.equal(energyMaxStepS(Number.NaN), 2);
+  assert.equal(energyMaxStepS(0), 2);
+  assert.equal(energyMaxStepS(-5000), 2);
+  assert.equal(energyMaxStepS('abc'), 2);
+});
+
+test('a 5s preset integrates its own cadence', () => {
+  const seconds = [0, 5, 10];
+  const current = [2, 2, 2];
+  const power = [10, 10, 10];
+  const scaled = calculateEnergyInRange(seconds, current, power, 0, 2, null, 5000);
+  assertClose(scaled.wh, 2 * ((10 * 5) / 3600));
+  assertClose(scaled.mah, 2 * ((2 * 1000 * 5) / 3600));
+  // 非空断言：阈值是移动了，不是守卫消失了
+  assert.equal(calculateEnergyInRange(seconds, current, power, 0, 2).wh, 0);
+});
+
+test('a sleep-sized hole is still skipped at a slow preset', () => {
+  const seconds = [0, 5, 10, 1810, 1815];
+  const current = [2, 2, 2, 2, 2];
+  const power = [10, 10, 10, 10, 10];
+  const result = calculateEnergyInRange(seconds, current, power, 0, 4, null, 5000);
+  assertClose(result.wh, 3 * ((10 * 5) / 3600), 1e-12, '三个 5 秒步进可积，1800 秒空档不可积');
+});
+
+test('estimateIntervalMsFromX reads the nominal cadence back from relative x', () => {
+  assert.equal(estimateIntervalMsFromX([0, 5, 10, 15, 20]), 5000);
+  assert.equal(estimateIntervalMsFromX([0, 5, 10, 1810, 1815]), 5000);
+  assert.equal(estimateIntervalMsFromX([0, 0.25, 0.5]), 250);
+  assert.equal(estimateIntervalMsFromX([0, 1]), 1000);
+  assert.equal(estimateIntervalMsFromX([7]), null);
+  assert.equal(estimateIntervalMsFromX([]), null);
+  assert.equal(estimateIntervalMsFromX([0, Number.NaN, 5, 10]), 5000);
+  // 越界的估计值夹到命令的实际接受域，不能给出一个设备不可能的间隔
+  assert.equal(estimateIntervalMsFromX([0, 500, 1000]), 60000);
+  assert.equal(estimateIntervalMsFromX([0, 0.001, 0.002]), 10);
+});
+
+test('the interval-aware guard still agrees with the obvious helper', () => {
+  const times = [0, 5, 10, 40, 1840, 1845];
+  const current = [1, -2, 3, NaN, 5, 6];
+  const power = [10, 20, 30, 40, 50, NaN];
+  assert.deepEqual(
+    calculateEnergyInRange(times, current, power, 0, times.length - 1, null, 5000),
+    energyViaHelper(times, current, power, 3600, 0, times.length - 1, null, energyMaxStepS(5000)),
+  );
+  assert.deepEqual(
+    calculateEnergy(times, current, power, null, 5000),
+    energyViaHelper(times, current, power, 3600000, 0, times.length - 1, null, energyMaxStepS(5000)),
+  );
+});
+
 test('maps optional CSV columns from legacy and current headers', () => {
   // 本应用旧格式（无信号线列）
   assert.deepEqual(mapCsvColumns('Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),'), {
@@ -110,4 +202,78 @@ test('niceCeiling snaps to the 1-2-5 series', () => {
   assert.equal(niceCeiling(-8), 1);
   assert.equal(niceCeiling(Number.NaN), 1);
   assert.equal(niceCeiling(Number.POSITIVE_INFINITY), 1);
+});
+
+test('a recording boundary drops only the interval that crosses it', () => {
+  const seconds = [0, 1, 2, 3, 4];
+  const current = [2, 2, 2, 2, 2];
+  const power = [10, 10, 10, 10, 10];
+
+  // 无分段：4 个间隔全部积分。
+  assert.deepEqual(calculateEnergyInRange(seconds, current, power, 0, 4), { wh: 40 / 3600, mah: 8000 / 3600 });
+  // i=2 换段：只丢 i=1→2 这一个间隔。
+  assert.deepEqual(calculateEnergyInRange(seconds, current, power, 0, 4, [0, 0, 1, 1, 1]), {
+    wh: 30 / 3600,
+    mah: 6000 / 3600,
+  });
+  // 连续两次换段丢两个间隔。
+  assert.deepEqual(calculateEnergyInRange(seconds, current, power, 0, 4, [0, 1, 2, 3, 4]), { wh: 0, mah: 0 });
+});
+
+test('a NaN segment id is not a boundary', () => {
+  // src/data.js:608 依赖这个语义：尾部用 NaN 填充"从未录制"的点，
+  // 那些点之间仍然要能积分，否则增量区间统计会凭空少掉一段。
+  const seconds = [0, 1, 2, 3];
+  const result = calculateEnergyInRange(seconds, [2, 2, 2, 2], [10, 10, 10, 10], 0, 3, [0, NaN, NaN, 0]);
+  // i=1: segments[1] 非有限 → 不是边界，积分；i=2 同理；i=3: 0 !== NaN → 是边界，丢弃。
+  assert.deepEqual(result, { wh: 20 / 3600, mah: 4000 / 3600 });
+});
+
+test('omitting segments and passing null are the same', () => {
+  const seconds = [0, 1, 2];
+  const current = [1, 2, 3];
+  const power = [10, 20, 30];
+  assert.deepEqual(
+    calculateEnergyInRange(seconds, current, power, 0, 2),
+    calculateEnergyInRange(seconds, current, power, 0, 2, null),
+  );
+  assert.deepEqual(calculateEnergy(seconds, current, power), calculateEnergy(seconds, current, power, null));
+  assert.deepEqual(
+    calculateEnergy(seconds, current, power, null),
+    energyViaHelper(seconds, current, power, 3600000, 0, 2, null),
+  );
+});
+
+test('integrateEnergy agrees with the obvious per-point helper over many segment shapes', () => {
+  // 覆盖 null / 全同段 / 每点换段 / NaN 空洞 / 越界索引 五种形状。
+  const shapes = [
+    null,
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 2, 3, 4, 5, 6, 7],
+    [0, 0, NaN, NaN, 4, 4, 4, NaN],
+    [NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN],
+    [3, 3, 3, -1, -1, 0, 0, 0],
+  ];
+  for (const segments of shapes) {
+    // 用非平凡的时间/幅值，让 dt 守卫与 NaN 守卫也参与比较。
+    const times = [0, 0.5, 1.5, 2.0, 2.0, 5.0, 5.5, 6.0];
+    const current = [1, -2, 3, NaN, 5, 6, -7, 8];
+    const power = [10, 20, 30, 40, 50, NaN, 70, 80];
+    assert.deepEqual(
+      calculateEnergy(times, current, power, segments),
+      energyViaHelper(times, current, power, 3600000, 0, times.length - 1, segments),
+      `segments=${JSON.stringify(segments && [...segments])}`,
+    );
+    for (const [start, end] of [
+      [0, 2],
+      [3, 7],
+      [2, 5],
+      [-4, 99],
+      [5, 5],
+    ])
+      assert.deepEqual(
+        calculateEnergyInRange(times, current, power, start, end, segments),
+        energyViaHelper(times, current, power, 3600, start, end, segments),
+      );
+  }
 });

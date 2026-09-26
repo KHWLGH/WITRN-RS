@@ -148,6 +148,67 @@ test('a sleep-sized wall-clock jump does not explode energy', () => {
   assert.ok(state.energy.wh - whBefore < 0.01, 'hour-long sleep must not integrate as one hour');
 });
 
+test('a slow preset still accumulates energy at its own cadence', () => {
+  // 非原生路径的 x 由挂钟推出，所以这里控制时钟；否则「步进刚好等于采样间隔」
+  // 这件事本身就不确定，断言会退化成只要 wh > 0 就算过。
+  const realNow = Date.now;
+  try {
+    let now = 1_704_067_200_000;
+    Date.now = () => now;
+    resetIngestState();
+    state.settings.sampleRate = 5000;
+    addDataPoint({ voltage: 5, current: 1, power: 10 });
+    now += 5000;
+    addDataPoint({ voltage: 5, current: 1, power: 10 });
+    assert.ok(Math.abs(state.energy.wh - 10 * (5 / 3600)) < 1e-9, `实测 ${state.energy.wh}`);
+    assert.equal(state.chartSeries.x.at(-1), 5, 'x 轴也按 5 秒推进');
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('native samples accumulate energy from the device-reported rate', () => {
+  resetIngestState();
+  state.settings.sampleRate = 5000;
+  const segment = { id: 1, generation: 1, columns: null, baseSeconds: 0, lastX: null, first: true };
+  const native = (seq) => ({
+    generation: 1,
+    seq,
+    segment: 1,
+    received_us: seq * 5_000_000,
+    segment_start_us: 0,
+    wall_anchor_ms: 1_704_067_200_000,
+    rate_ms: 5000,
+    voltage: 5,
+    current: 1,
+    power: 10,
+  });
+  addDataPoint(native(1), segment);
+  addDataPoint(native(2), segment);
+  assert.ok(Math.abs(state.energy.wh - 10 * (5 / 3600)) < 1e-9, `实测 ${state.energy.wh}`);
+});
+
+test('a hole larger than the scaled threshold stays excluded', () => {
+  resetIngestState();
+  state.settings.sampleRate = 5000;
+  const segment = { id: 1, generation: 1, columns: null, baseSeconds: 0, lastX: null, first: true };
+  const native = (receivedUs) => ({
+    generation: 1,
+    seq: 1,
+    segment: 1,
+    received_us: receivedUs,
+    segment_start_us: 0,
+    wall_anchor_ms: 1_704_067_200_000,
+    rate_ms: 5000,
+    voltage: 5,
+    current: 1,
+    power: 10,
+  });
+  addDataPoint(native(0), segment);
+  addDataPoint(native(3_600_000_000), segment);
+  assert.equal(state.energy.wh, 0, '休眠一小时不能按一小时积分');
+});
+
 test('colliding wall-clock samples still advance x and energy', () => {
   resetIngestState();
   state.settings.sampleRate = 250;

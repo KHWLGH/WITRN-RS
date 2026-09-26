@@ -46,6 +46,9 @@
       "!**/target",
       "!**/src-tauri/target",
       "!**/src-tauri/gen",
+      "!**/bench/results",
+      "!**/out",
+      "!**/bench/baselines",
       "!**/.vscode",
       "!**/node_modules",
       "!**/package-lock.json"

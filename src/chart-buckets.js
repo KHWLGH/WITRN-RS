@@ -13,6 +13,15 @@ export function bucketCap(width) {
 }
 
 /**
+ * 窗口条带宽度（每桶样本数）。`rebuild` 与调用方的复用判断必须同源，否则「已经画对了」
+ * 会被误判成需要重建 —— 或反过来让两种密度同时存在。
+ * @param {number} count @param {number} cap
+ */
+export function stripePpb(count, cap) {
+  return Math.max(1, Math.ceil(count / Math.max(BUCKET_MIN, cap | 0)));
+}
+
+/**
  * @param {ArrayLike<number>} xs
  * @param {number} length
  * @param {number} xVal
@@ -88,6 +97,9 @@ export class SeriesBuckets {
   /** @type {Float64Array[]|null} */
   _flatYs = null;
   _flatCap = 0;
+  _flatDirty = 0;
+  /** @type {{ x: Float64Array, ys: Float64Array[] }|null} */
+  _flatView = null;
 
   constructor() {
     this.reset(0);
@@ -101,6 +113,7 @@ export class SeriesBuckets {
     this.srcStart = srcStart;
     this.srcEnd = srcStart;
     this.cap = BUCKET_MIN;
+    this._flatDirty = 0;
   }
 
   /**
@@ -112,20 +125,13 @@ export class SeriesBuckets {
   }
 
   /**
-   * 当前桶是否覆盖 [start, end)（拖动缩进时可只改 X 窗、不必重建）。
-   * @param {number} start
-   * @param {number} end
-   */
-  covers(start, end) {
-    return end >= start && this.srcStart <= start && this.srcEnd >= end && (this.list.length > 0 || end === start);
-  }
-
-  /**
    * @param {number} x
    * @param {number[]} values
    */
   pushSample(x, values) {
-    const last = this.list[this.list.length - 1];
+    const lastIndex = this.list.length - 1;
+    const last = this.list[lastIndex];
+    this._flatDirty = Math.min(this._flatDirty, last && last.n < this.ppb ? lastIndex : this.list.length);
     if (last && last.n < this.ppb) {
       last.x1 = x;
       last.n += 1;
@@ -153,6 +159,7 @@ export class SeriesBuckets {
       }
       this.list = merged;
       this.ppb *= 2;
+      this._flatDirty = 0;
     }
   }
 
@@ -163,21 +170,34 @@ export class SeriesBuckets {
    * @param {number} start
    * @param {number} end
    * @param {number} cap
+   * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
    */
-  rebuild(xs, series, start, end, cap) {
+  rebuild(xs, series, start, end, cap, extrema = null) {
     this.reset(start);
-    this.cap = Math.max(BUCKET_MIN, cap | 0);
-    if (end <= start) return;
+    if (end <= start) {
+      this.cap = Math.max(BUCKET_MIN, cap | 0);
+      return;
+    }
     const n = end - start;
-    const ppb = Math.max(1, Math.ceil(n / this.cap));
+    const ppb = stripePpb(n, cap);
     this.ppb = ppb;
     for (let i = start; i < end; i += ppb) {
       const stripeEnd = i + ppb < end ? i + ppb : end;
       const bucket = makeBucketFromIndex(xs, series, i);
-      for (let j = i + 1; j < stripeEnd; j++) foldIndex(bucket, xs, series, j);
+      if (extrema) {
+        extrema.fold(bucket, series, i + 1, stripeEnd);
+        bucket.x1 = Number(xs[stripeEnd - 1]);
+        bucket.n = stripeEnd - i;
+      } else {
+        for (let j = i + 1; j < stripeEnd; j++) foldIndex(bucket, xs, series, j);
+      }
       this.list.push(bucket);
     }
     this.srcEnd = end;
+    // 条带数本来就贴着密度上限，此时 cap 保持等于它就意味着「录制中再落一个样本」
+    // 会 mergeDown 把整表分辨率腰斩 —— 画面会在没人操作时自己变稀。留一倍余量，
+    // 分辨率的合法变化由调用方比较 stripePpb 后整体重建决定，不靠这里降级。
+    this.cap = Math.max(BUCKET_MIN, this.list.length * 2);
   }
 
   /**
@@ -199,34 +219,31 @@ export class SeriesBuckets {
   /** @returns {{ x: Float64Array, ys: Float64Array[] }} */
   flatten() {
     const n = this.list.length * 2;
-    if (n === 0) {
-      const empty = new Float64Array(0);
-      return { x: empty, ys: Array.from({ length: DISPLAY_SERIES }, () => empty) };
-    }
     if (!this._flatX || !this._flatYs || this._flatCap < n) {
       this._flatCap = Math.max(n, this._flatCap * 2 || 64);
       this._flatX = new Float64Array(this._flatCap);
       this._flatYs = Array.from({ length: DISPLAY_SERIES }, () => new Float64Array(this._flatCap));
+      this._flatDirty = 0;
+      this._flatView = null;
     }
     const x = this._flatX;
     const ys = this._flatYs;
-    let k = 0;
-    for (const b of this.list) {
+    for (let i = this._flatDirty; i < this.list.length; i++) {
+      const b = this.list[i];
+      const k = i * 2;
       const xm = (b.x0 + b.x1) / 2;
       x[k] = xm;
       x[k + 1] = xm;
       for (let s = 0; s < DISPLAY_SERIES; s++) {
-        const col = ys[s];
-        if (!col) continue;
-        col[k] = Number(b.min[s]);
-        col[k + 1] = Number(b.max[s]);
+        ys[s][k] = Number(b.min[s]);
+        ys[s][k + 1] = Number(b.max[s]);
       }
-      k += 2;
     }
-    return {
-      x: x.subarray(0, n),
-      ys: ys.map((col) => col.subarray(0, n)),
-    };
+    this._flatDirty = this.list.length;
+    if (!this._flatView || this._flatView.x.length !== n) {
+      this._flatView = { x: x.subarray(0, n), ys: ys.map((col) => col.subarray(0, n)) };
+    }
+    return this._flatView;
   }
 }
 
