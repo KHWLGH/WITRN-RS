@@ -15,7 +15,7 @@
 
 ## 仓库布局
 
-Cargo workspace，三个成员 + 一个不经打包器的前端目录。
+Cargo workspace，四个成员 + 一个不经打包器的前端目录。
 
 ```
 WITRN-RS/
@@ -27,6 +27,7 @@ WITRN-RS/
 │   └── tauri.conf.json   窗口、CSP、打包配置
 ├── crates/
 │   ├── usbpd-parser/     USB-PD 报文解码库
+│   ├── km003c/            POWER-Z Bulk 协议、AdcQueue 与 CDC 控制
 │   └── witrn-hid/        WITRN HID 设备封装
 ├── src/                  前端（原生 ES Modules，即 frontendDist）
 ├── test/                 前端单元测试（node --test）
@@ -34,7 +35,7 @@ WITRN-RS/
 └── docs/                 本文档目录
 ```
 
-工作区在 `Cargo.toml` 里统一了 `version`、`edition = 2021`、`rust-version = 1.75` 与公共依赖（`serde`、`serde_json`、`hidapi 2.6`、`chrono 0.4`）。
+工作区在 `Cargo.toml` 里统一了 `version`、`edition = 2021`、`rust-version = 1.85` 与公共依赖（`serde`、`serde_json`、`hidapi 2.6`、`chrono 0.4`）。
 
 ## 后端
 
@@ -47,11 +48,12 @@ WITRN-RS/
 
 ### 线程模型
 
-每个设备连接持有**两个**后台线程，生产者与消费者分离：
+每个设备连接持有读线程与 IPC 发射线程；POWER-Z 另外持有一个 CDC 协议控制线程：
 
 ```
 HID 读线程 ──── channel ────> IPC 发射线程 ──── emit ────> WebView
  只解码，不 emit                合并 / 转发
+                         ↘ POWER-Z CDC 控制线程
 ```
 
 - **HID 读线程** —— 阻塞读 HID 报告，解码校验后写入通道。PD 事件在通道满时进入最多 256 条的 pending，循环下次先排空再读。它不接触 Tauri 的 `emit`，因此 IPC 的抖动不会反压到读取节奏。
@@ -71,7 +73,7 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `connect_device_by_path` | 按 HID 路径连接（前端实际使用的入口） |
 | `disconnect_device` | 断开并停止该连接的后台线程 |
 | `get_current_device_info` | 返回当前连接的设备信息 |
-| `set_sample_rate` | 设置采样间隔，接受 10 – 60000 ms |
+| `set_sample_rate` | 设置采样间隔，接受 1 – 60000 ms；按设备下限钳制 |
 | `set_pd_capture_enabled` | 开关 PD 报文采集 |
 | `pd_log_clear` | 清空 PD 日志，返回新的 generation |
 | `pd_log_after` | 增量拉取 `seq` 大于给定值的报文 |
@@ -81,6 +83,7 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `abandon_device_stream` | 退休一个终态会话，让断开 / 重连 / 退出重新可达；不改写 `consumed` |
 | `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源 |
 | `shutdown` | 停止全部后台线程后销毁主窗口 |
+| `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制命令 |
 
 ### `src-tauri/src/pd_capture.rs`
 
@@ -104,7 +107,7 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 
 ## 协议库
 
-两个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。它们是 [JohnScotttt](https://github.com/JohnScotttt) 的 Python 实现的 Rust 移植，许可为 LGPL-3.0-or-later。
+三个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。工作区公共许可证为 LGPL-3.0-or-later。
 
 ### `crates/usbpd-parser`
 
@@ -132,6 +135,13 @@ WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责
 | `temperature` | `Option<f32>` | °C，字段不可信时为 `None` |
 | `ah` | `f32` | Ah（仪表内部累加器） |
 | `wh` | `f32` | Wh（仪表内部累加器） |
+
+### `crates/km003c`
+
+POWER-Z KM003C/KM002C 的 Interface 0 Vendor Bulk 协议与虚拟串口控制。`protocol::auth` 实现
+MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字节 AdcQueue 样本，
+`transport::bulk` 负责连接、认证、StartGraph、队列读取与 StopGraph，`trigger` 负责 CDC 文本命令。
+1 ms 会话的队列序号由 `src-tauri/src/km003c_session.rs` 展开为单调主机时间，并统计序号空洞。
 
 > 仪表自己的 `ah` / `wh` 累加器会一路转发到前端，但**界面上的「累计能量 / 累计容量」并不使用它们** —— 前端对采样点自行积分，这样才能实现「暂停期间不计入积分」和「仅统计选中范围」，并由 `一键重置` 统一归零。
 >
@@ -163,11 +173,11 @@ WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责
 
 ## 数据流
 
-1. 前端调 `enumerate_devices` 扫描厂商 VID `0x0716` 下的设备；同一物理设备有多个 HID 接口时，后端优先选择厂商自定义 Usage Page。
-2. 前端调 `connect_device_by_path` 连接选中的接口。
-3. 后端启动该连接独享的 HID 读线程与 IPC 发射线程，解码并校验 HID 报告。
-4. 合法数据经事件系统推送：测量帧走 `device-data`（已按采样率节流），PD 报文走 `pd-data-batch`（约 8 ms 合并一帧）。
-5. 前端更新读数卡、uPlot 图表、统计，以及记录区间内的 Wh / mAh 积分。
+1. 前端调 `enumerate_devices` 合并 WITRN HID 与 POWER-Z Bulk 设备列表。
+2. 前端调 `connect_device_by_path` 连接选中的接口；POWER-Z 先完成 Bulk 握手。
+3. 后端按设备家族启动采集源、IPC 发射线程；POWER-Z 的协议控制由独立 CDC 线程拥有串口。
+4. 选择 1 ms 时，采集源执行 HardwareID 读取、StreamingAuth、StartGraph(3)，每 20 ms 请求 AdcQueue；认证失败自动切回 10 ms。
+5. 合法数据经事件系统推送：测量帧走 `device-data-batch`，PD 报文走 `pd-data-batch`，前端更新读数卡、图表、统计与记录文件。
 
 ## HID 报文布局
 
@@ -212,7 +222,7 @@ version-sync   temp-disconnect          settings-persistence
 其中有四个是**契约测试** —— 它们不测某个函数的行为，而是断言分散在多个文件里的事实必须彼此一致：
 
 - **`ids.test.js`** —— DOM 契约。从 JS 里提取每一个 `getElementById` 的字面量，断言该 id 在 `index.html` 中**恰好出现一次**。布局重构时丢掉某个控件会立刻被它抓住。
-- **`version-sync.test.js`** —— 版本契约。断言 `package.json`、`Cargo.toml` 的 `[workspace.package]`、`src-tauri/tauri.conf.json` 三处版本号一致，格式为 `X.Y.Z`，且三个成员 crate 仍是 `version.workspace = true`（否则会冒出第四、第五个真相来源）。
+- **`version-sync.test.js`** —— 版本契约。断言 `package.json`、`Cargo.toml` 的 `[workspace.package]`、`src-tauri/tauri.conf.json` 三处版本号一致，格式为 `X.Y.Z`，且四个成员 crate 仍是 `version.workspace = true`（否则会冒出第五、第六个真相来源）。
 - **`security-csp.test.js`** —— 安全契约。断言 dialog 能力只有 `allow-open` / `allow-save`，CSP 的 `script-src` / `style-src` 不含 `'unsafe-inline'`。
 - **`pd-capture-file.test.js`** —— PD 捕获文件的版本信封与 v1 兼容路径。
 
@@ -222,19 +232,20 @@ version-sync   temp-disconnect          settings-persistence
 - **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分（跳过随标称采样间隔定标的空档）。
 - **`pd-model.test.js`** —— 报文摘要提取（SOP / 角色 / 速览）、GoodCRC 过滤、缓冲回绕。
 
-### Rust —— 171 个 `#[test]`
+### Rust —— 275 个 `#[test]`
 
 | 位置 | 数量 |
 | --- | --- |
 | `crates/usbpd-parser`（12 个模块 + `tests/conversation.rs` 完整会话回放） | 104 |
 | `crates/witrn-hid`（`device.rs`、`general.rs`） | 23 |
-| `src-tauri`（`lib.rs`、`pd_capture.rs`、`usb_port.rs`） | 44 |
+| `crates/km003c`（协议、Bulk、CDC 与触发状态机） | 87 |
+| `src-tauri`（`lib.rs`、`acquire.rs`、`km003c_session.rs`、`file_io.rs` 等） | 61 |
 
 另有 17 个文档测试（`crates/usbpd-parser` 13 个、`crates/witrn-hid` 4 个），随 `cargo test --workspace` 一并运行。
 
 硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
 
-CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），三个包全部受 fmt / clippy / test 检查；另有一个 `crate-features` job 专门跑两个协议 crate 的非默认特性组合。详见 [开发与构建 · CI](DEVELOPMENT.md#-ci-门禁)。
+CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），四个包全部受 fmt / clippy / test 检查；另有一个 `crate-features` job 专门跑协议 crate 的非默认特性组合。详见 [开发与构建 · CI](DEVELOPMENT.md#-ci-门禁)。
 
 ## 安全边界
 

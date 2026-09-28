@@ -4,7 +4,7 @@
  *
  * uPlot 由 vendor/uPlot.iife.min.js 以全局变量方式载入（本地文件，无网络依赖）。
  * 数据为列式（columnar）格式：state.chartSeries = { x, voltage, current, power, temp, dp, dn, cc1, cc2 }，
- * 主图绑定 F64Col.view()（[x, v, c, p, t, dp, dn, cc1, cc2]），追加后在 applyData 里换新视图再 setData。
+ * 主图绑定可见窗口的有界原始列或 min/max 桶（[x, v, c, p, t, dp, dn, cc1, cc2]）。
  *
  * 对外 API：
  * - initChart()           初始化主图 + 导航图
@@ -22,6 +22,7 @@
 
 import {
   bucketCap,
+  columnSpan,
   firstIndexAfter,
   firstIndexAtOrAfter,
   nearestIndex,
@@ -30,6 +31,8 @@ import {
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { wheelZoomFactor } from './chart-window.js';
+import { runCooperativeSlices } from './cooperative.js';
+import { displayFrames } from './frame-scheduler.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
@@ -74,11 +77,11 @@ const TIME_INCRS = [
 
 // ─── Module state ────────────────────────────────────────────────────────────
 
-/** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]，元素为 F64Col.view()。 */
+/** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]。 */
 /** @typedef {number[]|Float64Array} ChartColView */
 /** @type {ChartColView[]} */
 let mainData = [[], [], [], [], [], [], [], [], []];
-/** 导航图数据：[x, power]（全量视图或桶数组）。 */
+/** 导航图数据：[x, power]（短历史的有界拷贝或桶数组）。 */
 /** @type {ChartColView[]} */
 let navData = [[], []];
 
@@ -103,7 +106,26 @@ let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, I
 let scannedLen = 0;
 
 /** 主图窗口级显示桶：可见窗口点数超过 1×宽度后启用，存储仍走全量列。 */
-const displayBuckets = new SeriesBuckets();
+let displayBuckets = new SeriesBuckets();
+// Small existing paths stay synchronous. Large replacements/window scans yield.
+const COOPERATIVE_POINTS = 250_000;
+/** @type {{generation: number, cancelled: boolean}|null} */
+let historyWork = null;
+/** @type {{generation: number, start: number, end: number, cap: number, cancelled: boolean}|null} */
+let projectionWork = null;
+
+function cancelPreparation() {
+  if (historyWork) historyWork.cancelled = true;
+  if (projectionWork) projectionWork.cancelled = true;
+  historyWork = null;
+  projectionWork = null;
+  setPreparing(false);
+}
+
+/** @param {boolean} busy */
+function setPreparing(busy) {
+  document.getElementById('main-chart')?.setAttribute?.('aria-busy', String(busy));
+}
 /**
  * 金字塔冷建是 O(全量) 的一次性开销（实测 1M ≈ 26ms / 5M ≈ 118ms），只为这么密的条带付。
  * 已 warm 之后每个新块只有微秒级增量，所以下限可以放到 BLOCK_SIZE。
@@ -113,10 +135,15 @@ const extremaIndex = new ExactExtremaIndex();
 /** @typedef {'raw'|'window'} BoundKind */
 /** @type {BoundKind} */
 let boundKind = 'raw';
+let rawStart = 0;
+let rawEnd = 0;
 /** 范围手柄是否正在拖动（推迟导航图重建与 Y 轴重算，不改变曲线内容）。 */
 let rangeDragging = false;
 /** 上次完整 apply 时的数据代数；主图绑定的正确性由 bindingCovers 判断，不记宽度。 */
 let appliedMainGen = -1;
+/** Last submitted X window; null invalidates reuse after replacing the source. */
+/** @type {[number, number]|null} */
+let appliedXRange = null;
 
 /** 数据代数 — 序列数组被整体替换（清空 / 导入）时递增，用于跳过导航图不必要的重建。 */
 let dataGen = 0;
@@ -126,8 +153,7 @@ let appliedNavLen = -1;
 
 let chartDirty = false;
 const tooltipThemeGen = 0;
-/** @type {number|null} */
-let chartFrame = null;
+let chartFramePending = false;
 let flushingChart = false;
 let paintBatchId = 0;
 /** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null }} PaintRequest */
@@ -142,7 +168,7 @@ function monitorVisible() {
 }
 
 /**
- * 导航图 minmax 桶。点数不超过 2×宽度时直接引用全量列；超过后按桶聚合，
+ * 导航图 minmax 桶。点数不超过 2×宽度时复制短列；超过后按桶聚合，
  * 新点只更新最后一桶，桶数超上限则两两合并。
  * @typedef {{ x0: number, x1: number, min: number, max: number, n: number }} NavBucket
  */
@@ -176,8 +202,8 @@ function resetNavBuckets() {
   navY = [];
 }
 
-/** @param {number} x @param {number} p */
-function pushNavSample(x, p) {
+/** @param {number} x @param {number} p @param {number} cap */
+function pushNavSample(x, p, cap) {
   const v = Number.isFinite(p) ? p : 0;
   const last = navBucketList[navBucketList.length - 1];
   if (last && last.n < navPpb) {
@@ -187,7 +213,6 @@ function pushNavSample(x, p) {
     last.n++;
   } else {
     navBucketList.push({ x0: x, x1: x, min: v, max: v, n: 1 });
-    const cap = navMaxBuckets();
     if (navBucketList.length > cap) {
       /** @type {NavBucket[]} */
       const merged = [];
@@ -243,28 +268,39 @@ function syncNavBuckets() {
   const cs = state.chartSeries;
   const n = cs.x.length;
   const cap = navMaxBuckets();
-  const xs = cs.x.buf;
-  const ps = cs.power.buf;
+  const xs = cs.x;
+  const ps = cs.power;
   if (n <= cap) {
     if (navSrcLen > n) resetNavBuckets();
     return;
   }
   if (navSrcLen > n || navSrcLen === 0) {
     resetNavBuckets();
-    for (let i = 0; i < n; i++) pushNavSample(xs[i], ps[i]);
+    foldNavRange(xs, ps, 0, n, cap);
   } else if (navSrcLen < n) {
-    for (let i = navSrcLen; i < n; i++) pushNavSample(xs[i], ps[i]);
+    foldNavRange(xs, ps, navSrcLen, n, cap);
   }
 }
 
-/** 把导航图数据指到全量功率列，或宽度级 minmax 桶。 */
+/** @param {import('./state.js').F64Col} xs @param {import('./state.js').F64Col} ps @param {number} start @param {number} end @param {number} cap */
+function foldNavRange(xs, ps, start, end, cap) {
+  for (let i = start; i < end; ) {
+    const xSpan = columnSpan(xs, i, end);
+    const pSpan = columnSpan(ps, i, end);
+    const through = Math.min(xSpan.end, pSpan.end);
+    for (; i < through; i++)
+      pushNavSample(Number(xSpan.values[i - xSpan.base]), Number(pSpan.values[i - pSpan.base]), cap);
+  }
+}
+
+/** 把导航图数据指到短历史功率列，或宽度级 minmax 桶。 */
 function bindNavData() {
   const cs = state.chartSeries;
   const n = cs.x.length;
   const cap = navMaxBuckets();
   syncNavBuckets();
   if (n <= cap) {
-    navData = [cs.x.view(), cs.power.view()];
+    navData = [cs.x.copyRange(0, n), cs.power.copyRange(0, n)];
     return;
   }
   flattenNavBuckets();
@@ -287,7 +323,10 @@ let linearBuilder = null;
  * @param {any} u @param {number} seriesIdx @param {number} idx0 @param {number} idx1
  */
 function adaptivePaths(u, seriesIdx, idx0, idx1) {
-  const builder = splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS ? splineBuilder : (linearBuilder ?? splineBuilder);
+  const builder =
+    boundKind === 'raw' && splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS
+      ? splineBuilder
+      : (linearBuilder ?? splineBuilder);
   return builder ? builder(u, seriesIdx, idx0, idx1) : null;
 }
 
@@ -298,34 +337,42 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
  * 仅在序列数组被整体替换（清空、导入 CSV）后需要调用；
  * 追加数据点时数组引用不变，无需重新绑定。
  */
-function bindMainViews() {
+function bindMainViews(start, end) {
   const cs = state.chartSeries;
+  rawStart = Math.max(0, start - 1);
+  rawEnd = Math.min(cs.x.length, end + 1);
   mainData = [
-    cs.x.view(),
-    cs.voltage.view(),
-    cs.current.view(),
-    cs.power.view(),
-    cs.temp.view(),
-    cs.dp.view(),
-    cs.dn.view(),
-    cs.cc1.view(),
-    cs.cc2.view(),
+    cs.x.copyRange(rawStart, rawEnd),
+    cs.voltage.copyRange(rawStart, rawEnd),
+    cs.current.copyRange(rawStart, rawEnd),
+    cs.power.copyRange(rawStart, rawEnd),
+    cs.temp.copyRange(rawStart, rawEnd),
+    cs.dp.copyRange(rawStart, rawEnd),
+    cs.dn.copyRange(rawStart, rawEnd),
+    cs.cc1.copyRange(rawStart, rawEnd),
+    cs.cc2.copyRange(rawStart, rawEnd),
   ];
 }
 
 export function syncChartSeries() {
-  bindMainViews();
+  cancelPreparation();
+  mainData = [[], [], [], [], [], [], [], [], []];
+  rawStart = 0;
+  rawEnd = 0;
   extremaIndex.reset();
   displayBuckets.reset(0);
   boundKind = 'raw';
   appliedMainGen = -1;
+  appliedXRange = null;
   resetNavBuckets();
-  bindNavData();
   seriesMax = [Number.NaN, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
   seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
   scannedLen = 0;
   dataGen++;
-  trackNewPoints();
+  if (state.chartSeries.x.length <= COOPERATIVE_POINTS) {
+    bindNavData();
+    trackNewPoints();
+  }
 }
 
 /** @param {boolean} dragging */
@@ -338,9 +385,9 @@ export function setRangeDragging(dragging) {
  * 增量扫描新追加的数据点，维护每条曲线的全量 min/max。
  * @returns {boolean} 是否有任一通道极值变化（决定 setData 要不要重算 Y 轴）
  */
-function trackNewPoints() {
+function trackNewPoints(through = state.chartSeries.x.length) {
   const cs = state.chartSeries;
-  const len = cs.x.length;
+  const len = Math.min(through, cs.x.length);
   if (len <= scannedLen) {
     scannedLen = len;
     return false;
@@ -348,19 +395,21 @@ function trackNewPoints() {
   const cols = [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
   let changed = false;
   for (let si = 0; si < cols.length; si++) {
-    const arr = cols[si].buf;
+    const arr = cols[si];
     let max = seriesMax[si + 1];
     let min = seriesMin[si + 1];
-    for (let i = scannedLen; i < len; i++) {
-      const v = arr[i];
-      if (Number.isFinite(v)) {
-        if (v > max) {
-          max = v;
-          changed = true;
-        }
-        if (v < min) {
-          min = v;
-          changed = true;
+    for (const { values } of arr.chunks(scannedLen, len)) {
+      for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (Number.isFinite(v)) {
+          if (v > max) {
+            max = v;
+            changed = true;
+          }
+          if (v < min) {
+            min = v;
+            changed = true;
+          }
         }
       }
     }
@@ -376,8 +425,8 @@ function sourceRange() {
   const n = xs.length;
   if (n === 0) return { start: 0, end: 0 };
   if (xWindow.min == null || xWindow.max == null) return { start: 0, end: n };
-  const start = firstIndexAtOrAfter(xs.buf, n, xWindow.min);
-  let end = firstIndexAfter(xs.buf, n, xWindow.max);
+  const start = firstIndexAtOrAfter(xs, n, xWindow.min);
+  let end = firstIndexAfter(xs, n, xWindow.max);
   if (end <= start) end = Math.min(n, start + 1);
   return { start, end };
 }
@@ -403,7 +452,7 @@ function plotCssWidth() {
 
 function channelBufs() {
   const cs = state.chartSeries;
-  return [cs.voltage.buf, cs.current.buf, cs.power.buf, cs.temp.buf, cs.dp.buf, cs.dn.buf, cs.cc1.buf, cs.cc2.buf];
+  return [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
 }
 
 /** @param {SeriesBuckets} buckets @param {BoundKind} kind */
@@ -417,7 +466,7 @@ function bindFlattenedBuckets(buckets, kind) {
  * 条带折叠的**速度选择器**：只决定耗时，不决定产出值 —— 金字塔 fold 与逐样本扫描对同一条带
  * 得到同一组 min/max（`test/chart-extrema.test.js` 的 `compare()` 逐桶钉着这条等价）。
  * 所以拖动中 / 松手后 / 冷启动走到不同分支，画出来的曲线也必须一模一样。
- * @param {ArrayLike<number>[]} series @param {number} end @param {number} ppb
+ * @param {import('./chart-buckets.js').NumericColumn[]} series @param {number} end @param {number} ppb
  * @returns {ExactExtremaIndex|null}
  */
 function extremaForStripes(series, end, ppb) {
@@ -426,8 +475,105 @@ function extremaForStripes(series, end, ppb) {
   // 窗口内已完成的块都建好了才算 warm；冷建是 O(全量) 的一次性开销，只留给足够密的窗口付。
   const warm = extremaIndex.blocks >= Math.floor(end / BLOCK_SIZE);
   if (!warm && ppb < COLD_BUILD_PPB) return null;
-  extremaIndex.sync(series, state.chartSeries.x.length);
+  extremaIndex.sync(series, end);
   return extremaIndex;
+}
+
+/**
+ * Prepare full-history auxiliaries without falling back to a full raw scan in
+ * the requesting frame. Appends do not invalidate the fixed prefix in progress.
+ * @param {number} length @param {number} end @param {number} ppb
+ */
+function prepareLargeHistory(length, end, ppb) {
+  if (historyWork) return true;
+  const cap = navMaxBuckets();
+  const needIndex = ppb >= COLD_BUILD_PPB && end - extremaIndex.blocks * BLOCK_SIZE > COOPERATIVE_POINTS;
+  if (
+    length - scannedLen <= COOPERATIVE_POINTS &&
+    (length <= cap || length - navSrcLen <= COOPERATIVE_POINTS) &&
+    !needIndex
+  )
+    return false;
+  const work = { generation: dataGen, cancelled: false };
+  historyWork = work;
+  const cs = state.chartSeries;
+  const series = channelBufs();
+  setPreparing(true);
+  void runCooperativeSlices(
+    () => {
+      if (scannedLen < length) {
+        trackNewPoints(Math.min(length, scannedLen + 4096));
+        return false;
+      }
+      if (length > cap && navSrcLen < length) {
+        const through = Math.min(length, navSrcLen + 4096);
+        foldNavRange(cs.x, cs.power, navSrcLen, through, cap);
+        return false;
+      }
+      return !needIndex || extremaIndex.syncStep(series, end);
+    },
+    { isCancelled: () => work.cancelled || work.generation !== dataGen },
+  )
+    .then((complete) => {
+      if (historyWork !== work) return;
+      historyWork = null;
+      setPreparing(false);
+      if (complete) updateCharts();
+    })
+    .catch((error) => {
+      if (historyWork === work) {
+        historyWork = null;
+        setPreparing(false);
+      }
+      console.error('Chart history preparation failed', error);
+    });
+  return true;
+}
+
+/** @param {number} start @param {number} end @param {number} cap */
+function prepareLargeProjection(start, end, cap) {
+  const count = end - start;
+  const ppb = stripePpb(count, cap);
+  if (projectionWork && (projectionWork.start !== start || projectionWork.end !== end || projectionWork.cap !== cap)) {
+    projectionWork.cancelled = true;
+    projectionWork = null;
+  }
+  if (projectionWork) return true;
+  if (count <= COOPERATIVE_POINTS || stripesMatch(start, end, count, cap)) return false;
+  // A short append still uses the existing cheap incremental path.
+  if (ppb === displayBuckets.ppb && displayBuckets.canAppend(start, end) && end - displayBuckets.srcEnd <= 4096)
+    return false;
+  const cs = state.chartSeries;
+  const series = channelBufs();
+  const index = extremaForStripes(series, end, ppb);
+  const buckets = new SeriesBuckets();
+  const step = buckets.beginRebuild(cs.x, series, start, end, cap, index);
+  const work = { generation: dataGen, start, end, cap, cancelled: false };
+  projectionWork = work;
+  setPreparing(true);
+  void runCooperativeSlices(() => step(index ? Math.max(4096, ppb * 16) : 4096), {
+    isCancelled: () => work.cancelled || work.generation !== dataGen,
+  })
+    .then((complete) => {
+      if (projectionWork !== work) return;
+      projectionWork = null;
+      setPreparing(false);
+      const latest = sourceRange();
+      if (complete && latest.start === start && latest.end === end && bucketCap(plotCssWidth()) === cap) {
+        displayBuckets = buckets;
+        bindFlattenedBuckets(displayBuckets, 'window');
+        appliedMainGen = -1;
+      }
+      if (complete) updateCharts();
+    })
+    .catch((error) => {
+      if (projectionWork === work) {
+        projectionWork = null;
+        setPreparing(false);
+      }
+      console.error('Chart projection preparation failed', error);
+    });
+  return true;
 }
 
 /**
@@ -449,7 +595,14 @@ function stripesMatch(start, end, windowCount, cap) {
  * @param {number} start @param {number} end @param {number} windowCount @param {number} cap
  */
 function bindingCovers(start, end, windowCount, cap) {
-  if (windowCount <= cap) return boundKind === 'raw';
+  if (windowCount <= cap) {
+    // Keep both neighbours: uPlot needs their segments at clipped boundaries.
+    return (
+      boundKind === 'raw' &&
+      rawStart <= Math.max(0, start - 1) &&
+      rawEnd >= Math.min(state.chartSeries.x.length, end + 1)
+    );
+  }
   return boundKind === 'window' && stripesMatch(start, end, windowCount, cap);
 }
 
@@ -461,7 +614,7 @@ function applyXScale() {
 
 /**
  * 「画什么」的唯一定义：把主图绑到窗口 `[start,end)` 在 `stripePpb(windowCount, cap)` 密度下的
- * min/max 条带；窗口不超过 1×绘图宽度时继续零拷贝全量视图。拖动中与松手后都只经过这里。
+ * min/max 条带；窗口不超过 1×绘图宽度时复制原始样本及裁剪邻点。拖动中与松手后都只经过这里。
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
@@ -470,7 +623,7 @@ function bindDisplayData(args) {
 
   if (windowCount <= cap) {
     boundKind = 'raw';
-    bindMainViews();
+    bindMainViews(start, end);
     return;
   }
 
@@ -484,12 +637,12 @@ function bindDisplayData(args) {
 
   // 左边界与密度都没动、只是窗口向右延长：追加比整表重扫便宜得多（流式跟随常用）。
   if (!force && ppb === displayBuckets.ppb && displayBuckets.canAppend(start, end)) {
-    displayBuckets.appendThrough(cs.x.buf, series, end);
+    displayBuckets.appendThrough(cs.x, series, end);
     bindFlattenedBuckets(displayBuckets, 'window');
     return;
   }
 
-  displayBuckets.rebuild(cs.x.buf, series, start, end, cap, extremaForStripes(series, end, ppb));
+  displayBuckets.rebuild(cs.x, series, start, end, cap, extremaForStripes(series, end, ppb));
   bindFlattenedBuckets(displayBuckets, 'window');
 }
 
@@ -551,34 +704,50 @@ function applyData(opts = {}) {
   paintRequest = null;
   const t0 = performance.now();
   chartDirty = false;
-  expectChartDraw(state.mainChart, request);
   const srcLen = state.chartSeries.x.length;
+  const { start, end } = sourceRange();
+  const cap = bucketCap(plotCssWidth());
+  const windowCount = end - start;
+  if (prepareLargeHistory(srcLen, end, stripePpb(windowCount, cap)) || prepareLargeProjection(start, end, cap)) {
+    chartDirty = true;
+    // Keep the original request timestamp across slices so draw latency includes
+    // deferred preparation instead of starting over when its result is ready.
+    paintRequest = request;
+    finishPreparation(t0, request);
+    return;
+  }
   const appended = srcLen > scannedLen;
   const yChanged = trackNewPoints();
   const force = !!opts.force;
   const dataChanged = appended || appliedMainGen !== dataGen;
-  const { start, end } = sourceRange();
-  const cap = bucketCap(plotCssWidth());
-  const windowCount = end - start;
   // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
   const preview = rangeDragging && !force;
 
-  if (!dataChanged && !force && bindingCovers(start, end, windowCount, cap)) {
-    applyXScale();
-    finishPreparation(t0, request);
-    return;
-  }
+  const nextXRange = xRange();
+  const sameXRange = appliedXRange?.[0] === nextXRange[0] && appliedXRange?.[1] === nextXRange[1];
+  const covers = bindingCovers(start, end, windowCount, cap);
+  const frozenAppend = appended && state.chartWindow.mode === 'frozen' && sameXRange && covers && !yChanged;
+  const reuseBinding = !force && appliedMainGen === dataGen && covers && (!dataChanged || frozenAppend);
 
-  bindDisplayData({ cap, start, end, windowCount, force });
-  if (state.mainChart) {
-    // Y 量程来自全量 seriesMax，与是否分桶无关；极值未破时跳过四轴量化。
-    if (appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
-      state.mainChart.setData(/** @type {any} */ (mainData), false);
+  if (reuseBinding) {
+    if (!sameXRange) {
+      expectChartDraw(state.mainChart, request);
       applyXScale();
-    } else {
-      state.mainChart.setData(/** @type {any} */ (mainData));
+    }
+  } else {
+    bindDisplayData({ cap, start, end, windowCount, force });
+    if (state.mainChart) {
+      expectChartDraw(state.mainChart, request);
+      // Y 量程来自全量 seriesMax，与是否分桶无关；极值未破时跳过四轴量化。
+      if (appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
+        state.mainChart.setData(/** @type {any} */ (mainData), false);
+        applyXScale();
+      } else {
+        state.mainChart.setData(/** @type {any} */ (mainData));
+      }
     }
   }
+  appliedXRange = nextXRange;
 
   if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
     syncNavBuckets();
@@ -626,8 +795,8 @@ export function handleMonitorShown() {
 }
 
 function cancelChartFrame() {
-  if (chartFrame != null) cancelAnimationFrame(chartFrame);
-  chartFrame = null;
+  displayFrames.cancel('chart');
+  chartFramePending = false;
   state.__chartUpdatePending = false;
 }
 
@@ -674,13 +843,18 @@ export function scheduleChartUpdate() {
   chartDirty = true;
   if (!monitorVisible() || flushingChart) return;
   requestPaint();
-  if (chartFrame != null) return;
+  if (chartFramePending) return;
+  chartFramePending = true;
   state.__chartUpdatePending = true;
-  chartFrame = requestAnimationFrame(() => {
-    chartFrame = null;
-    state.__chartUpdatePending = false;
-    flushChart();
-  });
+  displayFrames.schedule(
+    'chart',
+    () => {
+      chartFramePending = false;
+      state.__chartUpdatePending = false;
+      flushChart();
+    },
+    10,
+  );
 }
 
 // ─── Range / visibility / fill ───────────────────────────────────────────────
@@ -761,8 +935,8 @@ function xRange() {
   } else {
     const xs = state.chartSeries.x;
     if (!xs.length) return [0, 60];
-    min = xs.at(0);
-    max = xs.at(-1);
+    min = Number(xs.at(0));
+    max = Number(xs.at(-1));
   }
   // 单点 / 零跨度保护（uPlot 不接受 min == max）
   if (!(max - min > 0)) return [min - 0.3, min + 0.3];
@@ -1240,11 +1414,28 @@ function renderLegend() {
  * @returns {number|null}
  */
 function realIndexFromCursor(u, hoveredIdx) {
-  if (hoveredIdx == null) return null;
-  const xVal = u.data[0]?.[hoveredIdx];
-  if (xVal == null || !Number.isFinite(xVal)) return null;
-  if (boundKind === 'raw') return hoveredIdx;
-  return nearestIndex(state.chartSeries.x.buf, state.chartSeries.x.length, Number(xVal));
+  if (hoveredIdx == null || appliedMainGen !== dataGen) return null;
+  const left = u.cursor.left;
+  if (!Number.isFinite(left) || left < 0) return null;
+  const xVal = u.posToVal(left, 'x');
+  if (!Number.isFinite(xVal) || state.chartSeries.x.length === 0) return null;
+  return nearestIndex(state.chartSeries.x, state.chartSeries.x.length, xVal);
+}
+
+/** Position hover markers on the same raw sample used by the tooltip.
+ * @param {any} u @param {number} seriesIdx
+ */
+function cursorPointBox(u, seriesIdx) {
+  const index = realIndexFromCursor(u, u.cursor.idx);
+  const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[seriesIdx - 1]);
+  const value = index == null ? Number.NaN : state.chartSeries[field].valueAt(index);
+  if (index == null || !Number.isFinite(value)) return { left: -100, top: -100, width: 0, height: 0 };
+  return {
+    left: u.valToPos(state.chartSeries.x.valueAt(index), 'x') - 4,
+    top: u.valToPos(value, SERIES_SCALES[seriesIdx - 1]) - 4,
+    width: 8,
+    height: 8,
+  };
 }
 
 function cursorDataIdx(u, seriesIdx, hoveredIdx) {
@@ -1253,7 +1444,7 @@ function cursorDataIdx(u, seriesIdx, hoveredIdx) {
   if (realIdx == null) return null;
   if (seriesIdx === 0) return hoveredIdx;
   const field = FIELDS[seriesIdx - 1];
-  const y = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.buf[realIdx];
+  const y = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.valueAt(realIdx);
   return Number.isFinite(y) ? hoveredIdx : null;
 }
 
@@ -1301,9 +1492,9 @@ function tooltipPlugin() {
       hide();
       return;
     }
-    // idx 可能是桶顶点；只用其 X 二分回查原始列，绝不显示桶的 min/max 值。
+    // 从指针时间查原始点；不使用桶中点，否则同一桶内移动会吸附到错误样本。
     const realIdx = realIndexFromCursor(u, idx);
-    const xVal = realIdx == null ? null : state.chartSeries.x.buf[realIdx];
+    const xVal = realIdx == null ? null : state.chartSeries.x.valueAt(realIdx);
     if (realIdx == null || xVal == null || !Number.isFinite(xVal)) {
       hide();
       return;
@@ -1319,7 +1510,7 @@ function tooltipPlugin() {
       for (let i = 0; i < rows.length; i++) {
         const { row, swatch, text } = rows[i];
         const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[i]);
-        const value = state.chartSeries[field]?.buf[realIdx];
+        const value = state.chartSeries[field]?.valueAt(realIdx);
         const show = !!(mask & (1 << i)) && Number.isFinite(value);
         const display = show ? '' : 'none';
         if (row.style.display !== display) row.style.display = display;
@@ -1555,7 +1746,7 @@ export function initChart() {
     cursor: {
       y: false,
       drag: { setScale: false, x: false, y: false },
-      points: { size: 8 },
+      points: { size: 8, bbox: cursorPointBox },
       dataIdx: cursorDataIdx,
     },
     scales: {
@@ -1611,7 +1802,6 @@ export function initChart() {
   bindChartWheel(state.mainChart);
   observeResize(host, state.mainChart, () => {
     displayBuckets.reset(0);
-    applyData({ force: true });
   });
   renderLegend();
   registerChartListeners();
@@ -1684,10 +1874,6 @@ function initNavigatorChart() {
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);
   observeResize(host, state.navigatorChart, () => {
     resetNavBuckets();
-    bindNavData();
     appliedNavGen = -1;
-    if (state.navigatorChart) state.navigatorChart.setData(/** @type {any} */ (navData));
-    appliedNavGen = dataGen;
-    appliedNavLen = state.chartSeries.x.length;
   });
 }

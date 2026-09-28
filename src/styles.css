@@ -439,6 +439,13 @@ input[type="number"]::-webkit-outer-spin-button {
 
 /* ── 实时读数栏 ───────────────────────────────────────────────── */
 
+.stats-snapshot-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  flex: 0 0 auto;
+}
+
 .realtime-panel {
   display: flex;
   flex-direction: column;

@@ -31,6 +31,8 @@ const { emptyChartColumns, setChartColumns, state } = await import('../src/state
 const { startRecording, stopRecording } = await import('../src/data.js');
 
 function resetRecordingState() {
+  // 实时落盘有独立测试（recording-spool.test.js）；这里的桩后端不提供文件句柄。
+  state.settings.autoSaveRecording = false;
   state.isConnected = true;
   state.isRecording = false;
   state.recordingStartTime = null;
@@ -291,51 +293,150 @@ test('live energy skips non-finite power/current exactly like the range integrat
   await stopRecording();
 });
 
-test('CSV import waits for the pause boundary and does not replace data if it fails', async () => {
-  const messages = [];
-  window.__TAURI__.dialog = { open: async () => 'C:/记录.csv', save: async () => null, ask: async () => true };
-  window.__TAURI__.fs = {
-    readTextFile: async () => 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),\n00:00:00,5,2,10,\n00:00:01,6,3,18,',
-    writeTextFile: async () => {},
+const CSV_FIXTURE = 'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),\n00:00:00,5,2,10,\n00:00:01,6,3,18,';
+
+/**
+ * Backend file commands for one CSV: a pick returns a handle, reads return the bytes once
+ * and then an empty slice. Everything else falls through to `fallback`.
+ * @param {(cmd: string, args?: any) => Promise<unknown>} fallback
+ */
+function csvFileBackend(fallback, text = CSV_FIXTURE) {
+  const reads = new Map();
+  return async (cmd, args) => {
+    if (cmd === 'csv_import_pick') return { handle: 7, name: '记录.csv', path: 'C:/记录.csv', size: text.length };
+    if (cmd === 'csv_read_chunk') {
+      const done = reads.get(args.handle) ?? false;
+      reads.set(args.handle, true);
+      return done ? new ArrayBuffer(0) : new TextEncoder().encode(text).buffer;
+    }
+    if (cmd === 'csv_read_close') return null;
+    return fallback(cmd, args);
   };
+}
+
+test('CSV import waits for the pause boundary and does not replace data if it fails', async () => {
+  const { createCsvImport } = await import('../src/csv-import-core.js');
+  // Node has no browser Worker; keep the asynchronous begin/chunk/end protocol and transfer boundary.
+  globalThis.Worker = class {
+    terminated = false;
+    onmessage = null;
+    onerror = null;
+    onmessageerror = null;
+    /** @param {any} message */
+    postMessage(message) {
+      setImmediate(() => {
+        if (this.terminated) return;
+        try {
+          if (message.type === 'begin') {
+            this.session = createCsvImport(message.options);
+            this.decoder = new TextDecoder();
+            this.onmessage?.({ data: { type: 'ready' } });
+          } else if (message.type === 'chunk') {
+            this.session.push(this.decoder.decode(new Uint8Array(message.bytes), { stream: true }));
+            this.onmessage?.({ data: { type: 'ack', rows: this.session.rows } });
+          } else if (message.type === 'end') {
+            this.session.push(this.decoder.decode());
+            const result = this.session.finish();
+            const transfer = Object.values(result.columns).flatMap((column) => column._chunks.map((c) => c.buffer));
+            this.onmessage?.({ data: { type: 'done', result: structuredClone(result, { transfer }) } });
+          }
+        } catch (error) {
+          this.onmessage?.({ data: { type: 'error', error: error.message } });
+        }
+      });
+    }
+    terminate() {
+      this.terminated = true;
+    }
+  };
+  const messages = [];
+  const invoke = window.__TAURI__.core.invoke;
+  // No HTMLDialogElement in Node: ask() falls back to the dialog plugin.
+  window.__TAURI__.dialog = { ask: async () => true };
   const { toast } = await import('../src/ui/toast.js');
   const { importCSV } = await import('../src/csv.js');
   toast.success = (message) => messages.push(['success', message]);
   toast.error = (message) => messages.push(['error', message]);
-  openNativeStream();
-  await startRecording();
-  deviceStream.handleBatch([nativeSample(1)]);
+  toast.info = () => {};
+  try {
+    openNativeStream();
+    window.__TAURI__.core.invoke = csvFileBackend(window.__TAURI__.core.invoke);
+    await startRecording();
+    deviceStream.handleBatch([nativeSample(1)]);
+    const original = state.chartSeries;
+    rejectPause = true;
+    const logError = console.error;
+    console.error = () => {};
+    try {
+      await importCSV();
+    } finally {
+      console.error = logError;
+    }
+    assert.equal(state.chartSeries, original);
+    assert.equal(original.x.length, 1);
+    assert.match(messages.at(-1)[1], /pause rejected/);
+    assert.equal(
+      messages.some(([kind]) => kind === 'success'),
+      false,
+    );
+
+    openNativeStream();
+    window.__TAURI__.core.invoke = csvFileBackend(window.__TAURI__.core.invoke);
+    await startRecording();
+    deviceStream.handleBatch([nativeSample(1)]);
+    const beforeImport = state.chartSeries;
+    boundary = 2;
+    const importing = importCSV();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(state.chartSeries, beforeImport);
+    deviceStream.handleBatch([nativeSample(2)]);
+    await importing;
+    assert.notEqual(state.chartSeries, beforeImport);
+    assert.deepEqual([...state.chartSeries.voltage.view()], [5, 6]);
+    assert.equal(messages.at(-1)[0], 'success');
+    await deviceStream.settle();
+  } finally {
+    window.__TAURI__.core.invoke = invoke;
+  }
+});
+
+test('a new import cancels the prior worker; late replies and parse failure preserve the live columns', async () => {
+  const { importCSV } = await import('../src/csv.js');
+  const previousWorker = globalThis.Worker;
+  const invoke = window.__TAURI__.core.invoke;
+  window.__TAURI__.core.invoke = csvFileBackend(invoke);
+  const workers = [];
+  globalThis.Worker = class {
+    constructor() {
+      workers.push(this);
+    }
+    postMessage() {}
+    terminate() {
+      this.terminated = true;
+    }
+  };
   const original = state.chartSeries;
-  rejectPause = true;
+  const buffer = original.x.buf.buffer;
   const logError = console.error;
   console.error = () => {};
   try {
-    await importCSV();
+    const first = importCSV();
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = importCSV();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(workers[0].terminated, true);
+    workers[0].onmessage({ data: { type: 'done', result: {} } });
+    workers[1].onmessage({ data: { type: 'error', error: 'invalid test CSV' } });
+    await Promise.all([first, second]);
+    assert.equal(state.chartSeries, original);
+    assert.equal(original.x.buf.buffer, buffer);
+    assert.ok(buffer.byteLength > 0);
+    assert.equal(workers[1].terminated, true);
   } finally {
+    globalThis.Worker = previousWorker;
+    window.__TAURI__.core.invoke = invoke;
     console.error = logError;
   }
-  assert.equal(state.chartSeries, original);
-  assert.equal(original.x.length, 1);
-  assert.match(messages.at(-1)[1], /pause rejected/);
-  assert.equal(
-    messages.some(([kind]) => kind === 'success'),
-    false,
-  );
-
-  openNativeStream();
-  await startRecording();
-  deviceStream.handleBatch([nativeSample(1)]);
-  const beforeImport = state.chartSeries;
-  boundary = 2;
-  const importing = importCSV();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(state.chartSeries, beforeImport);
-  deviceStream.handleBatch([nativeSample(2)]);
-  await importing;
-  assert.notEqual(state.chartSeries, beforeImport);
-  assert.deepEqual([...state.chartSeries.voltage.view()], [5, 6]);
-  assert.equal(messages.at(-1)[0], 'success');
-  await deviceStream.settle();
 });
 
 // ─── 范围统计的非有限值口径 ─────────────────────────────────────────────────

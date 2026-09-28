@@ -45,7 +45,7 @@ export const MAX_ENERGY_STEP_S = 2;
 export const ENERGY_STEP_INTERVAL_MULTIPLIER = 8;
 
 /** `set_sample_rate` 实际接受的区间，用于夹住从数据里反推出的标称间隔。 */
-const SAMPLE_RATE_BOUNDS_MS = [10, 60000];
+const SAMPLE_RATE_BOUNDS_MS = [1, 60000];
 
 /**
  * 标称采样间隔对应的空档阈值（秒）。未知或非法间隔回落到 {@link MAX_ENERGY_STEP_S}，
@@ -62,14 +62,14 @@ export function energyMaxStepS(intervalMs) {
 /**
  * 从相对秒序列反推标称采样间隔（毫秒）。取前若干个正步长的中位数，
  * 这样休眠空档与乱序/缺失点都不会把估计值拉高。
- * @param {ArrayLike<number>} xSeconds
- * @returns {number|null} 没有可用步长时为 null；否则夹到设备接受的 10–60000 ms
+ * @param {ArrayLike<number>|import('./state.js').F64Col} xSeconds
+ * @returns {number|null} 没有可用步长时为 null；否则夹到设备接受的 1–60000 ms
  */
 export function estimateIntervalMsFromX(xSeconds) {
   const steps = [];
   for (let i = 1; i < xSeconds.length && steps.length < 200; i++) {
-    const prev = xSeconds[i - 1];
-    const delta = xSeconds[i] - prev;
+    const prev = valueAt(xSeconds, i - 1);
+    const delta = valueAt(xSeconds, i) - prev;
     if (Number.isFinite(delta) && delta > 0) steps.push(delta * 1000);
   }
   if (steps.length === 0) return null;
@@ -107,16 +107,25 @@ export function nextRecordingX(prevX, relSeconds, sampleRateMs) {
   return relSeconds;
 }
 
-/** @param {ArrayLike<number>|null} segments @param {number} index */
+/** @param {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64ColSnapshot} values @param {number} index */
+function valueAt(values, index) {
+  return 'valueAt' in values && typeof values.valueAt === 'function'
+    ? (values.valueAt(index) ?? NaN)
+    : (values[index] ?? NaN);
+}
+
+/** @param {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64ColSnapshot|null} segments @param {number} index */
 export function isRecordingBoundary(segments, index) {
-  return segments != null && Number.isFinite(segments[index]) && segments[index] !== segments[index - 1];
+  if (segments == null) return false;
+  const current = valueAt(segments, index);
+  return Number.isFinite(current) && current !== valueAt(segments, index - 1);
 }
 
 /**
- * @param {ArrayLike<number>} timestamps 毫秒时间戳
- * @param {ArrayLike<number>} current
- * @param {ArrayLike<number>} power
- * @param {ArrayLike<number>|null} [segments=null]
+ * @param {ArrayLike<number>|import('./state.js').F64Col} timestamps 毫秒时间戳
+ * @param {ArrayLike<number>|import('./state.js').F64Col} current
+ * @param {ArrayLike<number>|import('./state.js').F64Col} power
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} [segments=null]
  * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  */
 export function calculateEnergy(timestamps, current, power, segments = null, intervalMs = null) {
@@ -133,12 +142,12 @@ export function calculateEnergy(timestamps, current, power, segments = null, int
 }
 
 /**
- * @param {ArrayLike<number>} seconds 相对秒序列
- * @param {ArrayLike<number>} current
- * @param {ArrayLike<number>} power
+ * @param {ArrayLike<number>|import('./state.js').F64Col} seconds 相对秒序列
+ * @param {ArrayLike<number>|import('./state.js').F64Col} current
+ * @param {ArrayLike<number>|import('./state.js').F64Col} power
  * @param {number} startIndex
  * @param {number} endIndex
- * @param {ArrayLike<number>|null} [segments=null]
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} [segments=null]
  * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  */
 export function calculateEnergyInRange(
@@ -154,13 +163,13 @@ export function calculateEnergyInRange(
 }
 
 /**
- * @param {ArrayLike<number>} times
- * @param {ArrayLike<number>} current
- * @param {ArrayLike<number>} power
+ * @param {ArrayLike<number>|import('./state.js').F64Col} times
+ * @param {ArrayLike<number>|import('./state.js').F64Col} current
+ * @param {ArrayLike<number>|import('./state.js').F64Col} power
  * @param {number} perHour
  * @param {number} startIndex
  * @param {number} endIndex
- * @param {ArrayLike<number>|null} segments
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} segments
  * @param {number} maxStepS 空档阈值（秒）
  */
 function integrateEnergy(times, current, power, perHour, startIndex, endIndex, segments, maxStepS) {
@@ -168,11 +177,62 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex, s
   let mah = 0;
   const from = Math.max(0, startIndex) + 1;
   const to = Math.min(endIndex, times.length - 1);
+  if ('chunks' in times && 'chunks' in current && 'chunks' in power && (segments == null || 'chunks' in segments)) {
+    for (let chunkStart = Math.floor(from / 4096) * 4096; chunkStart <= to; chunkStart += 4096) {
+      const chunkEnd = Math.min(to + 1, chunkStart + 4096);
+      const xs = times.chunks(chunkStart, chunkEnd).next().value?.values;
+      const amps = current.chunks(chunkStart, chunkEnd).next().value?.values;
+      const watts = power.chunks(chunkStart, chunkEnd).next().value?.values;
+      const ids = segments?.chunks(chunkStart, chunkEnd).next().value?.values;
+      if (!xs || !amps || !watts) throw new RangeError('Energy range out of bounds');
+      const first = Math.max(from, chunkStart);
+      let previousX = valueAt(times, first - 1);
+      let previousSegment = segments == null ? NaN : valueAt(segments, first - 1);
+      for (let offset = first - chunkStart; offset < xs.length; offset++) {
+        const x = xs[offset];
+        const segment = ids?.[offset];
+        const boundary = ids && Number.isFinite(segment) && segment !== previousSegment;
+        const dt = (x - previousX) / perHour;
+        previousX = x;
+        previousSegment = segment;
+        if (boundary) continue;
+        const currentValue = Math.abs(amps[offset]);
+        const powerValue = Math.abs(watts[offset]);
+        if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
+        if (dt * 3600 > maxStepS) continue;
+        wh += powerValue * dt;
+        mah += currentValue * 1000 * dt;
+      }
+    }
+    return { wh, mah };
+  }
+  if (
+    !('valueAt' in times) &&
+    !('valueAt' in current) &&
+    !('valueAt' in power) &&
+    (segments == null || !('valueAt' in segments))
+  ) {
+    const xs = /** @type {ArrayLike<number>} */ (times);
+    const amps = /** @type {ArrayLike<number>} */ (current);
+    const watts = /** @type {ArrayLike<number>} */ (power);
+    const ids = /** @type {ArrayLike<number>|null} */ (segments);
+    for (let i = from; i <= to; i++) {
+      if (ids && Number.isFinite(ids[i]) && ids[i] !== ids[i - 1]) continue;
+      const dt = (xs[i] - xs[i - 1]) / perHour;
+      const currentValue = Math.abs(amps[i]);
+      const powerValue = Math.abs(watts[i]);
+      if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
+      if (dt * 3600 > maxStepS) continue;
+      wh += powerValue * dt;
+      mah += currentValue * 1000 * dt;
+    }
+    return { wh, mah };
+  }
   for (let i = from; i <= to; i++) {
     if (isRecordingBoundary(segments, i)) continue;
-    const dt = (times[i] - times[i - 1]) / perHour;
-    const currentValue = Math.abs(current[i]);
-    const powerValue = Math.abs(power[i]);
+    const dt = (valueAt(times, i) - valueAt(times, i - 1)) / perHour;
+    const currentValue = Math.abs(valueAt(current, i));
+    const powerValue = Math.abs(valueAt(power, i));
     if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
     if (dt * 3600 > maxStepS) continue;
     wh += powerValue * dt;

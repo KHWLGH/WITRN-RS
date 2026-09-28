@@ -633,16 +633,25 @@ export function isDivider(entry) {
  * @returns {boolean}
  */
 export function matchesFilter(entry, filterText, hideGoodCrc) {
-  if (isDivider(entry)) return true;
-  const msg = /** @type {PdEntry} */ (entry);
-  if (hideGoodCrc && msg.type === 'GoodCRC') return false;
+  return compilePdFilter(filterText, hideGoodCrc)(entry);
+}
+
+/** Normalize the query once for a whole scan.
+ * @param {string} filterText @param {boolean} hideGoodCrc
+ */
+export function compilePdFilter(filterText, hideGoodCrc) {
   const needle = filterText.trim().toLowerCase();
-  if (needle === '') return true;
-  if (msg.type.toLowerCase().includes(needle)) return true;
-  if (displayType(msg.type).toLowerCase().includes(needle)) return true;
-  if (msg.summary.toLowerCase().includes(needle)) return true;
-  if ((msg.direction ?? '').toLowerCase().includes(needle)) return true;
-  return false;
+  return (/** @type {PdEntry|PdDivider} */ entry) => {
+    if (isDivider(entry)) return true;
+    const msg = /** @type {PdEntry} */ (entry);
+    if (hideGoodCrc && msg.type === 'GoodCRC') return false;
+    if (needle === '') return true;
+    if (msg.type.toLowerCase().includes(needle)) return true;
+    if (displayType(msg.type).toLowerCase().includes(needle)) return true;
+    if (msg.summary.toLowerCase().includes(needle)) return true;
+    if ((msg.direction ?? '').toLowerCase().includes(needle)) return true;
+    return false;
+  };
 }
 
 /**
@@ -655,10 +664,39 @@ export function matchesFilter(entry, filterText, hideGoodCrc) {
 export function filterIndices(entries, filterText, hideGoodCrc) {
   /** @type {number[]} */
   const out = [];
+  const matches = compilePdFilter(filterText, hideGoodCrc);
   for (let i = 0; i < entries.length; i++) {
-    if (matchesFilter(entries[i], filterText, hideGoodCrc)) out.push(i);
+    if (matches(entries[i])) out.push(i);
   }
   return out;
+}
+
+/**
+ * Private incremental projection. Live append is folded on the next step; callers
+ * publish indices and offsets together only when step() reports completion.
+ * @param {(PdEntry|PdDivider)[]} entries @param {string} filterText
+ * @param {boolean} hideGoodCrc @param {number} noteWidth @param {number} charWidth
+ */
+export function createPdProjection(entries, filterText, hideGoodCrc, noteWidth, charWidth) {
+  const matches = compilePdFilter(filterText, hideGoodCrc);
+  /** @type {number[]} */
+  const indices = [];
+  const offsets = [0];
+  let through = 0;
+  return {
+    indices,
+    offsets,
+    step(maxRows = 512) {
+      const end = Math.min(entries.length, through + Math.max(1, maxRows));
+      for (; through < end; through++) {
+        const entry = entries[through];
+        if (!matches(entry)) continue;
+        indices.push(through);
+        offsets.push(offsets[offsets.length - 1] + rowHeightOf(entry, noteWidth, charWidth));
+      }
+      return through === entries.length;
+    },
+  };
 }
 
 /**
@@ -711,15 +749,28 @@ export function noteUsesTwoLines(summary, noteWidth, charWidth) {
   return false;
 }
 
-/**
- * @param {PdEntry|PdDivider} entry
- * @param {number} noteWidth
- * @param {number} charWidth
- */
+// Repeated summaries share metrics; cache capacity is independent of log length.
+/** @type {Map<string, number>} */
+const rowHeightCache = new Map();
+let metricWidth = 0;
+let metricAdvance = 0;
+
+/** @param {PdEntry|PdDivider} entry @param {number} noteWidth @param {number} charWidth */
 export function rowHeightOf(entry, noteWidth, charWidth) {
   if (isDivider(entry)) return PD_ROW_HEIGHT;
   const msg = /** @type {PdEntry} */ (entry);
-  return noteUsesTwoLines(msg.summary ?? '', noteWidth, charWidth) ? PD_ROW_HEIGHT_WRAP : PD_ROW_HEIGHT;
+  if (metricWidth !== noteWidth || metricAdvance !== charWidth) {
+    rowHeightCache.clear();
+    metricWidth = noteWidth;
+    metricAdvance = charWidth;
+  }
+  const summary = msg.summary ?? '';
+  const cached = rowHeightCache.get(summary);
+  if (cached !== undefined) return cached;
+  const height = noteUsesTwoLines(summary, noteWidth, charWidth) ? PD_ROW_HEIGHT_WRAP : PD_ROW_HEIGHT;
+  if (rowHeightCache.size >= 4096) rowHeightCache.clear();
+  rowHeightCache.set(summary, height);
+  return height;
 }
 
 /**

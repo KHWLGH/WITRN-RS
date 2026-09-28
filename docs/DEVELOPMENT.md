@@ -14,7 +14,7 @@
 
 | 组件 | 要求 | 说明 |
 | --- | --- | --- |
-| Rust | 1.75+ | 工作区 `rust-version`；建议用最新稳定版 |
+| Rust | 1.85+ | 工作区 `rust-version`；建议用最新稳定版 |
 | Tauri CLI | v2 | `cargo install tauri-cli --version "^2"` |
 | Windows | 10 / 11 | 当前的开发与验证平台 |
 | macOS | 12+（Apple Silicon 已验证） | 可自行编译，见 [macOS 自行编译](#-macos-自行编译) |
@@ -67,7 +67,7 @@ cargo tauri build
 | 文件 | 位置 |
 | --- | --- |
 | `package.json` | `"version"` |
-| `Cargo.toml` | `[workspace.package]` 的 `version`（三个成员 crate 通过 `version.workspace = true` 继承） |
+| `Cargo.toml` | `[workspace.package]` 的 `version`（四个成员 crate 通过 `version.workspace = true` 继承） |
 | `src-tauri/tauri.conf.json` | `"version"` |
 
 漏改一处不会有任何构建或测试报错 —— 装出来的包和源码对不上，但一切看起来都正常。所以这条不变量由 **`test/version-sync.test.js`** 守着：它断言三处一致、格式为 `X.Y.Z`，成员 crate 仍在继承而不是各写各的，以及 `macos-private-api` Cargo feature 与 `tauri.conf.json` 的 `macOSPrivateApi` 同步。该测试随 `npm test` 运行，因此 CI 每次 push / PR 都会检查。
@@ -96,16 +96,16 @@ npm run typecheck           # tsc --noEmit -p jsconfig.json
 npm run lint                # biome check --error-on-warnings .
 cargo fmt --check --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace      # 158 个单元 / 集成测试 + 20 个文档测试
+cargo test --workspace      # 工作区单元、集成与文档测试
 ```
 
 `npm run format` 会应用 Biome 的安全格式化（会改文件）。`npm run lint` 把警告视为失败。
 
-Rust 侧的三条命令都是**工作区范围**的：`--all` / `--workspace` 会同时覆盖 `src-tauri` 与 `crates/usbpd-parser`、`crates/witrn-hid`。注意不要退回到 `--manifest-path src-tauri/Cargo.toml` —— 那只会选中 `witrn-rs` 一个包，两个协议 crate 就完全漏掉了。
+Rust 侧的三条命令都是**工作区范围**的：`--all` / `--workspace` 会同时覆盖 `src-tauri` 与三个协议 crate。注意不要退回到 `--manifest-path src-tauri/Cargo.toml` —— 那只会选中 `witrn-rs` 一个包，协议 crate 就完全漏掉了。
 
 ### 特性组合
 
-上面那组命令走的都是默认特性。改动两个协议 crate 的 `#[cfg(feature = ...)]` 时，还要跑一遍非默认组合 —— 漏标的特性门只有在关掉对应特性时才会暴露：
+上面那组命令走的都是默认特性。改动两个带特性门的协议 crate 的 `#[cfg(feature = ...)]` 时，还要跑一遍非默认组合 —— 漏标的特性门只有在关掉对应特性时才会暴露：
 
 ```bash
 for combo in \
@@ -158,7 +158,6 @@ CI 的 `crate-features` job 跑的就是这一组。注意各组合的用例数*
 | --- | --- | --- |
 | `process_start` / `run_enter` / `plugins_registered` | 0 / 0 / 0 | 0 / 0 / 0 |
 | `context`（webview 上下文就绪） | 482（p95 527） | 723 / 720 |
-| `setup_enter` = `titlebar_created` = `material_applied` | 517 / 517 / 518 | 767 / 765 |
 | `platformProbed` | 681（p95 764） | 1011 / 959 |
 | `firstPaint` = `firstContentfulPaint` | 750（p95 792） | — |
 | `appReady` | 811（p95 885） | 1242 / 1281 |
@@ -255,13 +254,13 @@ rAF 间隔有两个来源，而**间隔本身分不开它们**：这一帧我们
 | `validate` | `ubuntu-latest` | 装系统依赖 → `npm ci` → **`npm run build`** → `npm test` → `typecheck` → `lint` → `cargo fmt --check --all` → `cargo clippy --workspace -D warnings` → `cargo test --workspace` |
 | `backend-other-platforms` | `windows-latest` | `npm ci && npm run build` → `cargo test --workspace` |
 | | `macos-latest` | `npm ci && npm run build` → `cargo check --workspace --all-targets` |
-| `crate-features` | `ubuntu-latest` | 对两个协议 crate 的 6 组非默认特性组合逐个跑 clippy 与 test（**不需要** `out/`：这些组合根本不构建 `src-tauri`） |
+| `crate-features` | `ubuntu-latest` | 对两个带特性门的协议 crate 的 6 组非默认特性组合逐个跑 clippy 与 test（**不需要** `out/`：这些组合根本不构建 `src-tauri`） |
 | `perf-shape` | `ubuntu-latest` | 硬门禁只放确定性检查：先 `npm run build` 产出 `out/`，再跑 `bench/packaging.mjs` 断言（含"内嵌集合里不许有未提交文件 / 声明文件"）+ `core.mjs --verify-baseline` 结构校验。计时（`--compare` 与 `cargo bench`）**只报告**，见下 |
 | `ui-integrity` | `windows-latest` | `bench:ui` 的**硬断言**（11 列 SHA-256、`lastSeq === count`、能量积分、并发 CSV 导出回环、零运行时异常），并用 `--shipped-csp` 以真实发货策略服务，因此同时门禁 CSP 回归。它的计时不进门禁 |
 
 前三个 job 的 cargo 步骤都**依赖 Node**：`frontendDist` 指向 `out/`，`generate_context!` 在宏展开期就嵌入它，目录不存在时 `cargo build` / `check` / `clippy` / `test` 一起失败 —— 包括原本只看 Rust、不需要 Node 的 `backend-other-platforms`。
 
-Rust 步骤都是工作区范围，因此 `src-tauri` 与两个协议 crate 一并受检。除 `crate-features` 外各 job 都启用了 `Swatinem/rust-cache@v2` 缓存依赖编译产物。
+Rust 步骤都是工作区范围，因此 `src-tauri` 与三个协议 crate 一并受检。除 `crate-features` 外各 job 都启用了 `Swatinem/rust-cache@v2` 缓存依赖编译产物。
 
 **为什么计时不硬门禁**：在同一台机器上实测，未改代码连跑三次，全部受门指标一起落在 1.12–1.50× 且逐轮上飘；`--compare` 已经用"扣漂移 + 3 轮互证"自我防护，但共享 runner 上的余量还不知道是多少，所以先 `continue-on-error: true` 观察。**把它改成真门禁的前提是先观察到一段安静期** —— 一个会莫名变红、于是被人忽略的门禁比没有门禁更糟。手改基线由 `validate` 里的 `--verify-baseline` 拦住。
 
@@ -288,7 +287,7 @@ npm run build && node bench/packaging.mjs && node bench/core.mjs --verify-baseli
 
 ### 发版前置：真机验收凭据
 
-100 Hz × 600 秒的真机长跑没法在托管 runner 上复现（没有 HID 设备），所以 `.github/workflows/release-perf.yml` 是一个 `workflow_dispatch`，它**不替你打 tag、不发 Release、不构建安装包**，只做机器能判的那一半：回执自洽、且回执测的就是这个 tag 里的代码。
+1000 SPS × 600 秒的真机长跑没法在托管 runner 上复现（没有 HID 设备），所以 `.github/workflows/release-perf.yml` 是一个 `workflow_dispatch`，它**不替你打 tag、不发 Release、不构建安装包**，只做机器能判的那一半：回执自洽、且回执测的就是这个 tag 里的代码。
 
 凭据不是手填的汇总数字，而是从**导出的 CSV** 与**应用自己的计数**一起算出来的。"100 Hz 跑满 600 秒且没丢点"这个命题里，能由 CSV 证明的是：行数与跨度自洽（60,000 行 / `RelativeTime(s)` 步进 ~0.01s）、无重复、不倒退、不跨分段；而"设备到文件之间有没有少"只能由 `window.__WITRN_STREAM__()` 的 `seq` 与行数比出来（见下面"空洞不参与判决"那一节：单靠文件既定不了罪，也证不了清白）：
 
@@ -296,7 +295,7 @@ npm run build && node bench/packaging.mjs && node bench/core.mjs --verify-baseli
 # 真机跑完 600 秒后：在应用 DevTools 里执行 window.__WITRN_STREAM__() 并整段复制返回值，
 # 再在应用里导出 CSV，然后：
 npm run verify:hardware -- --csv 导出文件.csv --diagnostics '{"seq":60000,"streamErrors":0,"capacityErrors":0,...}' \
-  --hz 100 --min-duration 600 --commit "$(git rev-parse HEAD)" --receipt-out acceptance.json
+  --hz 1000 --min-duration 600 --commit "$(git rev-parse HEAD)" --receipt-out acceptance.json
 npm run check:release-tag -- --tag v0.2.2 --receipt acceptance.json
 ```
 

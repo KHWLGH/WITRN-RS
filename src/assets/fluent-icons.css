@@ -53,6 +53,9 @@
 .fi-flash {
   --fi: url("fluent-icons/flash.svg");
 }
+.fi-options {
+  --fi: url("fluent-icons/options.svg");
+}
 .fi-select {
   --fi: url("fluent-icons/select-all-on.svg");
 }

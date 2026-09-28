@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatCsvChunks, formatExcelTime, parseCsv, parseCsvDateTime, snapshotCsvColumns } from '../src/csv-codec.js';
+import {
+  createCsvParser,
+  formatCsvChunks,
+  formatCsvRange,
+  formatExcelTime,
+  formatSpoolHeader,
+  formatSpoolHeaderPatch,
+  parseCsv,
+  parseCsvDateTime,
+  SPOOL_PATCH_BYTES,
+  snapshotCsvColumns,
+} from '../src/csv-codec.js';
 import { calculateEnergyInRange, mapCsvColumns, parseRelativeTime } from '../src/measurement.js';
 import { emptyChartColumns, F64Col } from '../src/state.js';
 
@@ -131,22 +142,57 @@ test('precise CSV retains missing rows and infinities without inventing zeros', 
   for (const key of KEYS) assert.deepStrictEqual(imported[key].view(), cols[key].view());
 });
 
-test('snapshot holds existing buffers and fixed logical lengths through append and reallocation without detaching', () => {
+test('snapshot holds chunk references and fixed logical lengths through append', () => {
   const cols = makeColumns([
     { x: 0, timestamps: START, voltage: 5, current: 2, power: 10 },
     { x: 1, timestamps: START + 1000, voltage: 6, current: 2, power: 12 },
   ]);
   const snapshot = snapshotCsvColumns(cols, { sampleRate: 250, startTime: START });
   for (const key of KEYS) {
-    assert.equal(snapshot.columns[key].buffer, cols[key].buf.buffer);
+    const buffer = snapshot.columns[key].chunks().next().value.values.buffer;
+    assert.equal(buffer, cols[key].buf.buffer);
     assert.equal(snapshot.columns[key].length, 2);
     cols[key].push(99);
-    assert.notEqual(snapshot.columns[key].buffer, cols[key].buf.buffer);
-    assert.equal(snapshot.columns[key].byteLength, 16);
+    assert.equal(snapshot.columns[key].chunks().next().value.values.buffer, buffer);
+    assert.equal(snapshot.columns[key].valueAt(2), undefined);
   }
   const imported = decode([...formatCsvChunks(snapshot)].join('')).columns;
   assert.equal(imported.x.length, 2);
   assert.deepEqual([...imported.voltage.view()], [5, 6]);
+});
+
+test('CSV round-trips every channel and segment across chunk boundaries', () => {
+  const cols = emptyChartColumns();
+  const keys = [...KEYS, 'recordingSegments'];
+  for (let i = 0; i < 4101; i++) {
+    for (const [channel, key] of keys.entries()) {
+      const value =
+        i === 4095 && key !== 'x' && key !== 'timestamps'
+          ? -0
+          : i === 4096 && key !== 'x' && key !== 'timestamps'
+            ? NaN
+            : key === 'x'
+              ? i * 0.25
+              : key === 'timestamps'
+                ? START + i * 250
+                : key === 'recordingSegments'
+                  ? Math.floor(i / 1000) + 1
+                  : i + channel / 11;
+      cols[key].push(value);
+    }
+  }
+  const snapshot = snapshotCsvColumns(cols, { sampleRate: 250, startTime: START, withTemp: true });
+  for (const key of keys) cols[key].push(999);
+  const parsed = decode([...formatCsvChunks(snapshot)].join('')).columns;
+  for (const key of keys) {
+    assert.equal(parsed[key].length, 4101, key);
+    for (const i of [0, 4094, 4095, 4096, 4097, 4100]) {
+      assert.ok(
+        Object.is(parsed[key].valueAt(i), snapshot.columns[key]?.valueAt(i) ?? snapshot.recordingSegments.valueAt(i)),
+        `${key}[${i}]`,
+      );
+    }
+  }
 });
 
 test('short optional columns cannot expose unused zero-filled buffer capacity', () => {
@@ -247,7 +293,7 @@ test('DateTime metadata with BOM/CRLF or after data is read without trusting SUM
   const parsed = decode(text);
   assert.equal(parsed.startTime, START);
   assert.equal(parsed.columns.timestamps.at(0), START);
-  assert.ok(parsed.columns.x.buf.length <= 2);
+  assert.equal(parsed.columns.x._chunks.length, 1);
   assert.equal(decode(`DateTime,bad\n${OLD_HEADER}\n00:00:00,5,2,10,`).startTime, START);
 });
 
@@ -324,4 +370,106 @@ test('invalid files fail before exposing any partial imported columns', () => {
   assert.throws(() => decode('garbage'), /Header not found/);
   assert.throws(() => decode(`${OLD_HEADER}\n00:00:00,NaN,2,10,`), /No valid data/);
   assert.throws(() => decode(OLD_HEADER), /No valid data/);
+});
+
+/** Every column of a parse result as plain arrays, for exact comparison. */
+function columnsOf(parsed) {
+  return Object.fromEntries(
+    [...KEYS, 'recordingSegments'].map((key) => [
+      key,
+      Array.from(parsed.columns[key].view(), (v) => (Object.is(v, -0) ? '-0' : v)),
+    ]),
+  );
+}
+
+test('streaming parse equals the whole-text parse at every split position', () => {
+  const precise = encode(
+    makeColumns([
+      { x: 0, timestamps: START, voltage: 5, current: -2, power: 10, temp: 25, dp: 0.6, dn: 0.6, cc1: 1.65, cc2: 0 },
+      { x: 0.25, timestamps: START + 250, voltage: 5.01, current: -2.1, power: 10.5 },
+      { x: 0.5, timestamps: START + 500, voltage: 9, current: 3, power: 27 },
+    ]),
+    { withTemp: true },
+  );
+  const legacy = `\uFEFFSUM,2\r\n${OLD_HEADER}\r\n00:00:00,5,2,10,\r\n00:00:01,6,-2,12,\r\nDateTime,2024/2/29 12:34:56.789\r\n`;
+  for (const text of [precise, legacy, precise.replaceAll('\n', '\r\n')]) {
+    const whole = decode(text);
+    for (let split = 0; split <= text.length; split++) {
+      const parser = createCsvParser({ fallbackStartTime: START, signedCurrent: true });
+      parser.push(text.slice(0, split));
+      parser.push(text.slice(split));
+      const streamed = parser.finish();
+      assert.deepEqual(columnsOf(streamed), columnsOf(whole), `split at ${split}`);
+      assert.equal(streamed.startTime, whole.startTime);
+      assert.equal(streamed.intervalMs, whole.intervalMs);
+    }
+  }
+});
+
+test('a byte-at-a-time feed still parses, and runaway lines are refused', () => {
+  const text = encode(makeColumns([{ x: 0, timestamps: START, voltage: 5, current: 1, power: 5 }]));
+  const parser = createCsvParser({ fallbackStartTime: START });
+  for (const ch of text) parser.push(ch);
+  assert.equal(parser.rows, 1);
+  assert.equal(parser.finish().columns.voltage.at(0), 5);
+  assert.throws(() => createCsvParser({ fallbackStartTime: START }).push('x'.repeat((1 << 20) + 1)), /行过长/);
+});
+
+test('range formatting concatenates to exactly the chunked body', () => {
+  const cols = emptyChartColumns();
+  for (let i = 0; i < 10; i++) for (const key of KEYS) cols[key].push(key === 'x' ? i / 4 : i + 0.5);
+  const snapshot = snapshotCsvColumns(cols, { sampleRate: 250, startTime: START });
+  const [header, ...body] = [...formatCsvChunks(snapshot, 4)];
+  assert.ok(header.endsWith('RelativeTime(s),Timestamp(ms),\n'));
+  assert.equal(
+    [formatCsvRange(snapshot, 0, 3), formatCsvRange(snapshot, 3, 7), formatCsvRange(snapshot, 7, 99)].join(''),
+    body.join(''),
+  );
+  assert.equal(formatCsvRange(snapshot, 5, 5), '');
+});
+
+test('the spool header has a fixed-width patchable prefix and imports like an export', () => {
+  const small = formatSpoolHeaderPatch({ length: 0, lastX: Number.NaN, sampleRate: 1 });
+  const large = formatSpoolHeaderPatch({ length: 123_456_789, lastX: 40 * 86400 + 3661.5, sampleRate: 60000 });
+  assert.equal(small.length, SPOOL_PATCH_BYTES);
+  assert.equal(large.length, SPOOL_PATCH_BYTES);
+  assert.match(large, /^SUM,000123456789\nTotalTime,="0040\.01:01:01\.500"\nSampTime\(ms\),060000\n$/);
+
+  const cols = makeColumns([
+    { x: 0, timestamps: START, voltage: 5, current: 1, power: 5, temp: 30 },
+    { x: 0.001, timestamps: START + 1, voltage: 5, current: 1.5, power: 7.5 },
+  ]);
+  cols.recordingSegments.push(1);
+  cols.recordingSegments.push(1);
+  const snapshot = snapshotCsvColumns(cols, {
+    sampleRate: 1,
+    startTime: START,
+    withTemp: true,
+    recordingSegments: cols.recordingSegments,
+  });
+  const header = formatSpoolHeader({ length: 0, lastX: Number.NaN, sampleRate: 1, startTime: START });
+  assert.ok(header.startsWith(small), 'the patchable prefix is the header start');
+  const text = header + formatCsvRange(snapshot, 0, 2);
+  const parsed = decode(text);
+  assert.equal(parsed.intervalMs, 1, 'a 1 ms declared interval is trusted');
+  // DateTime is written to the second, exactly as exports do; exact times live in Timestamp(ms).
+  assert.equal(parsed.startTime, Math.floor(START / 1000) * 1000);
+  assert.equal(parsed.columns.timestamps.at(1), START + 1);
+  assert.deepEqual([...parsed.columns.current.view()], [1, 1.5]);
+  assert.equal(parsed.columns.temp.at(0), 30);
+  assert.deepEqual([...parsed.recordingSegments.view()], [1, 1]);
+});
+
+test('a truncated last row of a precise file is dropped, a complete one is kept', () => {
+  const cols = makeColumns([
+    { x: 0, timestamps: START, voltage: 5, current: 1, power: 5 },
+    { x: 1, timestamps: START + 1000, voltage: 6, current: 1, power: 6 },
+  ]);
+  const text = encode(cols);
+  const cut = text.slice(0, text.length - 4);
+  assert.equal(decode(cut).columns.x.length, 1, 'the half-written row never becomes data');
+  assert.equal(decode(text.trimEnd()).columns.x.length, 2, 'no trailing newline is fine when the row is complete');
+  // Rows edited to drop the trailing comma keep every row, including the last one.
+  const edited = text.replace(/,\n/g, '\n').trimEnd();
+  assert.equal(decode(edited).columns.x.length, 2);
 });

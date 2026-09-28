@@ -9,9 +9,11 @@
  * - 布局为上表 + 下详情：点击行选中，详情按 hex 字 / Header 表 / 对象表渲染。
  */
 
+import { runCooperativeSlices } from '../cooperative.js';
 import {
   buildPdCaptureFile,
   buildRowOffsets,
+  createPdProjection,
   directionClass,
   displayType,
   filterIndices,
@@ -31,7 +33,6 @@ import {
   PD_SOFT_CAP,
   parsePdCaptureFile,
   rowHeightOf,
-  sessionOrigin,
   VI_SAMPLE_TITLE,
   visibleRangeByOffsets,
 } from '../pd-model.js';
@@ -47,6 +48,9 @@ import { toast } from '../ui/toast.js';
 
 /** @type {(PdEntry|PdDivider)[]} */
 const log = [];
+/** First message timestamp is invariant across append; scrolling never scans the log. */
+/** @type {number|null} */
+let originTime = null;
 /** 过滤后的日志下标。 */
 /** @type {number[]} */
 let filtered = [];
@@ -81,6 +85,14 @@ let listWindow = null;
 let rowOffsets = [0];
 let noteColWidth = 0;
 let monoAdvance = 0;
+/** @type {{cancelled: boolean}|null} */
+let projectionWork = null;
+
+function cancelProjection() {
+  if (projectionWork) projectionWork.cancelled = true;
+  projectionWork = null;
+  els.list()?.setAttribute?.('aria-busy', 'false');
+}
 
 // ─── 摘取 DOM ────────────────────────────────────────────────────────────────
 
@@ -175,6 +187,7 @@ function ingestOne(payload, live = true) {
   }
   rememberSeq(entry);
   log.push(entry);
+  if (originTime === null && !isDivider(entry)) originTime = entry.t;
   if (log.length === PD_SOFT_CAP && !softCapWarned) {
     softCapWarned = true;
     toast.warning(`PD 报文已达 ${PD_SOFT_CAP} 条，继续存储可能占用较多内存`);
@@ -184,6 +197,7 @@ function ingestOne(payload, live = true) {
     return true;
   }
   if (viewHidden()) return true;
+  if (projectionWork) return true;
   if (matchesFilter(entry, currentFilterText(), currentHideGoodCrc())) {
     filtered.push(log.length - 1);
     appendRowOffset(entry);
@@ -284,7 +298,7 @@ export function markPdDisconnect() {
   /** @type {PdDivider} */
   const divider = { t: Date.now(), divider: true };
   log.push(divider);
-  if (!paused && !viewHidden()) {
+  if (!paused && !viewHidden() && !projectionWork) {
     if (matchesFilter(divider, currentFilterText(), currentHideGoodCrc())) {
       filtered.push(log.length - 1);
       appendRowOffset(divider);
@@ -338,16 +352,18 @@ function syncWindow(followTail = false) {
   refreshRowMetrics();
   if (rowOffsets.length !== filtered.length + 1) rebuildRowOffsets();
   const total = rowOffsets[rowOffsets.length - 1] ?? 0;
+  // Publish the scroll extent first: setting scrollTop against the old, shorter
+  // filter would clamp it and leave follow mode in the middle of the new list.
+  listSpacer.style.height = `${total}px`;
 
   if (followTail && autoscrollEnabled()) {
     list.scrollTop = total;
   }
 
   const { start, end } = visibleRangeByOffsets(rowOffsets, list.scrollTop, list.clientHeight);
-  listSpacer.style.height = `${total}px`;
   listWindow.style.transform = `translateY(${rowOffsets[start] ?? 0}px)`;
 
-  const origin = sessionOrigin(log);
+  const origin = originTime ?? 0;
   patchWindow(start, end, origin);
 
   updateEmptyState();
@@ -361,6 +377,33 @@ function syncWindow(followTail = false) {
 }
 
 function rebuildFilterAndWindow() {
+  cancelProjection();
+  if (log.length > 4096) {
+    const width = measureNoteColWidth();
+    if (width > 0) noteColWidth = width;
+    if (!monoAdvance) monoAdvance = measureMonoAdvance();
+    const next = createPdProjection(log, currentFilterText(), currentHideGoodCrc(), noteColWidth, monoAdvance);
+    const work = { cancelled: false };
+    projectionWork = work;
+    els.list()?.setAttribute?.('aria-busy', 'true');
+    void runCooperativeSlices(() => next.step(), { isCancelled: () => work.cancelled || viewHidden() })
+      .then((complete) => {
+        if (projectionWork !== work) return;
+        projectionWork = null;
+        els.list()?.setAttribute?.('aria-busy', 'false');
+        if (!complete) return;
+        filtered = next.indices;
+        rowOffsets = next.offsets;
+        if (selectedIndex !== null && !filtered.includes(selectedIndex)) clearSelection();
+        syncWindow(autoscrollEnabled());
+      })
+      .catch((error) => {
+        if (projectionWork === work) cancelProjection();
+        console.error(error);
+        toast.error('PD 列表更新失败');
+      });
+    return;
+  }
   filtered = filterIndices(log, currentFilterText(), currentHideGoodCrc());
   rebuildRowOffsets();
   if (selectedIndex !== null) {
@@ -388,14 +431,19 @@ function measureMonoAdvance() {
 
 function refreshRowMetrics() {
   const nextWidth = measureNoteColWidth();
+  const oldAdvance = monoAdvance;
   if (!monoAdvance) monoAdvance = measureMonoAdvance();
-  if (nextWidth > 0 && Math.abs(nextWidth - noteColWidth) > 0.5) {
-    noteColWidth = nextWidth;
+  if ((nextWidth > 0 && Math.abs(nextWidth - noteColWidth) > 0.5) || oldAdvance !== monoAdvance) {
+    if (nextWidth > 0) noteColWidth = nextWidth;
     rebuildRowOffsets();
   }
 }
 
 function rebuildRowOffsets() {
+  if (log.length > 4096) {
+    rebuildFilterAndWindow();
+    return;
+  }
   rowOffsets = buildRowOffsets(log, filtered, noteColWidth, monoAdvance);
 }
 
@@ -753,7 +801,9 @@ function clearSelection() {
  * 两侧各自只调用对方的无级联版本，因此不会互相递归。
  */
 export function clearPdEntries() {
+  cancelProjection();
   log.length = 0;
+  originTime = null;
   filtered = [];
   rowOffsets = [0];
   bufferedWhilePaused = 0;
@@ -871,7 +921,9 @@ async function importPdCapture() {
       }
     }
 
+    cancelProjection();
     log.length = 0;
+    originTime = null;
     filtered = [];
     bufferedWhilePaused = 0;
     softCapWarned = false;
@@ -881,6 +933,7 @@ async function importPdCapture() {
     clearSelection();
     for (const entry of nextEntries) {
       log.push(entry);
+      if (originTime === null && !isDivider(entry)) originTime = entry.t;
       rememberSeq(entry);
       if (!isDivider(entry) && Number.isFinite(entry.gen)) acceptedGen = /** @type {number} */ (entry.gen);
     }
@@ -1058,6 +1111,7 @@ export function initPdView() {
       }
 
       paused = !paused;
+      if (paused) cancelProjection();
       if (!paused) {
         bufferedWhilePaused = 0;
         rebuildFilterAndWindow();
@@ -1081,15 +1135,7 @@ export function initPdView() {
     importBtn.addEventListener('click', () => void importPdCapture());
   }
 
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let filterTimer = null;
-  els.filter()?.addEventListener('input', () => {
-    if (filterTimer) clearTimeout(filterTimer);
-    filterTimer = setTimeout(() => {
-      filterTimer = null;
-      rebuildFilterAndWindow();
-    }, 150);
-  });
+  els.filter()?.addEventListener('input', () => rebuildFilterAndWindow());
   els.hideGoodCrc()?.addEventListener('change', () => rebuildFilterAndWindow());
   const followRecording = els.followRecording();
   if (followRecording) {

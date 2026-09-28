@@ -25,7 +25,6 @@ const STAGE_ORDER: &[&str] = &[
     "plugins_registered",
     "setup_enter",
     "titlebar_created",
-    "material_applied",
     "setup_exit",
     "web_reported",
     "reported",

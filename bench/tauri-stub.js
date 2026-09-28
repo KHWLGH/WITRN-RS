@@ -2,11 +2,14 @@
   const events = new Map(),
     files = new Map(),
     settings = new Map();
-  settings.set('appSettings', { signedCurrent: true, tempSource: 'device', sampleRate: 10, windowMaterial: false });
+  settings.set('appSettings', { signedCurrent: true, tempSource: 'device', sampleRate: 10 });
   let selectedFile = null,
     gen = 0,
     streamGeneration = 0;
+  let nextFileHandle = 0;
+  const openFiles = new Map();
   let stream = null;
+  let sampleRateMs = 10;
   const calls = Object.create(null);
   const device = {
     path: 'bench://synthetic',
@@ -26,7 +29,7 @@
   function emit(name, payload) {
     for (const fn of events.get(name) || []) fn({ event: name, payload });
   }
-  async function invoke(cmd, args = {}) {
+  async function invoke(cmd, args = {}, options = {}) {
     calls[cmd] = (calls[cmd] || 0) + 1;
     if (cmd.startsWith('plugin:store|')) {
       switch (cmd.split('|')[1]) {
@@ -88,7 +91,7 @@
         segment: stream.segment,
         received_us: stream.received_us,
         wall_anchor_ms: stream.wall_anchor_ms,
-        rate_ms: 10,
+        rate_ms: sampleRateMs,
       };
     }
     if (cmd === 'ack_device_stream') {
@@ -105,21 +108,78 @@
       }
       return end;
     }
-    if (cmd === 'get_window_material' || cmd === 'set_window_material_enabled')
-      return { available: false, applied: false };
     if (cmd === 'pd_log_after') return [];
     if (cmd === 'pd_log_clear') return ++gen;
-    if (
-      [
-        'set_sample_rate',
-        'disconnect_device',
-        'set_pd_capture_enabled',
-        'set_window_material_theme',
-        'set_window_material_unfocused',
-        'shutdown',
-      ].includes(cmd)
-    )
+    if (cmd === 'csv_export_pick') {
+      const path = 'bench://export.csv';
+      files.set(path, '');
+      const handle = ++nextFileHandle;
+      openFiles.set(handle, { path, offset: 0, kind: 'write' });
+      return { handle, name: 'export.csv', path, size: 0 };
+    }
+    if (cmd === 'csv_import_pick') {
+      if (!selectedFile) return null;
+      const text = files.get(selectedFile) ?? '';
+      const handle = ++nextFileHandle;
+      openFiles.set(handle, { path: selectedFile, offset: 0, kind: 'read' });
+      return {
+        handle,
+        name: selectedFile.split('/').at(-1),
+        path: selectedFile,
+        size: new TextEncoder().encode(text).byteLength,
+      };
+    }
+    if (cmd === 'spool_open') {
+      const path = `bench://spool-${++nextFileHandle}.partial.csv`;
+      files.set(path, '');
+      const handle = nextFileHandle;
+      openFiles.set(handle, { path, offset: 0, kind: 'write' });
+      return { handle, name: path.split('/').at(-1), path, size: 0 };
+    }
+    if (cmd === 'spool_recovery_list') return [];
+    if (cmd === 'spool_recovery_open' || cmd === 'spool_recovery_delete') return null;
+    if (cmd === 'csv_read_chunk') {
+      const entry = openFiles.get(args.handle);
+      if (!entry) throw new Error('unknown read handle');
+      const bytes = new TextEncoder()
+        .encode(files.get(entry.path) ?? '')
+        .slice(entry.offset, entry.offset + 4 * 1024 * 1024);
+      entry.offset += bytes.byteLength;
+      return bytes.buffer;
+    }
+    if (cmd === 'csv_read_close') {
+      openFiles.delete(args.handle);
       return;
+    }
+    if (cmd === 'csv_write_chunk') {
+      const handle = Number(options?.headers?.['x-handle']);
+      const entry = openFiles.get(handle);
+      if (!entry) throw new Error('unknown write handle');
+      files.set(entry.path, (files.get(entry.path) ?? '') + new TextDecoder().decode(args));
+      return;
+    }
+    if (cmd === 'csv_write_patch') {
+      const handle = Number(options?.headers?.['x-handle']);
+      const offset = Number(options?.headers?.['x-offset']);
+      const entry = openFiles.get(handle);
+      if (!entry) throw new Error('unknown write handle');
+      const current = files.get(entry.path) ?? '';
+      const patch = new TextDecoder().decode(args);
+      files.set(entry.path, current.slice(0, offset) + patch + current.slice(offset + patch.length));
+      return;
+    }
+    if (cmd === 'csv_write_sync') return;
+    if (cmd === 'csv_write_close') {
+      const entry = openFiles.get(args.handle);
+      openFiles.delete(args.handle);
+      if (args.options?.abort && entry) files.delete(entry.path);
+      return;
+    }
+    if (cmd === 'set_sample_rate') {
+      sampleRateMs = Number(args.rate) || sampleRateMs;
+      return;
+    }
+    if (['set_sample_rate', 'disconnect_device', 'set_pd_capture_enabled', 'shutdown'].includes(cmd)) return;
     throw new Error(`Unimplemented simulated Tauri command: ${cmd}`);
   }
   function feed(samples) {

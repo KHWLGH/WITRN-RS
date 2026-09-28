@@ -1,10 +1,31 @@
 // @ts-check
+import { F64_CHUNK_SIZE } from './state.js';
 /**
  * 主图显示用 min/max 桶。全量数据仍在 F64Col；这里只为 uPlot 准备 O(宽度) 顶点。
  */
 
 export const BUCKET_MIN = 64;
 export const DISPLAY_SERIES = 8;
+
+/** @typedef {ArrayLike<number>|import('./state.js').F64Col} NumericColumn */
+
+/** @param {NumericColumn} column @param {number} index */
+export function columnValue(column, index) {
+  return Number('valueAt' in column ? column.valueAt(index) : column[index]);
+}
+
+/** A direct view of one storage block (or the full ordinary array). @param {NumericColumn} column @param {number} index @param {number} end */
+export function columnSpan(column, index, end) {
+  if ('_chunks' in column) {
+    const chunk = column._chunks[index >>> 12];
+    return {
+      values: chunk,
+      base: (index >>> 12) * F64_CHUNK_SIZE,
+      end: Math.min(end, ((index >>> 12) + 1) * F64_CHUNK_SIZE),
+    };
+  }
+  return { values: column, base: 0, end };
+}
 
 /** @param {number} width */
 export function bucketCap(width) {
@@ -22,7 +43,7 @@ export function stripePpb(count, cap) {
 }
 
 /**
- * @param {ArrayLike<number>} xs
+ * @param {NumericColumn} xs
  * @param {number} length
  * @param {number} xVal
  * @returns {number}
@@ -32,21 +53,21 @@ export function nearestIndex(xs, length, xVal) {
   if (!Number.isFinite(xVal)) return 0;
   let lo = 0;
   let hi = length - 1;
-  const first = Number(xs[lo]);
-  const last = Number(xs[hi]);
+  const first = Number(columnValue(xs, lo));
+  const last = Number(columnValue(xs, hi));
   if (xVal <= first) return lo;
   if (xVal >= last) return hi;
   while (lo + 1 < hi) {
     const mid = (lo + hi) >> 1;
-    if (Number(xs[mid]) <= xVal) lo = mid;
+    if (Number(columnValue(xs, mid)) <= xVal) lo = mid;
     else hi = mid;
   }
-  return xVal - Number(xs[lo]) <= Number(xs[hi]) - xVal ? lo : hi;
+  return xVal - Number(columnValue(xs, lo)) <= Number(columnValue(xs, hi)) - xVal ? lo : hi;
 }
 
 /**
  * 第一个 x >= target 的下标；全部更小则返回 length。
- * @param {ArrayLike<number>} xs
+ * @param {NumericColumn} xs
  * @param {number} length
  * @param {number} target
  */
@@ -55,7 +76,7 @@ export function firstIndexAtOrAfter(xs, length, target) {
   let hi = length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (xs[mid] >= target) hi = mid;
+    if (columnValue(xs, mid) >= target) hi = mid;
     else lo = mid + 1;
   }
   return lo;
@@ -63,7 +84,7 @@ export function firstIndexAtOrAfter(xs, length, target) {
 
 /**
  * 第一个 x > target 的下标（exclusive end）。
- * @param {ArrayLike<number>} xs
+ * @param {NumericColumn} xs
  * @param {number} length
  * @param {number} target
  */
@@ -72,7 +93,7 @@ export function firstIndexAfter(xs, length, target) {
   let hi = length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (xs[mid] > target) hi = mid;
+    if (columnValue(xs, mid) > target) hi = mid;
     else lo = mid + 1;
   }
   return lo;
@@ -165,54 +186,96 @@ export class SeriesBuckets {
 
   /**
    * 单遍按条带折叠，不给每个样本分配中间数组。
-   * @param {ArrayLike<number>} xs
-   * @param {ArrayLike<number>[]} series
+   * @param {NumericColumn} xs
+   * @param {NumericColumn[]} series
    * @param {number} start
    * @param {number} end
    * @param {number} cap
    * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
    */
   rebuild(xs, series, start, end, cap, extrema = null) {
-    this.reset(start);
-    if (end <= start) {
-      this.cap = Math.max(BUCKET_MIN, cap | 0);
-      return;
+    const step = this.beginRebuild(xs, series, start, end, cap, extrema);
+    while (!step(Infinity)) {
+      /* synchronous public API */
     }
-    const n = end - start;
-    const ppb = stripePpb(n, cap);
-    this.ppb = ppb;
-    for (let i = start; i < end; i += ppb) {
-      const stripeEnd = i + ppb < end ? i + ppb : end;
-      const bucket = makeBucketFromIndex(xs, series, i);
-      if (extrema) {
-        extrema.fold(bucket, series, i + 1, stripeEnd);
-        bucket.x1 = Number(xs[stripeEnd - 1]);
-        bucket.n = stripeEnd - i;
-      } else {
-        for (let j = i + 1; j < stripeEnd; j++) foldIndex(bucket, xs, series, j);
-      }
-      this.list.push(bucket);
-    }
-    this.srcEnd = end;
-    // 条带数本来就贴着密度上限，此时 cap 保持等于它就意味着「录制中再落一个样本」
-    // 会 mergeDown 把整表分辨率腰斩 —— 画面会在没人操作时自己变稀。留一倍余量，
-    // 分辨率的合法变化由调用方比较 stripePpb 后整体重建决定，不靠这里降级。
-    this.cap = Math.max(BUCKET_MIN, this.list.length * 2);
   }
 
   /**
-   * @param {ArrayLike<number>} xs
-   * @param {ArrayLike<number>[]} series
+   * Build privately in bounded chunks, including partial stripes. Callers must
+   * publish this instance only after step() returns true.
+   * @param {NumericColumn} xs @param {NumericColumn[]} series
+   * @param {number} start @param {number} end @param {number} cap
+   * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
+   * @returns {(maxSamples?: number) => boolean}
+   */
+  beginRebuild(xs, series, start, end, cap, extrema = null) {
+    this.reset(start);
+    if (end <= start) {
+      this.cap = Math.max(BUCKET_MIN, cap | 0);
+      return () => true;
+    }
+    const n = end - start;
+    const ppb = stripePpb(n, cap);
+    const plainColumns = !('_chunks' in xs) && series.every((col) => !col || !('_chunks' in col));
+    this.ppb = ppb;
+    let i = start;
+    /** @type {DisplayBucket|null} */
+    let bucket = null;
+    let stripeEnd = start;
+    return (maxSamples = 4096) => {
+      let remaining = Math.max(1, maxSamples);
+      while (i < end && remaining > 0) {
+        if (!bucket) {
+          stripeEnd = Math.min(i + ppb, end);
+          bucket = makeBucketFromIndex(xs, series, i++);
+          remaining--;
+        }
+        const through = Math.min(stripeEnd, i + remaining);
+        if (extrema) {
+          extrema.fold(bucket, series, i, through);
+          bucket.n += through - i;
+          bucket.x1 = Number(columnValue(xs, through - 1));
+        } else {
+          if (plainColumns) {
+            for (let j = i; j < through; j++) foldIndex(bucket, xs, series, j);
+          } else {
+            foldRange(bucket, xs, series, i, through);
+          }
+        }
+        remaining -= through - i;
+        i = through;
+        if (i === stripeEnd) {
+          this.list.push(bucket);
+          bucket = null;
+        }
+      }
+      this.srcEnd = i;
+      // 条带数本来就贴着密度上限，此时 cap 保持等于它就意味着「录制中再落一个样本」
+      // 会 mergeDown 把整表分辨率腰斩 —— 画面会在没人操作时自己变稀。留一倍余量，
+      // 分辨率的合法变化由调用方比较 stripePpb 后整体重建决定，不靠这里降级。
+      if (i === end) this.cap = Math.max(BUCKET_MIN, this.list.length * 2);
+      return i === end;
+    };
+  }
+
+  /**
+   * @param {NumericColumn} xs
+   * @param {NumericColumn[]} series
    * @param {number} end
    */
   appendThrough(xs, series, end) {
     const values = new Array(DISPLAY_SERIES);
-    for (let i = this.srcEnd; i < end; i++) {
-      for (let s = 0; s < DISPLAY_SERIES; s++) {
-        const col = series[s];
-        values[s] = col ? Number(col[i]) : Number.NaN;
+    for (let i = this.srcEnd; i < end; ) {
+      const xSpan = columnSpan(xs, i, end);
+      const spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
+      const through = Math.min(xSpan.end, ...spans.map((span) => span?.end ?? end));
+      for (; i < through; i++) {
+        for (let s = 0; s < DISPLAY_SERIES; s++) {
+          const span = spans[s];
+          values[s] = span ? Number(span.values[i - span.base]) : Number.NaN;
+        }
+        this.pushSample(Number(xSpan.values[i - xSpan.base]), values);
       }
-      this.pushSample(Number(xs[i]), values);
     }
   }
 
@@ -248,8 +311,8 @@ export class SeriesBuckets {
 }
 
 /**
- * @param {ArrayLike<number>} xs
- * @param {ArrayLike<number>[]} series
+ * @param {NumericColumn} xs
+ * @param {NumericColumn[]} series
  * @param {number} i
  */
 function makeBucketFromIndex(xs, series, i) {
@@ -257,17 +320,12 @@ function makeBucketFromIndex(xs, series, i) {
   const values = new Array(DISPLAY_SERIES);
   for (let s = 0; s < DISPLAY_SERIES; s++) {
     const col = series[s];
-    values[s] = col ? Number(col[i]) : Number.NaN;
+    values[s] = col ? Number(columnValue(col, i)) : Number.NaN;
   }
-  return makeBucket(Number(xs[i]), values);
+  return makeBucket(Number(columnValue(xs, i)), values);
 }
 
-/**
- * @param {DisplayBucket} bucket
- * @param {ArrayLike<number>} xs
- * @param {ArrayLike<number>[]} series
- * @param {number} i
- */
+/** @param {DisplayBucket} bucket @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} i */
 function foldIndex(bucket, xs, series, i) {
   bucket.x1 = Number(xs[i]);
   bucket.n += 1;
@@ -279,6 +337,49 @@ function foldIndex(bucket, xs, series, i) {
     const curMax = bucket.max[s];
     if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
     if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
+  }
+}
+
+/**
+ * @param {DisplayBucket} bucket
+ * @param {NumericColumn} xs
+ * @param {NumericColumn[]} series
+ * @param {number} start @param {number} end
+ */
+function foldRange(bucket, xs, series, start, end) {
+  if (!('_chunks' in xs) && series.every((col) => !col || !('_chunks' in col))) {
+    for (let i = start; i < end; i++) {
+      bucket.x1 = Number(xs[i]);
+      bucket.n += 1;
+      for (let s = 0; s < DISPLAY_SERIES; s++) {
+        const col = series[s];
+        const v = col ? Number(col[i]) : Number.NaN;
+        if (!Number.isFinite(v)) continue;
+        const curMin = bucket.min[s];
+        const curMax = bucket.max[s];
+        if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
+        if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
+      }
+    }
+    return;
+  }
+  for (let i = start; i < end; ) {
+    const xSpan = columnSpan(xs, i, end);
+    const spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
+    const through = Math.min(xSpan.end, ...spans.map((span) => span?.end ?? end));
+    for (; i < through; i++) {
+      bucket.x1 = Number(xSpan.values[i - xSpan.base]);
+      bucket.n += 1;
+      for (let s = 0; s < DISPLAY_SERIES; s++) {
+        const span = spans[s];
+        const v = span ? Number(span.values[i - span.base]) : Number.NaN;
+        if (!Number.isFinite(v)) continue;
+        const curMin = bucket.min[s];
+        const curMax = bucket.max[s];
+        if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
+        if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
+      }
+    }
   }
 }
 

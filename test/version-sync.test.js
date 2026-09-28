@@ -17,7 +17,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(path.join(root, rel), 'utf8');
 
 /** 工作区成员，版本号必须继承而不是各写各的。 */
-const MEMBER_CRATES = ['src-tauri', 'crates/usbpd-parser', 'crates/witrn-hid'];
+const MEMBER_CRATES = ['src-tauri', 'crates/usbpd-parser', 'crates/witrn-hid', 'crates/km003c'];
 
 /**
  * 取 `[workspace.package]` 段内的 version。

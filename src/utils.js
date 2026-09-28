@@ -52,7 +52,7 @@ export function formatSampleRateLabel(intervalMs) {
 /**
  * 把采样率写入下拉框。
  *
- * 后端与设置允许 10..60000ms 的任意值（CSV 导入会带进预设之外的采样率），
+ * 后端与设置允许 1..60000ms 的任意值（CSV 导入会带进预设之外的采样率），
  * 而下拉框只列了 6 个常用档位。直接赋一个不在列表里的值会让 selectedIndex
  * 变成 -1、控件显示空白，所以这里按需补一个表示实际值的选项。
  *
@@ -60,7 +60,14 @@ export function formatSampleRateLabel(intervalMs) {
  * @param {number} intervalMs
  */
 export function setSampleRateOption(select, intervalMs) {
+  if (!select) return;
   const value = String(intervalMs);
+  // Settings can be loaded before a real document exists (for example in a
+  // headless host). Keep the state update useful without requiring Select DOM APIs.
+  if (!select.options) {
+    select.value = value;
+    return;
+  }
   if (!Array.from(select.options).some((o) => o.value === value)) {
     const option = document.createElement('option');
     option.value = value;

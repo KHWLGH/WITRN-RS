@@ -11,13 +11,14 @@ const config = options(process.argv.slice(2), {
   runs: 20,
   warmup: 5,
   duration: 10,
+  hz: 1000,
   revision: '',
   // Serve the built frontend (frontendDist) instead of src/. Second mode, never a timing gate:
   // its job is to prove the shipped artifact boots with every CSS url() resolving.
   dist: '',
   // 0 keeps the historical 'coalesced' shape: one point per 10ms tick, up to 1024 points in a
   // catch-up burst after a stall. Any other value replays what the Rust emitter actually sends at
-  // 100Hz: `emitWindowMs` of points delivered once per window, so the sustained run measures the
+  // The selected rate: `emitWindowMs` of points delivered once per window, so the sustained run measures the
   // real IPC cadence instead of a batch shape production never produces.
   emitWindowMs: 0,
   // Serve the app's real CSP instead of the harness's permissive one. Needed for any question of
@@ -26,6 +27,9 @@ const config = options(process.argv.slice(2), {
   shippedCsp: false,
   output: 'bench/results/ui.json',
 });
+// Match the native emitter's latency budget by default: 8ms at 1000 SPS, while an
+// explicit 100 SPS compatibility run gets the historical 40ms window.
+if (config.emitWindowMs === 0) config.emitWindowMs = config.hz >= 500 ? 8 : 40;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 class CDP {
   constructor(socket) {
@@ -315,6 +319,7 @@ try {
           cols.x.push(f.x[i]);
           cols.timestamps.push(f.timestamps[i]);
           for (let s = 0; s < CHANNELS.length; s++) cols[CHANNELS[s]].push(f.ys[s][i]);
+          cols.recordingSegments.push(Number.NaN);
           if (i && i % 10000 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
         }
         setChartColumns(cols);
@@ -322,6 +327,8 @@ try {
         chart.syncChartSeries();
         chart.setChartXWindow(f.x[0], f.x[n - 1]);
         chart.updateCharts();
+        while (document.getElementById('main-chart')?.getAttribute('aria-busy') === 'true')
+          await new Promise((resolve) => setTimeout(resolve, 2));
         await new Promise(requestAnimationFrame);
         const bounds = state.mainChart.over.getBoundingClientRect();
         return {
@@ -369,6 +376,8 @@ try {
             setChartXWindow(offset, (n - 100) / 100 + offset);
             updateCharts();
             const prepared = performance.now();
+            while (document.getElementById('main-chart')?.getAttribute('aria-busy') === 'true')
+              await new Promise((resolve) => setTimeout(resolve, 2));
             await new Promise(requestAnimationFrame);
             if (run >= 0) {
               prep.push(prepared - start);
@@ -426,6 +435,76 @@ try {
       }),
     );
   }
+  stage('render-invalidation');
+  result.renderInvalidation = await cdp.evaluate(async () => {
+    const { state } = await import('/state.js');
+    const chart = await import('/chart.js');
+    const cols = state.chartSeries;
+    const n = cols.x.length;
+    const start = Math.floor(n / 4);
+    const end = Math.floor(n / 2);
+    const min = cols.x.at(start);
+    const max = cols.x.at(end);
+    const settle = async () => {
+      while (document.getElementById('main-chart')?.getAttribute('aria-busy') === 'true')
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    state.chartWindow = { mode: 'frozen', min, max, duration: max - min };
+    chart.setChartXWindow(min, max);
+    chart.updateCharts();
+    await settle();
+    const main = state.mainChart;
+    const nav = state.navigatorChart;
+    const originalMain = main.setData;
+    const originalNav = nav.setData;
+    let mainSubmissions = 0;
+    let navSubmissions = 0;
+    let mainDraws = 0;
+    const drawn = () => mainDraws++;
+    main.setData = function (...args) {
+      mainSubmissions++;
+      return originalMain.apply(this, args);
+    };
+    nav.setData = function (...args) {
+      navSubmissions++;
+      return originalNav.apply(this, args);
+    };
+    main.hooks.draw.push(drawn);
+    try {
+      for (let batch = 0; batch < 20; batch++) {
+        for (let point = 0; point < 4; point++) {
+          cols.x.push(cols.x.at(-1) + 0.01);
+          cols.timestamps.push(cols.timestamps.at(-1) + 10);
+          for (const key of ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2']) {
+            cols[key].push(cols[key].at(start));
+          }
+          cols.recordingSegments.push(Number.NaN);
+        }
+        chart.scheduleChartUpdate();
+        await settle();
+      }
+      return {
+        scenario: 'manual column append outside frozen historical window; unchanged channel extrema',
+        beforeLength: n,
+        afterLength: cols.x.length,
+        batches: 20,
+        mainSubmissions,
+        navSubmissions,
+        mainDraws,
+      };
+    } finally {
+      main.setData = originalMain;
+      nav.setData = originalNav;
+      main.hooks.draw.splice(main.hooks.draw.indexOf(drawn), 1);
+      state.chartWindow = { mode: 'full', min: 0, max: 0, duration: 0 };
+      chart.setChartXWindow(null, null);
+      chart.updateCharts();
+      await settle();
+    }
+  });
+  assert.equal(result.renderInvalidation.afterLength, result.renderInvalidation.beforeLength + 80);
+  console.log(JSON.stringify({ renderInvalidation: result.renderInvalidation }));
   stage('style-checks');
   result.styleChecks = await cdp.evaluate(async () => {
     const settingsTab = document.getElementById('btn-settings-tab');
@@ -462,7 +541,7 @@ try {
   }
   stage('sustained');
   result.sustained = await cdp.evaluate(
-    async (seconds, nativeWindowMs) => {
+    async (seconds, nativeWindowMs, hz) => {
       const { fixture, canonicalBytes, VERSION, SEED } = await import('/__bench/fixtures.mjs');
       const { state } = await import('/state.js');
       const { initializeDeviceStream, disconnectDevice } = await import('/device.js');
@@ -471,8 +550,9 @@ try {
       const { calculateEnergyInRange } = await import('/measurement.js');
       const { parseCsv } = await import('/csv-codec.js');
       const { exportCSV } = await import('/csv.js');
-      const count = Math.round(seconds * 100),
-        f = fixture(count);
+      const intervalMs = 1000 / hz;
+      const count = Math.round(seconds * hz),
+        f = fixture(count, undefined, intervalMs);
       // Mirror addDataPoint's own channel transforms so the expected array is what the
       // pipeline must produce: signed current kept, power abs, device temp raw, D+/D-
       // clamped to [0,60] else NaN. NaN / -0 preserved (not silently zeroed).
@@ -502,7 +582,8 @@ try {
       deviceStream.open(info);
       state.isConnected = true;
       if (!deviceStream.generation) throw new Error('Synthetic stream did not open');
-      state.settings.sampleRate = 10;
+      state.settings.sampleRate = intervalMs;
+      await window.__TAURI__.core.invoke('set_sample_rate', { rate: intervalMs });
       state.settings.signedCurrent = true;
       state.settings.tempSource = 'device';
       state.isTempConnected = true;
@@ -553,7 +634,7 @@ try {
         dn: ys[5][i],
         cc1: ys[6][i],
         cc2: ys[7][i],
-        received_us: i * 10000,
+        received_us: i * intervalMs * 1000,
       });
       try {
         await new Promise((resolve, reject) => {
@@ -564,7 +645,7 @@ try {
           if (nativeWindowMs > 0) {
             // Native replay: `nativeWindowMs` of accumulated points delivered once per window,
             // which is what stream::emit_loop sends at 100Hz after the batch-window fix.
-            const perEmit = Math.max(1, Math.round(nativeWindowMs / 10));
+            const perEmit = Math.max(1, Math.round(nativeWindowMs / intervalMs));
             const tick = () => {
               try {
                 const end = Math.min(count, sent + perEmit);
@@ -596,7 +677,7 @@ try {
                 window.__BENCH_TAURI__.feed(batch);
               }
               afterFeed();
-              if (sent < count) setTimeout(pump, Math.max(0, started + sent * 10 - performance.now()));
+              if (sent < count) setTimeout(pump, Math.max(0, started + sent * intervalMs - performance.now()));
             } catch (error) {
               reject(error);
             }
@@ -652,7 +733,8 @@ try {
         throw new Error('Concurrent CSV export prefix mismatch');
       const result = {
         fixture: { version: `${VERSION}/native-finite-main-v1`, seed: SEED, inputSha256: expectedHash },
-        nominalHz: 100,
+        nominalHz: config.hz,
+        sampleIntervalMs: intervalMs,
         seconds,
         elapsedMs,
         sent,
@@ -670,7 +752,7 @@ try {
         rawPreparationMs: Array.from(prepare.subarray(0, drawCount)),
         rawRequestToDrawMs: Array.from(toDraw.subarray(0, drawCount)),
         longTasks: observer ? longTasks : null,
-        columnCapacityBytes: keys.reduce((sum, key) => sum + cols[key].buf.byteLength, 0),
+        columnCapacityBytes: keys.reduce((sum, key) => sum + (cols[key].byteLength ?? cols[key].buf.byteLength), 0),
         heap: performance.memory
           ? { used: performance.memory.usedJSHeapSize, total: performance.memory.totalJSHeapSize }
           : null,
@@ -687,7 +769,7 @@ try {
       await disconnectDevice();
       return result;
     },
-    [config.duration, config.emitWindowMs],
+    [config.duration, config.emitWindowMs, config.hz],
     config.duration * 1000 + 300000,
   );
   const rafActive = activeIntervals(result.sustained.rawRafMs);

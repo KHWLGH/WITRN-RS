@@ -52,10 +52,12 @@
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
  * @property {'auto'|'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
- * @property {boolean} windowMaterial - Win11 Mica 窗口材质（不可用时由运行时忽略）
- * @property {boolean} windowMaterialUnfocused - 非聚焦时仍使用窗口材质（需 windowMaterial）
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
+ * @property {{ pdType: number, em: number, sink: number }} km003cPdm - POWER-Z PDM 参数（PD 类型 / 线缆模拟 / Sink）
+ * @property {number}  recordLimitMb - 单次记录上限（MB，64–8192；按 100 字节/点换算点数）
+ * @property {boolean} recordingTempSpool - 记录时保留应用缓存中的临时恢复文件
+ * @property {boolean} autoSaveRecording - 旧设置兼容别名；新代码使用 recordingTempSpool
  */
 
 /**
@@ -85,53 +87,128 @@
  * @property {number|null} lastX - 上一个已积分点的相对秒；录制段开始为 null
  */
 
-/**
- * 可扩容 Float64 列。uPlot 吃 `view()`（连续 f64，零拷贝）；应用侧用 length / at / buf[i] / push。
- * 采集时倍增扩容，避免普通数组周期性整列拷贝与装箱。
- */
-export class F64Col {
+export const F64_CHUNK_SIZE = 4096;
+
+/** Fixed-prefix view. Appends to the source cannot change its length or chunk list. */
+export class F64Snapshot {
+  /** @param {Float64Array[]} chunks @param {number} length */
+  constructor(chunks, length) {
+    this._chunks = chunks;
+    this.length = length;
+  }
+
+  /** Valid indices return their exact stored value; out-of-range reads follow typed-array semantics. @param {number} i @returns {number} */
+  valueAt(i) {
+    return /** @type {number} */ (
+      i >= 0 && i < this.length ? this._chunks[i >>> 12]?.[i & (F64_CHUNK_SIZE - 1)] : undefined
+    );
+  }
+
+  /** @param {number} i */
+  at(i) {
+    return this.valueAt(i < 0 ? this.length + i : i);
+  }
+
+  /** @param {number} [start=0] @param {number} [end=this.length] */
+  *chunks(start = 0, end = this.length) {
+    const from = Math.max(0, Math.min(this.length, start));
+    const to = Math.max(from, Math.min(this.length, end));
+    for (let offset = from; offset < to; ) {
+      const chunkIndex = offset >>> 12;
+      const stop = Math.min(to, (chunkIndex + 1) * F64_CHUNK_SIZE);
+      yield {
+        offset,
+        values: this._chunks[chunkIndex].subarray(offset & (F64_CHUNK_SIZE - 1), stop - chunkIndex * F64_CHUNK_SIZE),
+      };
+      offset = stop;
+    }
+  }
+
+  /** @param {(values: Float64Array, offset: number) => void} callback @param {number} [start=0] @param {number} [end=this.length] */
+  forEachChunk(callback, start = 0, end = this.length) {
+    for (const { values, offset } of this.chunks(start, end)) callback(values, offset);
+  }
+
+  /** @param {number} [start=0] @param {number} [end=this.length] */
+  copyRange(start = 0, end = this.length) {
+    const from = Math.max(0, Math.min(this.length, start));
+    const to = Math.max(from, Math.min(this.length, end));
+    const copy = new Float64Array(to - from);
+    this.forEachChunk((values, offset) => copy.set(values, offset - from), from, to);
+    return copy;
+  }
+
+  get byteLength() {
+    return this._chunks.reduce((bytes, chunk) => bytes + chunk.byteLength, 0);
+  }
+}
+
+export { F64Snapshot as F64ColSnapshot };
+
+/** Append-only, fixed-size Float64 chunks; old chunks never move as a recording grows. */
+export class F64Col extends F64Snapshot {
   revision = 0;
 
   /** @param {number} [capacity=4096] */
   constructor(capacity = 4096) {
-    const cap = Math.max(1, capacity | 0);
-    /** @type {Float64Array} */
-    this.buf = new Float64Array(cap);
-    /** @type {number} */
-    this.length = 0;
+    super([], 0);
+    // Capacity is a hint for import, but chunks are allocated only as values arrive.
+    void capacity;
   }
 
-  /** @param {number} v */
-  push(v) {
-    if (this.length >= this.buf.length) {
-      const next = new Float64Array(this.buf.length * 2);
-      next.set(this.buf);
-      this.buf = next;
-    }
-    this.buf[this.length++] = v;
+  /** @param {number} value */
+  push(value) {
+    const index = this.length;
+    if (index === this._chunks.length * F64_CHUNK_SIZE) this._chunks.push(new Float64Array(F64_CHUNK_SIZE));
+    this._chunks[index >>> 12][index & (F64_CHUNK_SIZE - 1)] = value;
+    this.length = index + 1;
   }
 
-  /**
-   * @param {number} i
-   * @returns {number}
-   */
-  at(i) {
-    const idx = i < 0 ? this.length + i : i;
-    return this.buf[idx];
+  /** Allocate a pending chunk before a multi-column row is published. */
+  reserveNext() {
+    if (this.length === this._chunks.length * F64_CHUNK_SIZE) this._chunks.push(new Float64Array(F64_CHUNK_SIZE));
   }
 
-  /** @param {ArrayLike<number>} values */
+  /** Replace all values, leaving any prior snapshot intact. @param {ArrayLike<number>} values */
   set(values) {
-    const n = values.length;
-    if (n > this.buf.length) this.buf = new Float64Array(n);
-    this.buf.set(values);
-    this.length = n;
+    /** @type {Float64Array[]} */
+    const chunks = [];
+    for (let offset = 0; offset < values.length; offset += F64_CHUNK_SIZE) {
+      const chunk = new Float64Array(F64_CHUNK_SIZE);
+      const stop = Math.min(values.length, offset + F64_CHUNK_SIZE);
+      for (let i = offset; i < stop; i++) chunk[i - offset] = values[i];
+      chunks.push(chunk);
+    }
+    this._chunks = chunks;
+    this.length = values.length;
     this.revision++;
   }
 
-  /** @returns {Float64Array} */
+  /** @param {number} index @param {number} value */
+  setAt(index, value) {
+    if (index < 0 || index >= this.length) throw new RangeError('Column index out of range');
+    const chunkIndex = index >>> 12;
+    // Copy on write keeps previously captured snapshots stable.
+    const chunk = this._chunks[chunkIndex].slice();
+    chunk[index & (F64_CHUNK_SIZE - 1)] = value;
+    this._chunks[chunkIndex] = chunk;
+    this.revision++;
+  }
+
+  /** @returns {F64Snapshot} */
+  snapshot() {
+    return new F64Snapshot(this._chunks.slice(), this.length);
+  }
+
+  /** Compatibility for bounded/cold callers; large calls allocate a contiguous copy. */
   view() {
-    return this.buf.subarray(0, this.length);
+    return this.copyRange();
+  }
+
+  /** Compatibility for old one-chunk callers. */
+  get buf() {
+    if (this._chunks.length > 1) throw new Error('Multi-chunk column has no contiguous buffer');
+    return this._chunks[0] ?? new Float64Array(0);
   }
 }
 
@@ -187,6 +264,9 @@ export function setChartColumns(cols) {
  * @property {string} model_name
  * @property {number} interface_number
  * @property {number} usage_page
+ * @property {'witrn'|'km003c'} [family] - 设备家族；旧数据缺省按维简处理
+ * @property {boolean} [controls] - 是否提供协议控制
+ * @property {number} [max_rate_hz] - 最高采样率（次/秒）
  */
 
 // ─── Default Settings ────────────────────────────────────────────────────────
@@ -218,10 +298,12 @@ export const defaultSettings = {
   uiScalePercent: 100,
   theme: 'dark',
   windowStyle: 'auto',
-  windowMaterial: true,
-  windowMaterialUnfocused: false,
   realtimePanelWidth: 250,
   pdSplitSide: false,
+  km003cPdm: { pdType: 1, em: 1, sink: 0 },
+  recordLimitMb: 512,
+  recordingTempSpool: true,
+  autoSaveRecording: true,
 };
 
 /** @type {AutoPauseSettings} */
@@ -323,9 +405,8 @@ export const state = {
   deviceList: [],
   /** @type {string|null} */
   selectedDevicePath: null,
-
-  /** @type {boolean} 后端报告当前平台能否启用 Mica */
-  windowMaterialAvailable: false,
+  /** @type {DeviceInfo|null} 当前连接的设备（后端 get_current_device_info） */
+  connectedDevice: null,
 
   // ── Settings ──
   /** @type {Settings} */

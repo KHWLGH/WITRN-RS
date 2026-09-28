@@ -21,8 +21,8 @@
         "fullscreen": false,
         "decorations": false,
         "shadow": true,
-        "transparent": true,
-        "backgroundColor": "#00000000"
+        "transparent": false,
+        "backgroundColor": "#1f1f1f"
       }
     ],
     "security": {

@@ -81,7 +81,7 @@ codesign --force --deep --sign - --timestamp=none \
 | `npm run lint` | 通过，Biome 检查 61 个文件 |
 | `cargo fmt --check --all` | 通过 |
 | `cargo clippy --workspace --all-targets --offline -- -D warnings` | 通过；仅有依赖 `block v0.1.6` 的 future-incompatibility 提示 |
-| `cargo test --workspace --offline` | 通过，166 个测试/文档测试通过 |
+| `cargo test --workspace --offline` | 通过（工作区单元、集成与文档测试） |
 | `git diff --check` | 通过 |
 
 ## 安装与安全边界

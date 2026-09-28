@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/usbpd-parser",
     "crates/witrn-hid",
+    "crates/km003c",
 ]
 
 [workspace.package]
@@ -11,7 +12,7 @@ members = [
 # independently, so they share the application's version.
 version = "0.2.1"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "LGPL-3.0-or-later"
 repository = "https://github.com/KHWLGH/WITRN-RS"
 authors = ["KHWLGH"]
@@ -19,6 +20,7 @@ authors = ["KHWLGH"]
 [workspace.dependencies]
 usbpd-parser = { path = "crates/usbpd-parser" }
 witrn-hid = { path = "crates/witrn-hid" }
+km003c = { path = "crates/km003c" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hidapi = "2.6"

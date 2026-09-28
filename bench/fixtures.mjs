@@ -14,15 +14,15 @@ export function prng(seed = SEED) {
     return x >>> 0;
   };
 }
-export function fixture(size, seed = SEED) {
-  if (!Number.isSafeInteger(size) || size < 1 || size > 1_000_000) throw new RangeError('size must be 1..1000000');
+export function fixture(size, seed = SEED, intervalMs = 10) {
+  if (!Number.isSafeInteger(size) || size < 1 || size > 5_000_000) throw new RangeError('size must be 1..5000000');
   const next = prng(seed);
   const x = new Float64Array(size);
   const timestamps = new Float64Array(size);
   const ys = CHANNELS.map(() => new Float64Array(size));
   for (let i = 0; i < size; i++) {
-    x[i] = i / 100;
-    timestamps[i] = EPOCH_MS + i * 10;
+    x[i] = (i * intervalMs) / 1000;
+    timestamps[i] = EPOCH_MS + i * intervalMs;
     for (let s = 0; s < 8; s++) {
       let v = ((next() & 65535) - 32768) / 4096 + (s === 0 ? 12 : s === 3 ? 24 : 0);
       if (i % 8191 === 4095) v += (s % 2 ? -1 : 1) * 1024;

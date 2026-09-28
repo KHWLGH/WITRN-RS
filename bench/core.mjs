@@ -85,7 +85,7 @@ export function golden(f, segments) {
     const col = new F64Col(1);
     for (const x of source) col.push(x);
     assert.equal(col.length, f.size);
-    assert.equal(col.view().buffer, col.buf.buffer);
+    assert.deepStrictEqual(col.view(), source);
     return col;
   });
   assert.equal(sha256(canonicalBytes(copies.map((c) => c.view()))), inputHash(f));
@@ -141,7 +141,7 @@ export function golden(f, segments) {
     boundaries: edge.labels,
     inputSha256: inputHash(f),
     segmentsSha256: sha256(canonicalBytes([segments])),
-    f64CapacityBytes: copies.reduce((sum, c) => sum + c.buf.byteLength, 0),
+    f64CapacityBytes: copies.reduce((sum, c) => sum + c.byteLength, 0),
   };
 }
 function timed(name, fn, config, samples, repeat = 1) {

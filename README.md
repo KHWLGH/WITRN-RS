@@ -14,7 +14,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/KHWLGH/WITRN-RS?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/commits/main)
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-ES%20Modules-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
 [![uPlot](https://img.shields.io/badge/charts-uPlot-6E7B8B?style=flat-square)](https://github.com/leeoniya/uPlot)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4?style=flat-square)](#-下载与安装)
@@ -23,7 +23,7 @@
 
 ## 📖 项目简介
 
-WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。它通过 USB HID 直接读取仪表的测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，全程不需要网络。
+WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM002C 的桌面上位机。它通过 USB HID 或厂商 Bulk 接口读取测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，全程不需要网络。
 
 技术上基于 **Tauri v2**：后端是 **Rust**（HID 通信、USB-PD 解析、后台线程生命周期），前端是**不经打包器的原生 JavaScript ES Modules**，图表用 uPlot。所有前端依赖都已 vendor 进仓库，运行时不从 CDN 加载任何资源。
 
@@ -50,6 +50,8 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 - **信号线电压** D+ / D− / CC1 / CC2（设备分辨率 0.01 V），可叠加到图表上，也随 CSV 一起导出。
 - 可选**记录电流方向**：开启后保留电流符号（正向为正、反向为负，K2 原生支持 ±10 A），侧栏用箭头指示方向。
 - **自动暂停**：当电压 / 电流 / 功率低于阈值并持续指定秒数后自动停止记录，适合无人值守的充放电测试。
+- **POWER-Z 高速采样**：KM003C/KM002C 支持认证后的 AdcQueue 1000 次/秒采样；认证失败会自动回退到 100 次/秒。
+- **临时恢复与上限**：记录按秒写入应用缓存中的临时文件，仅用于崩溃恢复；正常退出自动清理，单次记录默认上限 512 MB，达到上限自动暂停。显式导出才生成长期 CSV。
 
 ### USB-PD 协议分析
 
@@ -72,7 +74,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 
 - **CSV 导出**（可选是否含温度列）与**导入**；导入按表头名匹配列，兼容不含信号线列的旧文件。
 - **PD 捕获导出 / 导入**，使用带版本号的 JSON 信封，旧版本格式仍可读取。
-- 采样率 0.1 – 10 次/秒可选（后端接受 10 – 60000 ms）。
+- 采样率 0.1 – 100 次/秒可选；POWER-Z 设备额外支持 1000 次/秒（后端接受 1 – 60000 ms，按设备限制）。
 
 ### 界面
 
@@ -88,14 +90,16 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 | WITRN K2 | `0x0716` | `0x5060` |
 | WITRN U3 | `0x0716` | `0x5063`、`0x5044` |
 | WITRN C5 | `0x0716` | `0x5053`、`0x5064` |
+| POWER-Z KM003C | `0x5FC9` | `0x0063` |
+| POWER-Z KM002C | `0x5FC9` | `0x0061` |
 
-设备列表按厂商 VID `0x0716` 枚举，因此**不在上表中的型号或固件变体同样会出现在下拉框里**（显示为「未知 WITRN 设备 (0716:XXXX)」）。它们能否正常读数取决于固件是否使用相同的报告布局。
+维简设备按厂商 VID `0x0716` 枚举，因此**不在上表中的型号或固件变体同样会出现在下拉框里**（显示为「未知 WITRN 设备 (0716:XXXX)」）。它们能否正常读数取决于固件是否使用相同的报告布局。POWER-Z 设备通过 `0x5FC9` 的 Vendor Bulk 接口单独枚举。
 
 同一物理设备存在多个 HID 接口时，后端优先选择厂商自定义 Usage Page。设备名会附带 USB 拓扑端口，如 `WITRN K2 (USB 4-4)`。
 
 ## 📦 下载与安装
 
-**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/WITRN-RS/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。仪表走标准 USB HID，**不需要安装驱动**。
+**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/WITRN-RS/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
 
 **macOS** —— 不提供预构建包（无 Developer ID / 公证）。Apple Silicon 可自行编译，见 [开发与构建 · macOS 自行编译](docs/DEVELOPMENT.md#-macos-自行编译)。一次已验证的 ARM64 打包步骤、ad-hoc 签名与 Gatekeeper 边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
 
@@ -124,16 +128,16 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 ## 🙏 致谢与相关项目
 
 - 感谢 WITRN 提供的 USB-PD 采集硬件支持。
-- 感谢 [JohnScotttt](https://github.com/JohnScotttt) 的 HID 实现。
+- 感谢 [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) 对 POWER-Z Bulk、认证与 AdcQueue 协议的公开研究。
 - 感谢所有开源项目贡献者。
 
-### 与 Python 原版的差异
+### 协议库
 
-本仓库的两个协议 crate 是 JohnScotttt 的 Python 实现的 Rust 移植，主要差异：
+工作区里的协议 crate 都是独立的 Rust 库（`publish = false`），不依赖 Tauri：
 
-- **`crates/witrn-hid`** —— HID 设备封装。移植后帧解析带范围校验（拒绝越界的电压 / 电流帧），并额外解出 D+ / D− / CC1 / CC2 信号线电压。
-- **`crates/usbpd-parser`** —— USB-PD 报文解码。以强类型枚举重写了报文头、PDO / RDO / VDO 与扩展报文，可选 `vendor-ids` feature 内嵌 USB-IF 厂商表。
-- 两个 crate 都是**独立的库**（`publish = false`，仅在本工作区内使用），不依赖 Tauri，可被其他 Rust 项目直接引用。
+- **`crates/witrn-hid`** —— WITRN HID 设备封装与测量帧解析。
+- **`crates/usbpd-parser`** —— USB-PD 报文解码与字段树。
+- **`crates/km003c`** —— POWER-Z Vendor Bulk、AES 认证、AdcQueue 与 CDC 控制。
 
 ## 📄 许可证
 
@@ -142,9 +146,9 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表的桌面上位机。�
 | 组件 | 许可证 |
 | --- | --- |
 | 应用本体（`src-tauri`、`src`） | [GPL-3.0-only](LICENSE) |
-| 协议库 `crates/usbpd-parser`、`crates/witrn-hid` | LGPL-3.0-or-later |
+| 协议库 `crates/usbpd-parser`、`crates/witrn-hid`、`crates/km003c` | LGPL-3.0-or-later |
 
-两个协议 crate 采用 LGPL 是为了与其 Python 原版的许可保持兼容，便于被其他项目复用。仓库根目录的 [`LICENSE`](LICENSE) 是 GPLv3 全文；LGPL-3.0 的完整文本请参阅 [GNU 官方页面](https://www.gnu.org/licenses/lgpl-3.0)。
+协议 crate 采用 LGPL 便于被其他项目复用。仓库根目录的 [`LICENSE`](LICENSE) 是 GPLv3 全文；LGPL-3.0 的完整文本请参阅 [GNU 官方页面](https://www.gnu.org/licenses/lgpl-3.0)。
 
 第三方组件：uPlot (MIT) · Fluent System Icons (MIT)
 

@@ -6,8 +6,8 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub const CHANNEL_CAP: usize = 1024;
-pub const SELECTED_CAP: usize = 1024;
+pub const CHANNEL_CAP: usize = 4096;
+pub const SELECTED_CAP: usize = 4096;
 pub const UNACKED_CAP: u64 = 8192;
 pub const BATCH_POINTS: usize = 64;
 /// Floor for the emit window. Below one frame there is nothing to gain: a window shorter
@@ -93,8 +93,8 @@ pub fn sample_at(received_us: u64, current: f32) -> Sample {
             cc1: 0.0,
             cc2: 0.0,
             temperature: None,
-            ah: 0.0,
-            wh: 0.0,
+            ah: Some(0.0),
+            wh: Some(0.0),
         },
         generation: 1,
         seq: 0,

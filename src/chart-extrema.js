@@ -1,4 +1,7 @@
 // @ts-check
+import { columnSpan } from './chart-buckets.js';
+
+/** @typedef {import('./chart-buckets.js').NumericColumn} NumericColumn */
 
 /** 金字塔叶子覆盖的样本数；条带窄于它时 fold 的 head/tail 暴力扫就等于整条，省不下读取。 */
 export const BLOCK_SIZE = 32;
@@ -30,21 +33,47 @@ export class ExactExtremaIndex {
     return values;
   }
 
-  /** @param {ArrayLike<number>[]} series @param {number} length */
+  /** @param {NumericColumn[]} series @param {number} length */
   sync(series, length) {
+    this.syncStep(series, length, Infinity);
+  }
+
+  /**
+   * Publish only complete leaves and ancestors. Queries may safely mix this prefix
+   * with the unindexed raw tail between calls.
+   * @param {NumericColumn[]} series @param {number} length
+   * @param {number} [maxBlocks=128]
+   * @returns {boolean} Whether the requested prefix is complete.
+   */
+  syncStep(series, length, maxBlocks = 128) {
     const complete = Math.floor(length / BLOCK_SIZE);
     if (complete < this.blocks) this.reset();
-    if (complete === this.blocks) return;
+    if (complete === this.blocks) return true;
+    if (this.levels.length === 0) {
+      // Cold builds know their target: reserve all levels once instead of doing
+      // large parent-buffer copies halfway through a cooperative slice.
+      for (let level = 0, nodes = complete; nodes > 0; level++, nodes = Math.floor(nodes / 2))
+        this.ensure(level, nodes);
+    }
+    const through = Math.min(complete, this.blocks + Math.max(1, Math.floor(maxBlocks)));
+    // Reserve the known target once; repeated doubling would copy the entire
+    // indexed prefix inside a later slice and retain needless spare capacity.
     const leaves = this.ensure(0, complete);
-    for (let block = this.blocks; block < complete; block++) {
+    for (let block = this.blocks; block < through; block++) {
       const start = block * BLOCK_SIZE;
       const offset = block * STRIDE;
       for (let s = 0; s < CHANNELS; s++) {
         const col = series[s];
         let min = Number.NaN;
         let max = Number.NaN;
+        if (!col) {
+          leaves[offset + s] = min;
+          leaves[offset + CHANNELS + s] = max;
+          continue;
+        }
+        const span = columnSpan(col, start, start + BLOCK_SIZE);
         for (let i = start; i < start + BLOCK_SIZE; i++) {
-          const v = col ? Number(col[i]) : Number.NaN;
+          const v = Number(span.values[i - span.base]);
           if (!Number.isFinite(v)) continue;
           if (!Number.isFinite(min) || v < min) min = v;
           if (!Number.isFinite(max) || v > max) max = v;
@@ -70,12 +99,13 @@ export class ExactExtremaIndex {
         }
       }
     }
-    this.blocks = complete;
+    this.blocks = through;
+    return this.blocks === complete;
   }
 
   /**
    * @param {{min: number[], max: number[]}} result
-   * @param {ArrayLike<number>[]} series
+   * @param {NumericColumn[]} series
    * @param {number} start
    * @param {number} end
    */
@@ -107,7 +137,7 @@ export class ExactExtremaIndex {
 
   /**
    * @param {{min: number[], max: number[]}} result
-   * @param {ArrayLike<number>[]} series
+   * @param {NumericColumn[]} series
    * @param {number} start
    * @param {number} end
    */
@@ -116,12 +146,16 @@ export class ExactExtremaIndex {
       const col = series[s];
       let min = result.min[s];
       let max = result.max[s];
-      for (let i = start; i < end; i++) {
-        const v = col ? Number(col[i]) : Number.NaN;
-        if (!Number.isFinite(v)) continue;
-        if (!Number.isFinite(min) || v < min) min = v;
-        if (!Number.isFinite(max) || v > max) max = v;
-      }
+      if (col)
+        for (let i = start; i < end; ) {
+          const span = columnSpan(col, i, end);
+          for (; i < span.end; i++) {
+            const v = Number(span.values[i - span.base]);
+            if (!Number.isFinite(v)) continue;
+            if (!Number.isFinite(min) || v < min) min = v;
+            if (!Number.isFinite(max) || v > max) max = v;
+          }
+        }
       result.min[s] = min;
       result.max[s] = max;
     }

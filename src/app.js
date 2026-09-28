@@ -18,7 +18,9 @@ import { exportCSV, importCSV } from './csv.js';
 import {
   adoptWindowFromPermille,
   clearAndResetStats,
+  refreshMonitorDisplay,
   refreshRecordButton,
+  refreshRecordLimitUI,
   scheduleStatsUpdate,
   startRecording,
   stopRecording,
@@ -39,6 +41,10 @@ import {
   shutdownDeviceStream,
 } from './device.js';
 import { enhanceSelects } from './dropdown.js';
+import { listSpoolRecoveries } from './file-io.js';
+import { deviceSupportsControl } from './km003c-model.js';
+import { clampLimitMb } from './recording-limit.js';
+import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
   applyRealtimePanelWidth,
   applySampleRate,
@@ -48,7 +54,7 @@ import {
   resetSettings,
   saveSettings,
 } from './settings.js';
-import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
+import { getActiveView, onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import {
   connectTempService,
@@ -66,6 +72,7 @@ import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
+import { setSampleRateOption } from './utils.js';
 import {
   applyPdSplitLayout,
   clearPdEntries,
@@ -74,8 +81,14 @@ import {
   markPdDisconnect,
   syncPdView,
 } from './views/pd.js';
-import { initSettingsView } from './views/settings-view.js';
-import { initWindowMaterial, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
+import { initSettingsView, showSpoolRecoveries } from './views/settings-view.js';
+import {
+  handlePdmState,
+  handleTriggerProgress,
+  initTriggerView,
+  syncTriggerConnection,
+  syncTriggerView,
+} from './views/trigger.js';
 import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -579,6 +592,26 @@ function setupControls() {
     debouncedSaveSettings();
   });
 
+  // 单次记录上限（设置页 图表与记录）：换算点数门限，底栏剩余提示随之刷新
+  const recordLimitEl = /** @type {HTMLInputElement|null} */ (document.getElementById('record-limit'));
+  recordLimitEl?.addEventListener('change', () => {
+    const mb = clampLimitMb(recordLimitEl.value);
+    recordLimitEl.value = String(mb);
+    state.settings.recordLimitMb = mb;
+    refreshRecordLimitUI();
+    debouncedSaveSettings();
+  });
+
+  // 临时恢复文件：关掉时收尾并删除当前缓存；记录中打开时立即新建
+  const tempSpoolEl = /** @type {HTMLInputElement|null} */ (document.getElementById('recording-temp-spool'));
+  tempSpoolEl?.addEventListener('change', () => {
+    state.settings.recordingTempSpool = tempSpoolEl.checked;
+    state.settings.autoSaveRecording = tempSpoolEl.checked;
+    if (!tempSpoolEl.checked) void finalizeSpool();
+    else if (state.isRecording) spoolRecordingStarted();
+    debouncedSaveSettings();
+  });
+
   // 记录电流方向（设置页 配置 卡）
   const signedCurrentEl = /** @type {HTMLInputElement|null} */ (document.getElementById('signed-current'));
   signedCurrentEl?.addEventListener('change', () => {
@@ -588,19 +621,6 @@ function setupControls() {
       const dirEl = document.getElementById('rt-current-dir');
       if (dirEl) dirEl.hidden = true;
     }
-    debouncedSaveSettings();
-  });
-
-  const windowMaterialEl = /** @type {HTMLInputElement|null} */ (document.getElementById('window-material'));
-  windowMaterialEl?.addEventListener('change', () => {
-    void setWindowMaterialEnabled(windowMaterialEl.checked);
-    debouncedSaveSettings();
-  });
-  const windowMaterialUnfocusedEl = /** @type {HTMLInputElement|null} */ (
-    document.getElementById('window-material-unfocused')
-  );
-  windowMaterialUnfocusedEl?.addEventListener('change', () => {
-    void setWindowMaterialUnfocused(windowMaterialUnfocusedEl.checked);
     debouncedSaveSettings();
   });
 
@@ -797,9 +817,50 @@ function initMonitorSplitter() {
 
 // ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────
 
+/** @type {ReturnType<typeof initTabBar>|null} */
+let tabbar = null;
+/** 上次停在协议控制页：设备列表就绪、确认选中的是 POWER-Z 后再切过去。 */
+let restoreTriggerPending = false;
+
+/** 下拉框当前指向的设备（已连接时就是连接中的那台）。 */
+function selectedDeviceInfo() {
+  return state.connectedDevice ?? state.deviceList.find((d) => d.path === state.selectedDevicePath) ?? null;
+}
+
+/** 协议控制 Tab 只在选中支持控制的设备时出现；隐藏时若正停在该页则回到监控。 */
+function syncControlTab() {
+  const device = selectedDeviceInfo();
+  const visible = deviceSupportsControl(device);
+  tabbar?.setHidden('trigger', !visible);
+  const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
+  const highRate = state.isConnected && state.connectedDevice?.family === 'km003c';
+  const highRateOption = /** @type {HTMLOptionElement|null} */ (rateSelect?.querySelector('option[value="1"]') ?? null);
+  if (highRateOption) highRateOption.hidden = !highRate;
+  if (!highRate && state.settings.sampleRate === 1) {
+    state.settings.sampleRate = 10;
+    state.dataIntervalMs = 10;
+    if (rateSelect) setSampleRateOption(rateSelect, 10);
+    updateSampleRateStatus();
+  }
+  if (visible && restoreTriggerPending) {
+    restoreTriggerPending = false;
+    showView('trigger');
+  } else if (!visible && getActiveView() === 'trigger') {
+    showView('monitor');
+  }
+}
+
 function setupShell() {
-  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: handleMonitorShown });
+  const showMonitor = () => {
+    refreshMonitorDisplay();
+    handleMonitorShown();
+  };
+  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: showMonitor });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshMonitorDisplay();
+  });
   registerView({ id: 'pd', icon: 'flash', label: 'PD 分析', init: initPdView, onShow: syncPdView });
+  registerView({ id: 'trigger', icon: 'options', label: '协议控制', init: initTriggerView, onShow: syncTriggerView });
   // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
   registerView({
     id: 'settings',
@@ -811,16 +872,18 @@ function setupShell() {
   const tabsContainer = document.getElementById('titlebar-tabs');
   const gearBtn = document.getElementById('btn-settings-tab');
   if (tabsContainer) {
-    const tabbar = initTabBar(
+    const bar = initTabBar(
       tabsContainer,
       [
         { id: 'monitor', icon: 'pulse', label: '监控' },
         { id: 'pd', icon: 'flash', label: 'PD 分析' },
+        { id: 'trigger', icon: 'options', label: '协议控制', hidden: true },
       ],
       showView,
     );
+    tabbar = bar;
     onSelectionChange((id) => {
-      tabbar.select(id);
+      bar.select(id);
       gearBtn?.classList.toggle('active', id === 'settings');
     });
   }
@@ -840,8 +903,14 @@ function setupShell() {
   applyWindowStyle(state.settings.windowStyle);
   initWindowControls();
 
-  // 恢复上次的工作区（默认监控）
+  // 恢复上次的工作区（默认监控）。协议控制页要等设备列表确认是 POWER-Z 才出现，
+  // 先停在监控：activeView 同时决定监控显示是否刷新，不能让它指着一个没显示的页。
+  if (state.settings.activeView === 'trigger') {
+    restoreTriggerPending = true;
+    state.settings.activeView = 'monitor';
+  }
   restoreView(state.settings.activeView);
+  document.addEventListener('witrn:device-selection', syncControlTab);
 }
 
 // ─── Event listeners ─────────────────────────────────────────────────────────
@@ -853,6 +922,21 @@ async function setupEventListener() {
   await listen('pd-data-batch', (/** @type {{ payload: unknown }} */ event) => {
     ingestPdBatch(event.payload);
   });
+
+  // 协议控制的进度与 PDM 状态：视图没打开时也要收，命令可能在别的 Tab 上结束。
+  await listen('km003c-trigger-progress', (/** @type {{ payload: unknown }} */ event) => {
+    handleTriggerProgress(event.payload);
+  });
+  await listen('km003c-pdm-state', (/** @type {{ payload: unknown }} */ event) => {
+    handlePdmState(event.payload);
+  });
+  await listen('km003c-high-rate', (/** @type {{ payload: { ok?: boolean; message?: string } }} */ event) => {
+    if (event.payload?.ok === false) {
+      void applySampleRate(10);
+      toast.warning(`POWER-Z 高速采样不可用，已退回 100 次/秒：${event.payload.message ?? ''}`);
+    }
+  });
+  document.addEventListener('witrn:monitor-changed', syncTriggerConnection);
 
   await listen('device-disconnected', async () => {
     if (state.isConnected) {
@@ -897,7 +981,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await setupCloseConfirm();
   await loadSettings();
-  await initWindowMaterial();
   initChart();
   setupChartToggles();
   setupControls();
@@ -913,6 +996,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await setupEventListener();
   await refreshDeviceList();
+  // Scan asynchronously so startup stays quiet and does not block device enumeration.
+  void listSpoolRecoveries()
+    .then((entries) => {
+      showSpoolRecoveries(entries);
+      if (entries.length) toast.info(`发现 ${entries.length} 份可恢复的临时记录，请在设置页查看。`);
+    })
+    .catch((error) => console.error('扫描临时恢复文件失败:', error));
+  // 列表里没有 POWER-Z 时不再等待恢复协议控制页。
+  restoreTriggerPending = false;
   window.__WITRN_BOOT__?.mark('appReady');
 
   updateTempUIVisibility();

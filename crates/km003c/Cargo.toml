@@ -1,0 +1,26 @@
+[package]
+name = "km003c"
+description = "ChargerLAB POWER-Z KM003C / KM002C: vendor-bulk protocol, CDC trigger commands and firmware text parsing."
+readme = "README.md"
+keywords = ["km003c", "power-z", "usb-pd", "usb-meter"]
+categories = ["hardware-support"]
+# Maintained inside the WITRN-RS workspace and versioned with the application.
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+serde.workspace = true
+nusb = "0.2"
+serialport = "4.9"
+encoding_rs = "0.8"
+aes = "0.8"
+
+[dev-dependencies]
+serde_json.workspace = true

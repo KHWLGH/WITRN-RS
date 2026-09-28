@@ -100,6 +100,12 @@
   .statusbar {
     gap: 8px;
   }
+
+  .status-metrics {
+    grid-template-columns: 74px 104px 88px 80px minmax(120px, 1fr);
+    gap: 6px;
+    padding-inline: 6px;
+  }
 }
 
 /* ── H1：视口高 < 620，纵向紧凑 ──────────────────────────────── */
@@ -194,5 +200,39 @@
 @media (max-width: 979.98px) {
   .realtime-panel {
     max-width: 200px;
+  }
+}
+
+/* 协议控制：窄窗时日志移到控件下方，控件区独占宽度。 */
+@media (max-width: 979.98px) {
+  .trigger-body {
+    flex-direction: column;
+  }
+
+  .trigger-controls {
+    min-width: 0;
+    flex: 1 1 60%;
+  }
+
+  .trigger-log-pane {
+    min-width: 0;
+    flex: 1 1 40%;
+    border-left: 0;
+    border-top: 1px solid var(--stroke-divider);
+  }
+
+  .trigger-live {
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .trigger-live-metric {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 5px;
+  }
+
+  .trigger-live-value {
+    min-width: 5ch;
   }
 }

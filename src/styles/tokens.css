@@ -123,8 +123,7 @@
   --light-teal-tint40: #a6e9ed;
 
   /* ── 2. 语义角色（暗色 = webDark alias） ───────────────────── */
-  /* color-scheme 不写在 :root：Chromium/WebView2 会按它给 html 画布填 UA Canvas 色
-     （暗色偏海军蓝），盖住 DWM Mica。控件方案下沉到 .app-shell。 */
+  /* color-scheme 下沉到 .app-shell，避免 Chromium/WebView2 的 UA 画布颜色影响主题。 */
 
   /* 表面：Background2 / Background1 / CardBackground / Background1 */
   --surface-base: var(--grey-12); /* 壳 chrome：标题栏 / 命令栏 / 状态栏 */
@@ -478,21 +477,4 @@
   --pd-header-table-fg: var(--blue-shade30);
   --pd-object-table-bg: var(--green-tint40);
   --pd-object-table-fg: var(--green-shade30);
-}
-
-/* Mica 覆盖必须在浅色主题之后：外壳用中性灰半透明罩层透出 DWM 材质，
-   卡片保持 --surface-card 不透明。html 画布显式透明，避免 WebView UA Canvas 海军蓝。 */
-:root[data-backdrop="mica"] {
-  --surface-base: color-mix(in srgb, var(--grey-12) 80%, transparent);
-  --surface-content: color-mix(in srgb, var(--grey-16) 55%, transparent);
-}
-
-:root[data-theme="light"][data-backdrop="mica"] {
-  --surface-base: color-mix(in srgb, var(--grey-98) 80%, transparent);
-  --surface-content: color-mix(in srgb, var(--white) 55%, transparent);
-}
-
-:root[data-backdrop="mica"],
-:root[data-backdrop="mica"] body {
-  background-color: transparent;
 }

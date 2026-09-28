@@ -4,7 +4,15 @@
  */
 
 import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js';
-import { updateEnergyDisplay, updateSampleRateStatus, updateSliderFill, updateStatsDisplay } from './data.js';
+import {
+  refreshRecordLimitUI,
+  updateEnergyDisplay,
+  updateSampleRateStatus,
+  updateSliderFill,
+  updateStatsDisplay,
+} from './data.js';
+import { clampPdm } from './km003c-model.js';
+import { clampLimitMb } from './recording-limit.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { applyThemePreference, echoThemeUI } from './theme.js';
@@ -12,7 +20,6 @@ import { syncAutoPauseUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
-import { echoWindowMaterialUI, setWindowMaterialEnabled, setWindowMaterialUnfocused } from './window-material.js';
 import { applyWindowStyle, echoWindowStyleUI, normalizeWindowStyle } from './window-style.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
@@ -50,7 +57,7 @@ function normalizeSettings(saved) {
     merged.rangeStart = merged.rangeEnd;
     merged.rangeEnd = swap;
   }
-  merged.sampleRate = Math.round(clamp(merged.sampleRate, 10, 60_000, defaultSettings.sampleRate));
+  merged.sampleRate = Math.round(clamp(merged.sampleRate, 1, 60_000, defaultSettings.sampleRate));
   // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
   if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
     merged.chartHeadroomMode = defaultSettings.chartHeadroomMode;
@@ -62,7 +69,7 @@ function normalizeSettings(saved) {
   merged.uiScalePercent = clampUiScalePercent(merged.uiScalePercent);
   // activeView 会被 shell 用来切换视图，白名单校验防止坏值卡死在不存在的视图
   // （'device' 视图已并入 settings，旧存值一并回落到 monitor）
-  if (!['monitor', 'pd', 'settings'].includes(merged.activeView)) {
+  if (!['monitor', 'pd', 'trigger', 'settings'].includes(merged.activeView)) {
     merged.activeView = defaultSettings.activeView;
   }
   if (merged.tempSource !== 'device' && merged.tempSource !== 'external') {
@@ -72,12 +79,23 @@ function normalizeSettings(saved) {
     merged.theme = defaultSettings.theme;
   }
   merged.windowStyle = normalizeWindowStyle(merged.windowStyle);
-  merged.windowMaterial = merged.windowMaterial !== false;
-  merged.windowMaterialUnfocused = merged.windowMaterialUnfocused === true;
+  // Mica settings were removed; discard them when loading older LazyStore data.
+  const legacyMerged = /** @type {Record<string, unknown>} */ (merged);
+  delete legacyMerged.windowMaterial;
+  delete legacyMerged.windowMaterialUnfocused;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
   merged.pdSplitSide = merged.pdSplitSide === true;
+  // PDM 参数直接下发到仪表：越界值会被固件拒绝或落到意外模式。
+  merged.km003cPdm = clampPdm(merged.km003cPdm);
+  // 上限直接换算成点数门限，坏值会让记录立刻停下或永不停下。
+  merged.recordLimitMb = clampLimitMb(merged.recordLimitMb);
+  const legacyTempSpool = source.autoSaveRecording;
+  merged.recordingTempSpool =
+    typeof source.recordingTempSpool === 'boolean' ? source.recordingTempSpool : legacyTempSpool !== false;
+  // Keep the old key in memory so older callers and persisted settings remain compatible.
+  merged.autoSaveRecording = merged.recordingTempSpool;
   return merged;
 }
 
@@ -86,7 +104,7 @@ function normalizeSettings(saved) {
  * @param {number} rate
  */
 export async function applySampleRate(rate) {
-  const clamped = Math.round(Math.min(60_000, Math.max(10, Number(rate) || defaultSettings.sampleRate)));
+  const clamped = Math.round(Math.min(60_000, Math.max(1, Number(rate) || defaultSettings.sampleRate)));
   state.settings.sampleRate = clamped;
   // 能量空档阈值跟着新间隔走；设备回来的 rate_ms 会立刻覆盖成实际值。
   state.dataIntervalMs = clamped;
@@ -170,6 +188,21 @@ function echoSettingsUI() {
   const apDuration = /** @type {HTMLInputElement|null} */ (document.getElementById('ap-duration'));
   if (apDuration) apDuration.value = String(state.autoPauseSettings.duration);
   echoApUnit();
+
+  const pdm = clampPdm(state.settings.km003cPdm);
+  /** @param {string} id @param {number} value */
+  const setSelect = (id, value) => {
+    const el = /** @type {HTMLSelectElement|null} */ (document.getElementById(id));
+    if (el) el.value = String(value);
+  };
+  setSelect('km-pdm-type', pdm.pdType);
+  setSelect('km-pdm-em', pdm.em);
+  setSelect('km-pdm-sink', pdm.sink);
+
+  const recordLimit = /** @type {HTMLInputElement|null} */ (document.getElementById('record-limit'));
+  if (recordLimit) recordLimit.value = String(state.settings.recordLimitMb);
+  setChecked('recording-temp-spool', state.settings.recordingTempSpool);
+  refreshRecordLimitUI();
 
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
@@ -301,7 +334,6 @@ export async function loadSettings() {
     echoThemeUI();
     echoWindowStyleUI(state.settings.windowStyle);
     applyWindowStyle(state.settings.windowStyle);
-    echoWindowMaterialUI();
     echoRealtimePanelWidth();
     fillUiScaleHint();
     try {
@@ -384,11 +416,8 @@ export async function resetSettings() {
     echoThemeUI();
     echoWindowStyleUI(state.settings.windowStyle);
     applyWindowStyle(state.settings.windowStyle);
-    echoWindowMaterialUI();
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
-    await setWindowMaterialUnfocused(state.settings.windowMaterialUnfocused);
-    await setWindowMaterialEnabled(state.settings.windowMaterial);
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位

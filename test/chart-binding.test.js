@@ -60,15 +60,23 @@ function stubChart() {
     height: 300,
     hooks: {},
     data: null,
+    submissions: 0,
+    scaleChanges: 0,
     setData(data) {
+      this.submissions++;
       this.data = data.map((col) => Array.from(col));
     },
-    setScale() {},
+    setScale() {
+      this.scaleChanges++;
+    },
   };
 }
 
 /** 写入 SAMPLES 个点，x 为 20ms 间隔的相对秒。 */
 function seed() {
+  state.chartWindow = { mode: 'full', min: 0, max: 0, duration: 0 };
+  state.navigatorChart = null;
+  state.isRecording = false;
   const cs = state.chartSeries;
   for (const col of [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2]) col.length = 0;
   for (let i = 0; i < SAMPLES; i++) {
@@ -157,7 +165,7 @@ test('panning keeps one stripe density from the first drag frame to the settled 
   assert.deepEqual(secondFrame, u.data);
 });
 
-test('sparse windows keep the zero-copy raw binding in both states', () => {
+test('sparse windows bind only visible raw samples and neighbours in both states', () => {
   seed();
   const u = stubChart();
   state.mainChart = u;
@@ -168,10 +176,118 @@ test('sparse windows keep the zero-copy raw binding in both states', () => {
   chart.setRangeDragging(false);
   commit(sparse);
 
-  // 窗口窄于 1×宽度时不降采样：两帧都是全量列的零拷贝视图，X 窗只靠 setScale。
-  assert.equal(whileDragging[0].length, SAMPLES);
+  // 窗口窄于 1×宽度时不降采样；uPlot 只接收窗口及两侧裁剪邻点。
+  assert.equal(whileDragging[0].length, 403);
+  assert.equal(whileDragging[0][0], state.chartSeries.x.at(9_999));
   assert.equal(visible(whileDragging, sparse), 401);
   assert.deepEqual(whileDragging, u.data);
+});
+
+function appendSample({ voltage = 5, current = 2 } = {}) {
+  const cs = state.chartSeries;
+  cs.x.push(cs.x.at(-1) + 0.02);
+  for (const [field, value] of Object.entries({
+    voltage,
+    current,
+    power: 10,
+    temp: 30,
+    dp: 3.3,
+    dn: 0.6,
+    cc1: 0,
+    cc2: 0,
+  })) {
+    cs[field].push(value);
+  }
+}
+
+for (const [label, start, end] of [
+  ['dense', 40_000, 90_000],
+  ['sparse', 10_000, 10_400],
+]) {
+  test(`frozen ${label} windows skip unchanged main data but update the navigator`, () => {
+    seed();
+    const u = stubChart();
+    const nav = stubChart();
+    state.mainChart = u;
+    state.navigatorChart = nav;
+    const range = windowOf(start, end);
+    state.chartWindow = { mode: 'frozen', min: range[0], max: range[1], duration: range[1] - range[0] };
+    commit(range);
+    const before = u.data;
+    const navCount = nav.submissions;
+    appendSample();
+    dragFrame(u, range);
+    assert.equal(u.submissions, 1, 'unrelated append must not resubmit the frozen main graph');
+    assert.equal(u.scaleChanges, 0, 'unchanged X range must not be submitted either');
+    assert.equal(u.data, before);
+    assert.equal(nav.submissions, navCount + 1, 'the overview still receives the appended history');
+    assert.equal(state.chartSeries.x.length, SAMPLES + 1, 'render suppression never discards the sample');
+
+    appendSample({ voltage: 60 });
+    dragFrame(u, range);
+    assert.equal(u.submissions, 2, 'a new global extreme must refresh Y scales even outside the window');
+  });
+}
+
+test('a retained sparse binding refreshes before navigating into newly appended data', () => {
+  seed();
+  const u = stubChart();
+  state.mainChart = u;
+  const range = windowOf(100, 200);
+  state.chartWindow = { mode: 'frozen', min: range[0], max: range[1], duration: range[1] - range[0] };
+  commit(range);
+  assert.equal(u.data[0][0], state.chartSeries.x.at(99));
+  assert.equal(u.data[0].at(-1), state.chartSeries.x.at(201));
+  appendSample();
+  dragFrame(u, range);
+  assert.equal(u.submissions, 1);
+  dragFrame(u, windowOf(SAMPLES - 2, SAMPLES));
+  assert.equal(u.submissions, 2);
+  assert.equal(u.data[0].length, 4);
+  assert.equal(u.data[0].at(-1), state.chartSeries.x.at(-1));
+});
+
+test('replacing columns with equal-length data invalidates a frozen projection', () => {
+  seed();
+  const u = stubChart();
+  state.mainChart = u;
+  const range = windowOf(100, 200);
+  state.chartWindow = { mode: 'frozen', min: range[0], max: range[1], duration: range[1] - range[0] };
+  commit(range);
+  state.chartSeries.voltage.set(Float64Array.from({ length: SAMPLES }, () => 12));
+  chart.syncChartSeries();
+  dragFrame(u, range);
+  assert.equal(u.submissions, 2);
+  assert.equal(u.data[1][100], 12);
+});
+
+test('a frozen sparse window refreshes when its first right neighbour arrives', () => {
+  seed();
+  const u = stubChart();
+  state.mainChart = u;
+  const range = windowOf(SAMPLES - 20, SAMPLES - 1);
+  range[1] += 0.01;
+  state.chartWindow = { mode: 'frozen', min: range[0], max: range[1], duration: range[1] - range[0] };
+  commit(range);
+  appendSample();
+  dragFrame(u, range);
+  assert.equal(u.submissions, 2, 'the right neighbour changes the clipped line at the window boundary');
+  assert.equal(u.data[0].length, 22);
+});
+
+test('follow windows still submit every newly extended projection', () => {
+  seed();
+  const u = stubChart();
+  state.mainChart = u;
+  const range = windowOf(SAMPLES - 100, SAMPLES - 1);
+  state.chartWindow = { mode: 'follow', min: range[0], max: range[1], duration: range[1] - range[0] };
+  commit(range);
+  appendSample();
+  dragFrame(u, windowOf(SAMPLES - 99, SAMPLES));
+  assert.equal(u.submissions, 2);
+  assert.equal(u.data[0].length, 101);
+  assert.equal(u.data[0][0], state.chartSeries.x.at(SAMPLES - 100));
+  assert.equal(u.data[0].at(-1), state.chartSeries.x.at(SAMPLES));
 });
 
 // ─── 结构守卫 ────────────────────────────────────────────────────────────────

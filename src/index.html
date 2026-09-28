@@ -53,6 +53,7 @@
             <span class="cmd-sep"></span>
             <span class="cmd-label">采样率</span>
             <select id="sample-rate" class="ribbon-select" title="采样率（显示为 每秒次数；值为毫秒）">
+              <option value="1" hidden>1000 次/秒</option>
               <option value="10">100 次/秒</option>
               <option value="100">10 次/秒</option>
               <option value="250" selected>4 次/秒</option>
@@ -109,6 +110,7 @@
           <div class="monitor-body">
             <!-- 实时读数栏 -->
             <div class="realtime-panel">
+              <div id="stats-snapshot-label" class="stats-snapshot-label" hidden></div>
               <div class="realtime-card voltage">
                 <div class="realtime-body">
                   <div class="realtime-label"><span class="realtime-dot"></span><span>电压</span></div>
@@ -376,6 +378,164 @@
           </div>
         </section>
 
+        <!-- ── 协议控制工作区（POWER-Z KM003C / KM002C） ── -->
+        <section class="view" id="view-trigger" role="tabpanel" aria-labelledby="tab-trigger" hidden>
+          <div class="commandbar">
+            <span class="trigger-pill" id="km-pdm-status">PDM · 未打开</span>
+            <select id="km-pdm-type" class="ribbon-select" title="PD 类型">
+              <option value="0">自动</option>
+              <option value="1" selected>PD 3.0</option>
+              <option value="2">PD 3.1</option>
+              <option value="3">私有 PPS</option>
+            </select>
+            <select id="km-pdm-em" class="ribbon-select" title="线缆模拟（E-Marker）">
+              <option value="0">线缆模拟：关闭</option>
+              <option value="1" selected>线缆模拟：20V 5A</option>
+              <option value="2">线缆模拟：50V 5A EPR</option>
+              <option value="3">线缆模拟：LA135 6.75A</option>
+            </select>
+            <select id="km-pdm-sink" class="ribbon-select" title="Sink 能力">
+              <option value="0" selected>Sink：3A PPS</option>
+              <option value="1">Sink：5A PPS</option>
+            </select>
+            <button type="button" class="cmd-btn" id="btn-km-pdm-open" title="打开 PDM 协议会话">
+              <i class="fi fi-play" aria-hidden="true"></i>打开
+            </button>
+            <button type="button" class="cmd-btn" id="btn-km-pdm-close" title="关闭 PDM 协议会话">
+              <i class="fi fi-dismiss" aria-hidden="true"></i>关闭
+            </button>
+            <button type="button" class="cmd-btn" id="btn-km-pdm-apply" title="应用 PD 类型、线缆模拟与 Sink 参数">
+              <i class="fi fi-success" aria-hidden="true"></i>应用
+            </button>
+            <span class="cmd-spacer"></span>
+            <span class="trigger-live" title="实时读数">
+              <span class="trigger-live-metric voltage"><span class="trigger-live-value" id="km-live-voltage">--</span><span class="trigger-live-unit">V</span></span>
+              <span class="trigger-live-metric current"><span class="trigger-live-value" id="km-live-current">--</span><span class="trigger-live-unit">A</span></span>
+              <span class="trigger-live-metric power"><span class="trigger-live-value" id="km-live-power">--</span><span class="trigger-live-unit">W</span></span>
+            </span>
+          </div>
+          <div class="trigger-body">
+            <div class="trigger-controls">
+              <div class="trigger-banner" id="km-banner">连接 POWER-Z 设备后可用；除自定义命令外，先打开 PDM。</div>
+              <section class="trigger-section">
+                <h2 class="trigger-section-title">电压触发</h2>
+                <div class="trigger-actions">
+                  <button type="button" class="btn" id="btn-km-read-pdo">读取 PDO</button>
+                  <button type="button" class="btn" id="btn-km-scan" title="扫描支持的快充协议，最长约 90 秒">自动检测</button>
+                  <button type="button" class="btn" id="btn-km-scan-full" title="包含私有协议的完整扫描，最长约 3 分钟">
+                    完整检测
+                  </button>
+                  <button type="button" class="btn" id="btn-km-reset" title="退出当前协议，恢复默认 5V">复位</button>
+                </div>
+                <div class="trigger-form">
+                  <label class="trigger-field">
+                    <span class="trigger-field-label">协议</span>
+                    <select id="km-proto" class="ribbon-select">
+                      <option value="pd" selected>PD</option>
+                      <option value="qc">QC 2.0</option>
+                      <option value="qc3">QC 3.0</option>
+                      <option value="fcp">FCP</option>
+                      <option value="afc">AFC</option>
+                      <option value="sfcp">SFCP</option>
+                      <option value="scp">SCP</option>
+                      <option value="vfcp">VFCP</option>
+                      <option value="ufcs">UFCS</option>
+                      <option value="bc">BC 1.2</option>
+                      <option value="apple">Apple</option>
+                    </select>
+                  </label>
+                  <label class="trigger-field" id="km-field-position">
+                    <span class="trigger-field-label" id="km-position-label">PDO 序号</span>
+                    <input type="number" id="km-req-pos" class="ribbon-input" min="1" max="15" step="1" value="1" />
+                  </label>
+                  <label class="trigger-field" id="km-field-qc-volt" hidden>
+                    <span class="trigger-field-label">电压</span>
+                    <select id="km-qc-volt" class="ribbon-select">
+                      <option value="5V">5V</option>
+                      <option value="9V" selected>9V</option>
+                      <option value="12V">12V</option>
+                      <option value="20V">20V</option>
+                    </select>
+                  </label>
+                  <label class="trigger-field" id="km-field-volt">
+                    <span class="trigger-field-label">电压</span>
+                    <span class="trigger-input-unit">
+                      <input type="number" id="km-req-volt" class="ribbon-input" min="0" max="60000" step="20" value="5000" />
+                      <span class="cmd-label">mV</span>
+                    </span>
+                  </label>
+                  <label class="trigger-field" id="km-field-cur">
+                    <span class="trigger-field-label">电流</span>
+                    <span class="trigger-input-unit">
+                      <input type="number" id="km-req-cur" class="ribbon-input" min="0" max="10000" step="50" value="3000" />
+                      <span class="cmd-label">mA</span>
+                    </span>
+                  </label>
+                  <div class="trigger-form-actions">
+                    <button type="button" class="btn" id="btn-km-qc3-up" hidden>QC3 +200 mV</button>
+                    <button type="button" class="btn" id="btn-km-qc3-down" hidden>QC3 −200 mV</button>
+                    <button type="button" class="btn btn-accent" id="btn-km-trigger">触发</button>
+                  </div>
+                </div>
+              </section>
+              <section class="trigger-section">
+                <h2 class="trigger-section-title">PDO 列表<span class="trigger-hint">点击一行填入请求</span></h2>
+                <div class="trigger-pdo-list" id="km-pdo-list" role="list">
+                  <div class="trigger-empty">读取 PDO 或插入充电器后显示</div>
+                </div>
+                <div class="trigger-protocols" id="km-protocols" hidden></div>
+              </section>
+              <details class="trigger-section trigger-advanced">
+                <summary>高级协议命令</summary>
+                <div class="trigger-form">
+                  <label class="trigger-field">
+                    <span class="trigger-field-label">PD cmd</span>
+                    <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
+                  </label>
+                  <div class="trigger-form-actions">
+                    <button type="button" class="btn" id="btn-km-pd-cmd">发送 pd cmd</button>
+                    <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
+                  </div>
+                  <label class="trigger-field trigger-field-wide">
+                    <span class="trigger-field-label">PD data</span>
+                    <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
+                  </label>
+                  <div class="trigger-form-actions">
+                    <button type="button" class="btn" id="btn-km-pd-data">发送 pd data</button>
+                    <button type="button" class="btn" id="btn-km-ufcs-pdo">读取 UFCS PDO</button>
+                  </div>
+                  <label class="trigger-field">
+                    <span class="trigger-field-label">UFCS cmd</span>
+                    <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
+                  </label>
+                  <div class="trigger-form-actions">
+                    <button type="button" class="btn" id="btn-km-ufcs-cmd">发送 ufcs cmd</button>
+                  </div>
+                  <label class="trigger-field trigger-field-wide">
+                    <span class="trigger-field-label">自定义命令</span>
+                    <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="如 pd pdo" spellcheck="false" />
+                  </label>
+                  <div class="trigger-form-actions">
+                    <button type="button" class="btn" id="btn-km-raw">发送命令</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div class="trigger-log-pane">
+              <div class="trigger-log-head">
+                <span id="km-log-title">返回日志</span>
+                <span class="cmd-spacer"></span>
+                <button type="button" class="cmd-btn" id="btn-km-cancel" hidden>
+                  <i class="fi fi-dismiss" aria-hidden="true"></i>取消
+                </button>
+                <button type="button" class="cmd-btn" id="btn-km-log-copy">复制</button>
+                <button type="button" class="cmd-btn" id="btn-km-log-clear">清空</button>
+              </div>
+              <textarea id="km-log" class="trigger-log" readonly spellcheck="false" aria-label="协议返回日志"></textarea>
+            </div>
+          </div>
+        </section>
+
         <!-- ── 设置（主栏选项 + 宽屏设备/关于侧栏） ── -->
         <section class="view" id="view-settings" role="tabpanel" aria-labelledby="btn-settings-tab" hidden>
           <div class="page settings-page">
@@ -427,34 +587,6 @@
                             <span>macOS 风格</span>
                           </label>
                         </div>
-                      </div>
-                    </div>
-                    <div class="settings-row" id="window-material-row" hidden>
-                      <div class="settings-row-text">
-                        <div class="settings-row-title">窗口材质</div>
-                        <div class="settings-row-desc">
-                          使用 Windows 11 Mica 半透明材质。远程桌面或录屏下若出现透底，可关闭此项。
-                        </div>
-                      </div>
-                      <div class="settings-row-control">
-                        <label class="toggle">
-                          <input type="checkbox" id="window-material" checked />
-                          <span class="toggle-track"></span>
-                        </label>
-                      </div>
-                    </div>
-                    <div class="settings-row settings-row-nested" id="window-material-unfocused-row" hidden>
-                      <div class="settings-row-text">
-                        <div class="settings-row-title">允许非聚焦窗口使用窗口材质</div>
-                        <div class="settings-row-desc">
-                          窗口失去焦点时仍保持 Mica 半透明，而不是回退为纯色。
-                        </div>
-                      </div>
-                      <div class="settings-row-control">
-                        <label class="toggle">
-                          <input type="checkbox" id="window-material-unfocused" />
-                          <span class="toggle-track"></span>
-                        </label>
                       </div>
                     </div>
                     <div class="settings-row">
@@ -529,6 +661,42 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
+                        <label class="settings-row-title" for="record-limit">单次记录上限</label>
+                        <div class="settings-row-desc" id="record-limit-hint">--</div>
+                      </div>
+                      <div class="settings-row-control">
+                        <span class="opacity-wrap record-limit-wrap">
+                          <input
+                            type="number"
+                            id="record-limit"
+                            value="512"
+                            min="64"
+                            max="8192"
+                            step="64"
+                            class="ribbon-input no-spin"
+                            title="当前图表里全部数据的内存上限"
+                          />
+                          <span class="opacity-suffix">MB</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <div class="settings-row-title">保留临时恢复文件</div>
+                        <div class="settings-row-desc">
+                          记录时约每秒写入应用缓存，仅用于崩溃恢复；正常清空、导入或退出后自动删除。显式导出才会生成用户文件。
+                        </div>
+                        <div class="settings-row-desc" id="spool-recovery-status" hidden></div>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="toggle">
+                          <input type="checkbox" id="recording-temp-spool" checked />
+                          <span class="toggle-track"></span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
                         <div class="settings-row-title">重置所有配置</div>
                         <div class="settings-row-desc">
                           恢复采样率、显示通道、界面缩放、自动暂停、温度服务等全部设置的默认值。
@@ -559,7 +727,7 @@
                         <span class="settings-kv-value" id="device-sn" title="设备序列号">--</span>
                       </div>
                     </div>
-                    <p class="settings-row-desc">
+                    <p class="settings-row-desc" id="device-note">
                       HID 枚举得到的厂商 ID、产品 ID 与 USB 序列号。维简硬件的序列号通常是生产批次日期，不是单机编号。
                     </p>
                   </div>
@@ -592,12 +760,17 @@
 
       <!-- 全局状态栏 -->
       <footer class="statusbar" id="statusbar">
-        <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="开始或暂停记录">
-          <span class="status-label">记录:</span><span id="record-status">停止</span>
-        </span>
-        <span class="status-item"><span class="status-label">时长:</span><span id="record-duration">--</span></span>
-        <span class="status-item"><span class="status-label">采样:</span><span id="status-sample-rate">4 次/秒</span></span>
-        <span class="status-item"><span class="status-label">点数:</span><span id="data-count">0</span></span>
+        <div class="status-metrics" aria-label="记录状态">
+          <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="开始或暂停记录">
+            <span class="status-label">记录:</span><span id="record-status">停止</span>
+          </span>
+          <span class="status-item status-duration"><span class="status-label">时长:</span><span id="record-duration">--</span></span>
+          <span class="status-item status-rate"><span class="status-label">采样:</span><span id="status-sample-rate">4 次/秒</span></span>
+          <span class="status-item status-count"><span class="status-label">点数:</span><span id="data-count">0</span></span>
+          <span class="status-item status-remaining" id="status-remaining" title="单次记录剩余容量">
+            <span class="status-label">剩余:</span><span id="record-remaining">--</span>
+          </span>
+        </div>
         <span class="status-item status-connection" title="连接状态">
           <span class="status-indicator" id="connection-status"></span>
           <span id="connection-text">未连接</span>

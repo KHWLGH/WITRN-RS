@@ -53,7 +53,7 @@ globalThis.requestAnimationFrame = (cb) => {
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
 const { state } = await import('../src/state.js');
-const { getStore, saveSettings, resetSettings } = await import('../src/settings.js');
+const { getStore, loadSettings, saveSettings, resetSettings } = await import('../src/settings.js');
 const { toast } = await import('../src/ui/toast.js');
 
 /** @type {{command:string, args:Record<string,unknown>}[]} */
@@ -171,4 +171,28 @@ test('a healthy store produces no failure toasts', async () => {
   assert.equal(await saveSettings(), true);
   assert.equal(await getStore(), await getStore(), '单例仍然复用');
   assert.deepEqual(errorToasts, [], '干净路径不该出现任何错误提示');
+});
+
+test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {
+  installStoreStub();
+  const stored = globalThis.window.__TAURI__.core.invoke;
+  globalThis.window.__TAURI__.core.invoke = async (command, args = {}) => {
+    if (command === 'plugin:store|get' && args.key === 'appSettings') {
+      return [{ activeView: 'trigger', km003cPdm: { pdType: 9, em: 2, sink: 'x' } }, true];
+    }
+    return stored(command, args);
+  };
+  const before = state.settings;
+  // loadSettings 的收尾会回显读数栏宽度，需要能做 instanceof 判断。
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    await loadSettings();
+    assert.equal(state.settings.activeView, 'trigger');
+    assert.deepEqual(state.settings.km003cPdm, { pdType: 1, em: 2, sink: 0 });
+  } finally {
+    state.settings = before;
+    globalThis.window.__TAURI__.core.invoke = stored;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
 });

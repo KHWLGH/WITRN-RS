@@ -38,6 +38,7 @@ const DYNAMIC_CONTRACT_IDS = [
   'opacity-temp',
   'view-monitor',
   'view-pd',
+  'view-trigger',
   'view-settings',
 ];
 

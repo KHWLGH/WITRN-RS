@@ -630,7 +630,7 @@ html[data-ui-scale-css] .app-shell {
   height: var(--statusbar-height);
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   padding: 0 12px;
   background: var(--surface-base);
   border-top: 1px solid var(--stroke-divider);
@@ -641,10 +641,54 @@ html[data-ui-scale-css] .app-shell {
   overflow: hidden;
 }
 
+.status-metrics {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 82px 112px 96px 92px minmax(150px, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid var(--stroke-divider);
+  border-radius: var(--radius-control);
+  background: var(--fill-control);
+  overflow: hidden;
+}
+
 .statusbar .status-item {
   gap: 5px;
   font-size: 11px;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.statusbar .status-item > :last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar .status-duration > :last-child {
+  min-width: 9ch;
+}
+
+.statusbar .status-rate > :last-child {
+  min-width: 9ch;
+}
+
+.statusbar .status-count > :last-child {
+  min-width: 7ch;
+}
+
+.statusbar .status-remaining > :last-child {
+  min-width: 14ch;
+}
+
+.statusbar .status-remaining.is-warning {
+  color: var(--status-caution);
 }
 
 .statusbar .status-indicator {
@@ -654,6 +698,7 @@ html[data-ui-scale-css] .app-shell {
 
 .statusbar .status-connection {
   margin-left: auto;
+  flex: none;
 }
 
 /* ── 浮出面板内容行 ───────────────────────────────────────────── */
@@ -1006,6 +1051,10 @@ html[data-ui-scale-css] .app-shell {
 .opacity-wrap .ribbon-input {
   width: 100%;
   padding-right: 16px;
+}
+
+.record-limit-wrap {
+  width: 120px;
 }
 
 .opacity-suffix {

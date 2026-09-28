@@ -139,11 +139,7 @@ test('a new generation clears the terminal failure and keeps the strict path', a
 
   const commands = h.calls.map((c) => c.command);
   assert.ok(commands.includes('ack_device_stream'), '健康路径必须照旧消费并 ACK');
-  assert.equal(
-    commands.includes('abandon_device_stream'),
-    false,
-    '健康路径不能顺手走终态逃生口',
-  );
+  assert.equal(commands.includes('abandon_device_stream'), false, '健康路径不能顺手走终态逃生口');
 });
 
 test('each selected sample is consumed once, in sequence, without animation frames', async () => {

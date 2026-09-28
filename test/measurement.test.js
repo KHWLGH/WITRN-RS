@@ -11,6 +11,7 @@ import {
   niceCeiling,
   parseRelativeTime,
 } from '../src/measurement.js';
+import { F64Col } from '../src/state.js';
 
 /** An independent re-implementation of the segmented integration rule, written the obvious
  * way (call the exported helper per point). src/measurement.js inlines nothing today, but this
@@ -141,7 +142,7 @@ test('estimateIntervalMsFromX reads the nominal cadence back from relative x', (
   assert.equal(estimateIntervalMsFromX([0, Number.NaN, 5, 10]), 5000);
   // 越界的估计值夹到命令的实际接受域，不能给出一个设备不可能的间隔
   assert.equal(estimateIntervalMsFromX([0, 500, 1000]), 60000);
-  assert.equal(estimateIntervalMsFromX([0, 0.001, 0.002]), 10);
+  assert.equal(estimateIntervalMsFromX([0, 0.001, 0.002]), 1);
 });
 
 test('the interval-aware guard still agrees with the obvious helper', () => {
@@ -276,4 +277,30 @@ test('integrateEnergy agrees with the obvious per-point helper over many segment
         energyViaHelper(times, current, power, 3600, start, end, segments),
       );
   }
+});
+
+test('chunked columns preserve energy and interval results across chunk boundaries', () => {
+  const n = 9001;
+  const times = Float64Array.from({ length: n }, (_, i) => i * 0.25);
+  const current = Float64Array.from({ length: n }, (_, i) => (i % 17 ? 2 : -3));
+  const power = Float64Array.from({ length: n }, (_, i) => (i % 19 ? 10 : Number.NaN));
+  const segments = Float64Array.from({ length: n }, (_, i) => Math.floor(i / 4096));
+  segments[8189] = Number.NaN;
+  times[8192] += 100;
+  const columns = [times, current, power, segments].map((values) => {
+    const column = new F64Col();
+    column.set(values);
+    return column;
+  });
+  for (const [start, end] of [
+    [0, n - 1],
+    [4094, 4098],
+    [8188, 8194],
+  ]) {
+    assert.deepEqual(
+      calculateEnergyInRange(columns[0], columns[1], columns[2], start, end, columns[3], 250),
+      calculateEnergyInRange(times, current, power, start, end, segments, 250),
+    );
+  }
+  assert.equal(estimateIntervalMsFromX(columns[0]), estimateIntervalMsFromX(times));
 });

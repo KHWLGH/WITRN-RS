@@ -395,3 +395,283 @@
 .pd-kv-table td.pd-dir-plug {
   font-weight: 600;
 }
+
+/* ── 协议控制（POWER-Z KM003C / KM002C） ──────────────────────── */
+
+.trigger-pill {
+  padding: 1px 10px;
+  border: 1px solid var(--stroke-control);
+  border-radius: var(--radius-full);
+  font: var(--type-caption);
+  color: var(--text-secondary);
+  background: var(--fill-control);
+  white-space: nowrap;
+}
+
+.trigger-pill.is-open {
+  border-color: transparent;
+  background: var(--accent-fill);
+  color: var(--text-on-accent);
+}
+
+.trigger-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.trigger-live-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 84px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+}
+
+.trigger-live-metric.voltage {
+  background: var(--ch-voltage-card);
+}
+
+.trigger-live-metric.current {
+  background: var(--ch-current-card);
+}
+
+.trigger-live-metric.power {
+  background: var(--ch-power-card);
+}
+
+.trigger-live-value {
+  min-width: 6ch;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.trigger-live-unit {
+  color: var(--text-tertiary);
+}
+
+.trigger-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.trigger-controls {
+  flex: 1 1 56%;
+  min-width: 320px;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.trigger-banner {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--accent-fill-faint);
+  color: var(--text-secondary);
+  font: var(--type-body);
+}
+
+.trigger-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--radius-surface);
+  background: var(--surface-card);
+}
+
+.trigger-section-title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font: var(--type-body-strong);
+  color: var(--text-primary);
+}
+
+.trigger-hint {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+}
+
+.trigger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.trigger-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.trigger-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.trigger-field-wide {
+  grid-column: 1 / -1;
+}
+
+.trigger-field-label {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.trigger-field .ribbon-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.trigger-input-unit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.trigger-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.trigger-pdo-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--stroke-divider);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.trigger-pdo-row {
+  display: grid;
+  grid-template-columns: 3.5em 7em minmax(0, 1fr) 6em;
+  gap: var(--space-3);
+  padding: 6px var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--stroke-divider);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger-pdo-row:last-child {
+  border-bottom: 0;
+}
+
+.trigger-pdo-row:hover {
+  background: var(--fill-subtle-hover);
+}
+
+.trigger-pdo-row:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: -2px;
+}
+
+.trigger-pdo-list.is-disabled .trigger-pdo-row {
+  cursor: default;
+}
+
+.trigger-pdo-list.is-disabled .trigger-pdo-row:hover {
+  background: transparent;
+}
+
+.trigger-pdo-pos,
+.trigger-pdo-volt,
+.trigger-pdo-cur {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.trigger-pdo-kind {
+  color: var(--text-secondary);
+}
+
+.trigger-pdo-cur {
+  text-align: right;
+}
+
+.trigger-empty {
+  padding: var(--space-3);
+  font: var(--type-body);
+  color: var(--text-tertiary);
+}
+
+.trigger-protocols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.trigger-chip {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--accent-fill-faint);
+  font: var(--type-caption);
+  color: var(--text-primary);
+}
+
+.trigger-advanced > summary {
+  font: var(--type-body-strong);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.trigger-log-pane {
+  flex: 1 1 44%;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--stroke-divider);
+  background: var(--surface-content);
+}
+
+.trigger-log-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--stroke-divider);
+  font: var(--type-body-strong);
+  color: var(--text-secondary);
+}
+
+.trigger-log {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3);
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.trigger-log:focus {
+  outline: none;
+}
+
+.trigger-log.is-live {
+  color: var(--text-secondary);
+}

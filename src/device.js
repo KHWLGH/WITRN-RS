@@ -5,6 +5,7 @@
 
 import { refreshRecordButton, stopRecording } from './data.js';
 import { deviceStream } from './device-stream.js';
+import { finalizeSpool } from './recording-spool.js';
 import { state } from './state.js';
 import { resetTempForDevice } from './temperature.js';
 import { toast } from './ui/toast.js';
@@ -52,16 +53,37 @@ export function initializeDeviceStream() {
   return streamInitialization;
 }
 
+/** 落盘收尾的时限：写完尾部、回写表头；超时不阻止退出，文件已按秒同步过。 */
+const SPOOL_EXIT_TIMEOUT_MS = 3000;
+
 /** Replaces app.js invoke('shutdown'); rejects rather than destroy with a missing tail. */
 export async function shutdownDeviceStream() {
   await initializeDeviceStream();
-  await deviceStream.shutdown();
+  // 末包排空之后再收尾落盘：退出前最后一批点也要进文件。
+  await deviceStream.shutdown(() =>
+    Promise.race([finalizeSpool(), new Promise((resolve) => setTimeout(resolve, SPOOL_EXIT_TIMEOUT_MS))]),
+  );
 }
 
 /** @param {string} id @param {string} value */
 function setDeviceField(id, value) {
   const el = document.getElementById(id);
   if (el) el.textContent = value;
+}
+
+/** 设置页「设备」说明随设备家族变化。 @param {string|undefined} family */
+function setDeviceNote(family) {
+  setDeviceField(
+    'device-note',
+    family === 'km003c'
+      ? 'USB 枚举得到的厂商 ID、产品 ID 与序列号。POWER-Z 经 Vendor Bulk 接口（Windows 下为 WinUSB）采集，协议控制走同一设备的虚拟串口。'
+      : 'HID 枚举得到的厂商 ID、产品 ID 与 USB 序列号。维简硬件的序列号通常是生产批次日期，不是单机编号。',
+  );
+}
+
+/** 下拉框选中项或连接状态变了：协议控制 Tab 等依赖设备家族的界面据此刷新。 */
+function announceDeviceSelection() {
+  document.dispatchEvent?.(new CustomEvent('witrn:device-selection'));
 }
 
 // ─── Device enumeration ──────────────────────────────────────────────────────
@@ -85,6 +107,7 @@ export async function refreshDeviceList() {
       option.textContent = '-- 未检测到设备 --';
       select.appendChild(option);
       state.selectedDevicePath = null;
+      announceDeviceSelection();
     } else {
       state.deviceList.forEach((device) => {
         const option = document.createElement('option');
@@ -94,6 +117,7 @@ export async function refreshDeviceList() {
         option.dataset.pid = String(device.pid);
         option.dataset.sn = device.serial_number || '';
         option.dataset.model = device.model_name;
+        option.dataset.family = device.family ?? 'witrn';
         select.appendChild(option);
       });
 
@@ -127,12 +151,15 @@ export function onDeviceSelect() {
     setDeviceField('device-vid', `0x${Number(vid).toString(16).toUpperCase().padStart(4, '0')}`);
     setDeviceField('device-pid', `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`);
     setDeviceField('device-sn', sn || '--');
+    setDeviceNote(selectedOption.dataset.family);
   } else {
     state.selectedDevicePath = null;
     setDeviceField('device-vid', '--');
     setDeviceField('device-pid', '--');
     setDeviceField('device-sn', '--');
+    setDeviceNote(undefined);
   }
+  announceDeviceSelection();
 }
 
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
@@ -156,11 +183,13 @@ export async function connectDevice() {
 
     // 获取连接后的设备信息
     const deviceInfo = await invoke('get_current_device_info');
+    state.connectedDevice = /** @type {import('./state.js').DeviceInfo|null} */ (deviceInfo ?? null);
     if (deviceInfo) {
       const di = /** @type {import('./state.js').DeviceInfo} */ (deviceInfo);
       setDeviceField('device-vid', `0x${di.vid.toString(16).toUpperCase().padStart(4, '0')}`);
       setDeviceField('device-pid', `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`);
       setDeviceField('device-sn', di.serial_number || '--');
+      setDeviceNote(di.family);
     }
 
     if (deviceStream.ended) throw new Error('设备已在连接过程中断开');
@@ -194,6 +223,7 @@ export async function disconnectDevice() {
  */
 export function setConnected(connected) {
   state.isConnected = connected;
+  if (!connected) state.connectedDevice = null;
 
   const statusEl = document.getElementById('connection-status');
   if (statusEl) statusEl.classList.toggle('connected', connected);
@@ -240,4 +270,5 @@ export function setConnected(connected) {
   // PD 视图的采集按钮在「跟随记录」开启时就是记录开关，未连接时要禁用 —— 连接
   // 状态变化同样要广播（stopRecording 只覆盖「拔设备时正在记录」这一种情况）
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
+  announceDeviceSelection();
 }

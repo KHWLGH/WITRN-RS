@@ -109,7 +109,7 @@ pub(crate) fn hex_upper(data: &[u8]) -> String {
 /// ```
 pub fn bits_to_hex(s: &str) -> String {
     let pad = (4 - s.len() % 4) % 4;
-    let padded: String = std::iter::repeat('0').take(pad).chain(s.chars()).collect();
+    let padded: String = std::iter::repeat_n('0', pad).chain(s.chars()).collect();
     padded
         .as_bytes()
         .chunks(4)

@@ -39,6 +39,7 @@ serde.workspace = true
 serde_json.workspace = true
 hidapi.workspace = true
 witrn-hid.workspace = true
+km003c.workspace = true
 tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"
@@ -46,18 +47,14 @@ tauri-plugin-decorum = "1.1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2", features = ["macos-private-api"] }
-window-vibrancy = "0.6"
 # Set the process-wide policy once during hidapi initialization, before any opens.
 hidapi = { workspace = true, features = ["macos-shared-device"] }
 
 [target.'cfg(windows)'.dependencies]
-window-vibrancy = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_Properties",
-    "Win32_Foundation",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation"
 ] }
 
 [dev-dependencies]

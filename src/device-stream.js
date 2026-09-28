@@ -5,7 +5,7 @@
  * @typedef {{generation:number, wall_anchor_ms:number}} StreamOpen
  * @typedef {{generation:number, after_seq:number, segment:number, received_us:number, wall_anchor_ms:number, rate_ms:number}} StreamBoundary
  * @typedef {{id:number, generation:number, columns:object, baseSeconds:number, lastX:number|null, first:boolean}} RecordingSegment
- * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
+ * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onBatch?:(count:number)=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
  */
 
 /** No DOM, rAF or timers on the consumption path.
@@ -18,6 +18,7 @@ export function createDeviceStream(options = {}) {
     invoke: (command, args) => window.__TAURI__.core.invoke(command, args),
     getColumns: () => null,
     onSample() {},
+    onBatch() {},
     onError: (e) => console.error(e.error),
     onEnd() {},
     drainTimeoutMs: 10000,
@@ -162,6 +163,7 @@ export function createDeviceStream(options = {}) {
   function handleBatch(batch) {
     if (!Array.isArray(batch) || failed) return;
     if (columns !== hooks.getColumns()) replace();
+    let accepted = 0;
     for (const sample of batch) {
       if (sample.generation !== generation || ended) continue;
       if (sample.seq <= seq) continue; // duplicate delivery is harmless
@@ -189,7 +191,9 @@ export function createDeviceStream(options = {}) {
         return;
       }
       seq = sample.seq;
+      accepted += 1;
     }
+    if (accepted) hooks.onBatch?.(accepted);
     notify();
     void acknowledge();
   }
@@ -343,8 +347,10 @@ export function createDeviceStream(options = {}) {
       capacityErrors: terminalErrors.filter((e) => String(e.error ?? '').includes('capacity exceeded')).length,
       lastError: terminalErrors.at(-1)?.error ?? null,
     }),
-    async shutdown() {
+    /** @param {() => Promise<unknown>} [beforeExit] 末包已消费、窗口销毁之前执行（写完落盘尾部） */
+    async shutdown(beforeExit) {
       const end = await drain();
+      if (beforeExit) await beforeExit();
       await hooks.invoke('shutdown', { generation: end?.generation ?? null, lastSeq: end?.last_seq ?? null });
     },
   };

@@ -63,7 +63,9 @@ export function options(argv, defaults) {
       throw new Error(`Invalid ${key}`);
   for (const key of ['runs', 'warmup'])
     if (key in result && !Number.isInteger(result[key])) throw new Error(`Invalid ${key}`);
-  if (result.sizes?.some((n) => !Number.isSafeInteger(n) || n < 1 || n > 1_000_000)) throw new Error('Invalid sizes');
+  if ('hz' in result && (!Number.isFinite(result.hz) || result.hz <= 0 || result.hz > 1000))
+    throw new Error('Invalid hz');
+  if (result.sizes?.some((n) => !Number.isSafeInteger(n) || n < 1 || n > 5_000_000)) throw new Error('Invalid sizes');
   return result;
 }
 export async function provenance() {

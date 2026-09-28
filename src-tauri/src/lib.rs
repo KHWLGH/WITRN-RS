@@ -1,10 +1,12 @@
+mod acquire;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
+mod file_io;
+mod km003c_session;
 mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
 pub mod stream;
 mod usb_port;
-mod window_material;
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
@@ -18,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
-use witrn_hid::{decode_general_sample, decode_pd_report, Parser, ReportKind};
+use witrn_hid::{decode_general_sample, ReportKind};
 
 use pd_capture::{now_ms, PdEvent, PdLoadEntry, PdLog};
 
@@ -64,6 +66,14 @@ pub const KNOWN_DEVICES: &[KnownDevice] = &[
     },
 ];
 
+/// 设备家族：决定采集源、是否提供协议控制
+#[derive(Clone, Copy, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceFamily {
+    Witrn,
+    Km003c,
+}
+
 /// 枚举到的设备信息
 #[derive(Clone, Serialize, Debug)]
 pub struct DeviceInfo {
@@ -78,6 +88,11 @@ pub struct DeviceInfo {
     pub display_name: String,
     pub interface_number: i32,
     pub usage_page: u16,
+    pub family: DeviceFamily,
+    /// 支持协议触发（PDM / PD 请求 / 快充触发）
+    pub controls: bool,
+    /// 设备能提供的最高采样率（次/秒）
+    pub max_rate_hz: u32,
 }
 
 type PhysicalDeviceKey = (u16, u16, String);
@@ -142,6 +157,9 @@ fn device_info_from_hid(api: &HidApi, device_info: &HidDeviceInfo) -> DeviceInfo
         display_name,
         interface_number: device_info.interface_number(),
         usage_page: device_info.usage_page(),
+        family: DeviceFamily::Witrn,
+        controls: false,
+        max_rate_hz: 100,
     }
 }
 
@@ -208,8 +226,8 @@ struct DeviceData {
     cc1: f32,                 // CC1
     cc2: f32,                 // CC2
     temperature: Option<f32>, // 仪表温度；缺失为 null，避免 JSON NaN 丢掉整帧
-    ah: f32,                  // 累计容量 Ah
-    wh: f32,                  // 累计能量 Wh
+    ah: Option<f32>,          // 仪表累计容量 Ah；没有累加器的设备为 null
+    wh: Option<f32>,          // 仪表累计能量 Wh
 }
 
 struct DeviceSession {
@@ -320,7 +338,10 @@ fn stop_task(slot: &mut Option<BackgroundTask>) {
 /// 正常路径。走到这里的生产端已经停止、线程已 join、`end` 已定稿，屏障保护的样本
 /// 不会再出现；此时只剩「放行销毁」与「整个进程再也退不出去」两个选项。
 /// 这里绝不写 `consumed`——空洞仍然是未消费。
-fn abandon_device_task(task: &mut BackgroundTask, generation: u64) -> Result<Option<stream::End>, String> {
+fn abandon_device_task(
+    task: &mut BackgroundTask,
+    generation: u64,
+) -> Result<Option<stream::End>, String> {
     if task.running.load(Ordering::Acquire) {
         return Err("cannot abandon a running stream".into());
     }
@@ -350,8 +371,10 @@ pub(crate) struct AppState {
     temp_task: Mutex<Option<BackgroundTask>>,
     pd_log: Arc<Mutex<PdLog>>,
     pd_capture_enabled: Arc<AtomicBool>,
-    pub(crate) window_material_available: AtomicBool,
-    pub(crate) window_material_enabled: AtomicBool,
+    /// 当前 POWER-Z 会话的协议控制句柄；与设备槽分开加锁，排空流时不阻塞取消。
+    km003c: Mutex<Option<km003c_session::Km003cControl>>,
+    /// CSV 导入 / 导出 / 临时恢复文件的文件句柄。
+    files: Mutex<file_io::FileRegistry>,
     /// 末包已校验、进入销毁流程：置位后禁止新建连接，退出事件放行。
     shutting_down: AtomicBool,
 }
@@ -367,8 +390,8 @@ impl Default for AppState {
             pd_log: Arc::new(Mutex::new(PdLog::default())),
             // 默认跟随记录且未开始记录：与前端 ingest 门控一致，不入库。
             pd_capture_enabled: Arc::new(AtomicBool::new(false)),
-            window_material_available: AtomicBool::new(false),
-            window_material_enabled: AtomicBool::new(false),
+            km003c: Mutex::new(None),
+            files: Mutex::new(file_io::FileRegistry::default()),
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -380,11 +403,13 @@ fn get_runtime_platform() -> &'static str {
     std::env::consts::OS
 }
 
-/// 枚举所有已连接的维简设备
+/// 枚举所有已连接的设备：维简 HID 仪表与 POWER-Z KM003C / KM002C
 #[tauri::command(async)]
 fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
     let api = HidApi::new().map_err(|e| format!("无法初始化HID API: {}", e))?;
-    Ok(collect_supported_device_infos(&api))
+    let mut devices = collect_supported_device_infos(&api);
+    devices.extend(km003c_session::device_infos());
+    Ok(devices)
 }
 
 /// 获取当前连接的设备信息
@@ -407,6 +432,9 @@ fn connect_device_on_path(
     state: &AppState,
     app: AppHandle,
 ) -> Result<stream::Open, String> {
+    if let Some(location) = path.strip_prefix(km003c_session::PATH_PREFIX) {
+        return km003c_session::connect(&path, location, state, app);
+    }
     let api = HidApi::new().map_err(|e| e.to_string())?;
 
     let current_info = collect_supported_device_infos(&api)
@@ -418,6 +446,36 @@ fn connect_device_on_path(
                 .map(|device| device_info_from_hid(&api, device))
         })
         .ok_or("找不到指定设备")?;
+    let (mut task_slot, had_session) = claim_device_slot(state)?;
+
+    // 与 USB 端口枚举共用非独占打开策略。
+    let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
+    let device = match usb_port::open_device_nonexclusive(&api, path_cstr.as_c_str()) {
+        Ok(device) => device,
+        Err(e) => {
+            report_open_failure(state, &app, had_session);
+            return Err(format!("无法打开设备: {}", e));
+        }
+    };
+    // 维简仪表没有写通路，不提供协议控制。
+    if let Ok(mut control) = state.km003c.lock() {
+        *control = None;
+    }
+    Ok(launch_stream(
+        state,
+        app,
+        &mut task_slot,
+        current_info,
+        |seed| (HidSource::new(device, seed.epoch), Vec::new()),
+    ))
+}
+
+/// 为新连接占用设备槽：退出中拒绝；旧代还有未消费的已选点时拒绝退休它。
+///
+/// 返回持有中的设备槽锁，以及之前是否存在会话（打开失败时据此通知前端断开）。
+fn claim_device_slot(
+    state: &AppState,
+) -> Result<(std::sync::MutexGuard<'_, Option<BackgroundTask>>, bool), String> {
     // Reconnect cannot retire a generation with unconsumed selected data.
     let mut task_slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
     if state.shutting_down.load(Ordering::Acquire) {
@@ -432,47 +490,63 @@ fn connect_device_on_path(
     }
     let had_session = task_slot.is_some();
     stop_task(&mut task_slot);
+    Ok((task_slot, had_session))
+}
 
-    // 与 USB 端口枚举共用非独占打开策略。
-    let path_cstr = std::ffi::CString::new(path.clone()).map_err(|e| e.to_string())?;
-    let device = match usb_port::open_device_nonexclusive(&api, path_cstr.as_c_str()) {
-        Ok(device) => device,
-        Err(e) => {
-            if had_session {
-                if let Ok(mut info) = state.current_device_info.lock() {
-                    *info = None;
-                }
-                let _ = app.emit("device-disconnected", ());
-            }
-            return Err(format!("无法打开设备: {}", e));
+/// 旧会话已退休、新设备却打不开：前端仍以为连着，必须告诉它断开了。
+fn report_open_failure(state: &AppState, app: &AppHandle, had_session: bool) {
+    if had_session {
+        if let Ok(mut info) = state.current_device_info.lock() {
+            *info = None;
         }
-    };
+        let _ = app.emit("device-disconnected", ());
+    }
+}
 
-    // Store device info
-    {
-        let mut info = state.current_device_info.lock().unwrap();
-        *info = Some(current_info);
+/// 新会话的身份与时钟，在构造采集源之前确定。
+pub(crate) struct SessionSeed {
+    pub generation: u64,
+    pub epoch: Instant,
+    /// 会话存活标志；读线程、发射线程与附属线程共用。
+    pub running: Arc<AtomicBool>,
+}
+
+/// 为已打开的设备启动发射线程与读线程，并装入设备槽。
+///
+/// `build` 在分配 generation 之后构造采集源，可以顺带启动附属线程；附属线程排在
+/// 读线程与发射线程之后 join，停止条件同样是 `running`。
+fn launch_stream<S, F>(
+    state: &AppState,
+    app: AppHandle,
+    task_slot: &mut Option<BackgroundTask>,
+    info: DeviceInfo,
+    build: F,
+) -> stream::Open
+where
+    S: acquire::Source + 'static,
+    F: FnOnce(&SessionSeed) -> (S, Vec<JoinHandle<()>>),
+{
+    if let Ok(mut current) = state.current_device_info.lock() {
+        *current = Some(info);
     }
 
     // 每个连接拥有自己的停止标志；旧连接即使延迟醒来也不会看到新连接的状态。
     let running_arc = Arc::new(AtomicBool::new(true));
-    let running_for_thread = Arc::clone(&running_arc);
-    let sample_rate_arc = Arc::clone(&state.sample_rate);
-    let pd_log_arc = Arc::clone(&state.pd_log);
-    let pd_capture_arc = Arc::clone(&state.pd_capture_enabled);
-    let device_info_arc = Arc::clone(&state.current_device_info);
-
     let generation = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
     let epoch = Instant::now();
     let wall_anchor_ms = now_ms();
+    let seed = SessionSeed {
+        generation,
+        epoch,
+        running: Arc::clone(&running_arc),
+    };
+    let (source, extra_joins) = build(&seed);
+
     let (tx, rx) = mpsc::sync_channel(stream::CHANNEL_CAP);
     let (controls, control_rx) = mpsc::sync_channel(64);
     let produced = Arc::new(AtomicU64::new(0));
     let consumed = Arc::new(AtomicU64::new(0));
     let end = Arc::new(Mutex::new(None));
-    let reader_produced = Arc::clone(&produced);
-    let reader_consumed = Arc::clone(&consumed);
-    let reader_end = Arc::clone(&end);
     let emit_app = app.clone();
     let emit_rate_arc = Arc::clone(&state.sample_rate);
     let emit_running = Arc::clone(&running_arc);
@@ -510,186 +584,29 @@ fn connect_device_on_path(
         }
     });
 
-    // Only the read thread changes segment/rate, always between HID reads.
-    let read_join = thread::spawn(move || {
-        let mut buf = [0u8; 64];
-        let mut next_selection_at: Option<u64> = None;
-        let mut selection = stream::Selection::new(stream::SELECTED_CAP, reader_produced);
-        let mut pd_pending = VecDeque::new();
-        let mut last_bus = None;
-        let mut pd_parser = Parser::new();
-        let mut last_report_at = Instant::now();
-        let mut saw_report = false;
-        let mut segment = 0;
-        let mut last_segment = 0;
-        let mut segment_start_us = 0;
-        let mut rate_ms = sample_rate_arc.load(Ordering::Relaxed);
-        let mut failure = None;
-        // Debug-only bus probe: what the device actually puts on the wire, independent of what we
-        // decide to select. `offers/s` above `selects/s` means the cadence gate is decimating.
-        #[cfg(debug_assertions)]
-        let mut bus_probe = stream::BusProbe::default();
-        'read: loop {
-            if !running_for_thread.load(Ordering::Acquire) {
-                break;
-            }
-            if let Err(error) = selection.drain(&tx) {
-                failure = Some(error);
-                break;
-            }
-            if selection
-                .seq
-                .saturating_sub(reader_consumed.load(Ordering::Acquire))
-                >= stream::UNACKED_CAP
-            {
-                failure =
-                    Some("unacknowledged sample capacity exceeded; acquisition stopped".into());
-                break;
-            }
-            while let Ok(control) = control_rx.try_recv() {
-                if let Err(error) = selection.select().and_then(|()| selection.drain(&tx)) {
-                    failure = Some(error);
-                    break 'read;
-                }
-                let at = epoch.elapsed().as_micros() as u64;
-                let reply = match control {
-                    stream::Control::Segment {
-                        segment: next,
-                        pd_enabled,
-                        reply,
-                    } => {
-                        if next != 0 && next <= last_segment {
-                            let _ = reply.send(Err("recording segment must increase".into()));
-                            continue;
-                        }
-                        segment = next;
-                        last_segment = last_segment.max(next);
-                        segment_start_us = at;
-                        pd_capture_arc.store(pd_enabled, Ordering::Release);
-                        reply
-                    }
-                    stream::Control::Rate { rate, reply } => {
-                        rate_ms = rate;
-                        sample_rate_arc.store(rate, Ordering::Release);
-                        reply
-                    }
-                };
-                next_selection_at = None;
-                let _ = reply.send(Ok(stream::Boundary {
-                    generation,
-                    after_seq: selection.seq,
-                    segment,
-                    received_us: at,
-                    wall_anchor_ms,
-                    rate_ms,
-                }));
-            }
-            if !drain_pd_pending(&tx, &mut pd_pending) {
-                failure = Some("PD emitter disconnected".into());
-                break;
-            }
-            let read = device.read_timeout(&mut buf, rate_ms.min(20) as i32);
-            // Stamp immediately after host reception, before parsing or peak selection.
-            let received_at = Instant::now();
-            let received_us = received_at.duration_since(epoch).as_micros() as u64;
-            match read {
-                Ok(0) => {
-                    if saw_report && last_report_at.elapsed() >= UNPLUG_IDLE {
-                        break;
-                    }
-                }
-                Ok(read_len) => {
-                    last_report_at = received_at;
-                    saw_report = true;
-                    let report = &buf[..read_len.min(buf.len())];
-                    match ReportKind::of(report) {
-                        Some(ReportKind::General) => {
-                            if let Some(data) = parse_device_data(report) {
-                                last_bus = Some((data.voltage, data.current));
-                                #[cfg(debug_assertions)]
-                                bus_probe.offer(received_us);
-                                selection.offer(stream::Sample {
-                                    data,
-                                    generation,
-                                    seq: 0,
-                                    segment,
-                                    received_us,
-                                    wall_anchor_ms,
-                                    segment_start_us,
-                                    rate_ms,
-                                });
-                            }
-                        }
-                        Some(ReportKind::Pd) => match decode_pd_report(&mut pd_parser, report) {
-                            Ok(metadata) if pd_capture_arc.load(Ordering::Acquire) => {
-                                let (vbus, ibus) =
-                                    last_bus.map_or((None, None), |(v, i)| (Some(v), Some(i)));
-                                let event = pd_log_arc.lock().unwrap().push_message(
-                                    now_ms(),
-                                    report.to_vec(),
-                                    metadata,
-                                    vbus,
-                                    ibus,
-                                );
-                                if let Some(event) = event {
-                                    enqueue_pd_pending(&mut pd_pending, event);
-                                }
-                            }
-                            Err(error) => eprintln!("PD 报告解析错误: {}", error),
-                            _ => {}
-                        },
-                        _ => {}
-                    }
-                }
-                Err(_) => break,
-            }
-            let (due, next_deadline) = stream::selection_deadline(
-                received_us,
-                next_selection_at,
-                Duration::from_millis(rate_ms).as_micros() as u64,
-            );
-            // The grid only moves when a point was actually taken: a read-timeout tick has no point
-            // in it, and arming the deadline from that would put it a hair past the next arrival.
-            if selection.pending.is_some() && due {
-                if let Err(error) = selection.select().and_then(|()| selection.drain(&tx)) {
-                    failure = Some(error);
-                    break;
-                }
-                // Selection cadence does not depend on transport capacity.
-                next_selection_at = Some(next_deadline);
-                #[cfg(debug_assertions)]
-                bus_probe.select();
-            }
-            #[cfg(debug_assertions)]
-            if let Some(line) = bus_probe.take_report(Duration::from_secs(5), rate_ms) {
-                eprintln!("{line}");
-            }
-        }
-        running_for_thread.store(false, Ordering::Release);
-        if let Ok(mut info) = device_info_arc.lock() {
-            *info = None;
-        }
-        if let Err(error) = selection.finish(&tx) {
-            failure = Some(error);
-        }
-        // PD remains recoverable from its log even if its bounded live queue overflowed.
-        for event in pd_pending {
-            if tx.send(DeviceOutgoing::Pd(Box::new(event))).is_err() {
-                break;
-            }
-        }
-        let receipt = stream::End {
-            generation,
-            last_seq: selection.seq,
-            error: failure,
-        };
-        *reader_end.lock().unwrap() = Some(receipt.clone());
-        let _ = tx.send(DeviceOutgoing::End(receipt));
-    });
-
-    task_slot.replace(BackgroundTask {
+    // Only the read thread changes segment/rate, always between device reads.
+    let ctx = acquire::ReaderCtx {
+        generation,
+        epoch,
+        wall_anchor_ms,
         running: Arc::clone(&running_arc),
-        joins: vec![read_join, emit_join],
+        sample_rate: Arc::clone(&state.sample_rate),
+        pd_log: Arc::clone(&state.pd_log),
+        pd_capture: Arc::clone(&state.pd_capture_enabled),
+        device_info: Arc::clone(&state.current_device_info),
+        tx,
+        controls: control_rx,
+        produced: Arc::clone(&produced),
+        consumed: Arc::clone(&consumed),
+        end: Arc::clone(&end),
+    };
+    let read_join = thread::spawn(move || acquire::run_reader(source, ctx));
+
+    let mut joins = vec![read_join, emit_join];
+    joins.extend(extra_joins);
+    task_slot.replace(BackgroundTask {
+        running: running_arc,
+        joins,
         session: Some(DeviceSession {
             generation,
             controls,
@@ -699,10 +616,10 @@ fn connect_device_on_path(
         }),
     });
 
-    Ok(stream::Open {
+    stream::Open {
         generation,
         wall_anchor_ms,
-    })
+    }
 }
 
 #[tauri::command(async)]
@@ -843,8 +760,23 @@ fn set_sample_rate(
     generation: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<Option<stream::Boundary>, String> {
-    if !(10..=60_000).contains(&rate) {
-        return Err("采样间隔必须在 10 到 60000 毫秒之间".to_string());
+    if !(1..=60_000).contains(&rate) {
+        return Err("采样间隔必须在 1 到 60000 毫秒之间".to_string());
+    }
+    let minimum = state
+        .current_device_info
+        .lock()
+        .map_err(|_| "设备信息状态已损坏")?
+        .as_ref()
+        .map_or(1, |info| {
+            if info.family == DeviceFamily::Witrn {
+                10
+            } else {
+                1
+            }
+        });
+    if rate < minimum {
+        return Err(format!("当前设备的采样间隔不能低于 {minimum} 毫秒"));
     }
     let (reply, rx) = mpsc::channel();
     {
@@ -926,6 +858,10 @@ fn shutdown(
     }
     if let Ok(mut task) = state.temp_task.lock() {
         stop_task(&mut task);
+    }
+    // 前端已写完落盘尾部；这里只兜底把缓冲写进磁盘。
+    if let Ok(mut files) = state.files.lock() {
+        files.close_all();
     }
     match app.get_webview_window("main") {
         Some(window) => window.destroy().map_err(|e| e.to_string())?,
@@ -1068,6 +1004,70 @@ fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String>
 /// 连续超时超过此时长且曾经读到过报告，视为拔线。
 const UNPLUG_IDLE: Duration = Duration::from_secs(2);
 
+/// 维简 HID 仪表：阻塞读 64 字节报告，每个报告最多一个到达物。
+struct HidSource {
+    device: hidapi::HidDevice,
+    epoch: Instant,
+    buf: [u8; 64],
+    last_report_at: Instant,
+    saw_report: bool,
+}
+
+impl HidSource {
+    fn new(device: hidapi::HidDevice, epoch: Instant) -> Self {
+        Self {
+            device,
+            epoch,
+            buf: [0u8; 64],
+            last_report_at: Instant::now(),
+            saw_report: false,
+        }
+    }
+}
+
+impl acquire::Source for HidSource {
+    fn min_rate_ms(&self) -> u64 {
+        10
+    }
+
+    fn read(&mut self, rate_ms: u64, out: &mut Vec<acquire::Arrival>) -> Result<(), acquire::Stop> {
+        let read = self
+            .device
+            .read_timeout(&mut self.buf, rate_ms.min(20) as i32);
+        // Stamp immediately after host reception, before parsing or peak selection.
+        let received_at = Instant::now();
+        let received_us = received_at.duration_since(self.epoch).as_micros() as u64;
+        match read {
+            Ok(0) => {
+                if self.saw_report && self.last_report_at.elapsed() >= UNPLUG_IDLE {
+                    return Err(acquire::Stop::Unplugged);
+                }
+            }
+            Ok(read_len) => {
+                self.last_report_at = received_at;
+                self.saw_report = true;
+                let report = &self.buf[..read_len.min(self.buf.len())];
+                let payload = match ReportKind::of(report) {
+                    Some(ReportKind::General) => {
+                        parse_device_data(report).map(acquire::Payload::Sample)
+                    }
+                    Some(ReportKind::Pd) => Some(acquire::Payload::Pd(report.to_vec())),
+                    _ => None,
+                };
+                if let Some(payload) = payload {
+                    out.push(acquire::Arrival {
+                        received_us,
+                        payload,
+                    });
+                }
+            }
+            // A failed HID read is how Windows reports a pulled cable.
+            Err(_) => return Err(acquire::Stop::Unplugged),
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 fn retain_pending_sample(pending: Option<DeviceData>, sample: DeviceData) -> DeviceData {
     match pending {
@@ -1091,8 +1091,8 @@ fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
         cc1: sample.cc1,
         cc2: sample.cc2,
         temperature: sample.temperature,
-        ah: sample.ah,
-        wh: sample.wh,
+        ah: Some(sample.ah),
+        wh: Some(sample.wh),
     })
 }
 
@@ -1133,10 +1133,6 @@ pub fn run() {
                     .expect("failed to create overlay titlebar");
                 boot_timing::mark("titlebar_created");
             }
-            // 平台材质由模块调度到主线程；不支持或失败时使用不透明底色。
-            let state = app.state::<AppState>();
-            window_material::try_enable_on_setup(&main_window, &state, true);
-            boot_timing::mark("material_applied");
             boot_timing::mark("setup_exit");
             Ok(())
         })
@@ -1161,10 +1157,20 @@ pub fn run() {
             decode_pd_at,
             pd_log_after,
             pd_log_replace,
-            window_material::get_window_material,
-            window_material::set_window_material_theme,
-            window_material::set_window_material_enabled,
-            window_material::set_window_material_unfocused
+            km003c_session::km003c_trigger,
+            km003c_session::km003c_cancel_trigger,
+            file_io::csv_export_pick,
+            file_io::csv_import_pick,
+            file_io::csv_read_chunk,
+            file_io::csv_read_close,
+            file_io::csv_write_chunk,
+            file_io::csv_write_patch,
+            file_io::csv_write_sync,
+            file_io::csv_write_close,
+            file_io::spool_open,
+            file_io::spool_recovery_list,
+            file_io::spool_recovery_open,
+            file_io::spool_recovery_delete,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1216,6 +1222,9 @@ mod tests {
             display_name: "WITRN K2 (USB 4-4)".to_string(),
             interface_number,
             usage_page,
+            family: DeviceFamily::Witrn,
+            controls: false,
+            max_rate_hz: 100,
         }
     }
 
@@ -1494,8 +1503,8 @@ mod tests {
             cc1: 0.0,
             cc2: 0.0,
             temperature: None,
-            ah: 0.0,
-            wh: 0.0,
+            ah: Some(0.0),
+            wh: Some(0.0),
         };
         let spike = DeviceData {
             current: 3.5,

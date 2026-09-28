@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SeriesBuckets } from '../src/chart-buckets.js';
 import { ExactExtremaIndex } from '../src/chart-extrema.js';
+import { F64Col } from '../src/state.js';
 
 function data(n) {
   const xs = Float64Array.from({ length: n }, (_, i) => Math.floor(i / 2) * 0.01);
@@ -45,6 +46,32 @@ test('indexed buckets preserve viewport phase, missing values and repeated times
     for (const start of [0, 1, 7, 31, 32, 33, 511, 1003]) {
       compare(xs, series, start, xs.length - start, cap, index);
     }
+  }
+});
+
+test('chunked columns match typed arrays across storage blocks and partial stripes', () => {
+  const { xs, series } = data(12_319);
+  const chunkedX = new F64Col();
+  chunkedX.set(xs);
+  const chunkedSeries = series.map((values) => {
+    const col = new F64Col();
+    col.set(values);
+    return col;
+  });
+  const index = new ExactExtremaIndex();
+  index.sync(chunkedSeries, xs.length);
+  for (const [start, end, cap] of [
+    [0, xs.length, 64],
+    [4089, 8201, 127],
+    [8191, 12_317, 1200],
+  ]) {
+    const reference = new SeriesBuckets();
+    reference.rebuild(xs, series, start, end, cap);
+    const actual = new SeriesBuckets();
+    const step = actual.beginRebuild(chunkedX, chunkedSeries, start, end, cap, index);
+    while (!step(37)) {}
+    assert.deepStrictEqual(actual.list, reference.list);
+    assert.deepStrictEqual(actual.flatten(), reference.flatten());
   }
 });
 
