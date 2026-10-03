@@ -29,6 +29,16 @@ test('a healthy frame interrupts slow feedback and the idle interval determines 
   assert.equal(policy.pixelsPerBucket, 2);
 });
 
+test('continuous interaction lowers the budget after measured pressure without sacrificing healthy detail', () => {
+  const policy = new ChartRenderPolicy();
+  assert.equal(feedback(policy, 16, 100, { interactive: true }), false);
+  assert.equal(policy.pixelsPerBucket, 2);
+  assert.equal(feedback(policy, 40, 150, { interactive: true }), true);
+  assert.equal(policy.pixelsPerBucket, 4);
+  assert.equal(feedback(policy, 40, 200, { interactive: true }), true);
+  assert.equal(policy.pixelsPerBucket, 8);
+});
+
 test('recovery requires two continuous healthy seconds and five seconds between changes', () => {
   const policy = new ChartRenderPolicy();
   feedback(policy, 110, 100);
@@ -58,12 +68,17 @@ test('hidden, sparse, invalid and interrupted feedback never establish recovery'
   assert.equal(feedback(policy, 40, 10300), false);
 });
 
-test('dense pacing includes next-frame raster delay, while sparse inexpensive charts stay unthrottled', () => {
-  assert.equal(liveChartIntervalMs(0.4, true, 16, 16), 33);
+test('100Hz retains cheap dense refreshes; 1000Hz reserves 50–100ms including raster pressure', () => {
+  assert.equal(liveChartIntervalMs(0.4, true, 16, 16), 0);
   assert.equal(liveChartIntervalMs(0.4, true, 85, 16), 100);
   assert.equal(liveChartIntervalMs(12, true, 16, 16), 36);
   assert.equal(liveChartIntervalMs(0.4), 0);
-  assert.equal(liveChartIntervalMs(NaN, true), 33);
+  assert.equal(liveChartIntervalMs(NaN, true), 0);
+  assert.equal(liveChartIntervalMs(0.4, true, 16, 16, 1), 50);
+  assert.equal(liveChartIntervalMs(0.4, false, 16, 16, 1), 50);
+  assert.equal(liveChartIntervalMs(12, true, 16, 16, 1), 50);
+  assert.equal(liveChartIntervalMs(0.4, true, 85, 16, 1), 100);
+  assert.equal(liveChartIntervalMs(0.4, true, 16, 16, NaN), 0);
 });
 
 function fillFeedback(fill, render, delayMs, at, overrides = {}) {
@@ -92,6 +107,18 @@ test('fill requires a slow pair after a density reduction actually painted', () 
   assert.equal(fillFeedback(fill, render, 40, 400), true);
   assert.equal(fill.reason, 'persistent-slow-frame');
   assert.equal(fill.suppressed, true);
+});
+
+test('fill remembers the first gesture reduction but requires a slower paint at that density', () => {
+  const fill = new ChartFillPolicy();
+  const observe = (delayMs, at, paintedDensity, nextDensity) =>
+    fill.observe({ delayMs, at, idleFrameMs: 16, visible: true, eligible: true, paintedDensity, nextDensity });
+  assert.equal(observe(40, 100, 2, 4), false);
+  assert.equal(fill.suppressed, false);
+  assert.equal(observe(16, 150, 4, 4), false);
+  assert.equal(observe(40, 200, 4, 8), false);
+  assert.equal(observe(40, 250, 8, 16), true);
+  assert.equal(fill.reason, 'persistent-slow-frame');
 });
 
 test('severe frames protect immediately; maximum density needs a bounded confirmation', () => {

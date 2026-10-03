@@ -66,7 +66,7 @@ async function paintFeedback(delayMs = 16, delayed = false) {
 }
 
 async function submit() {
-  chart.updateCharts();
+  chart.updateCharts('live');
   await Promise.resolve();
 }
 
@@ -76,6 +76,7 @@ function seed(recording = true, count = 5000, interval = 1) {
     const values = new Float64Array(count);
     if (key === 'x') for (let i = 0; i < count; i++) values[i] = (i * interval) / 1000;
     else if (key === 'voltage') for (let i = 0; i < count; i++) values[i] = i % 2;
+    else if (key === 'sampleIntervals') values.fill(interval);
     else values.fill(1);
     col.set(values);
   }
@@ -107,7 +108,8 @@ test('real draw hooks lower the bound density even when JS drawing is cheap, pre
   assert.equal(last.sourcePointCount, 5000);
   assert.equal(last.displayPointCount, state.mainChart.data[0].length);
   assert.ok(last.drawMs < 1);
-  assert.ok(last.refreshIntervalMs >= 33 && last.refreshIntervalMs <= 100);
+  assert.equal(last.refreshSource, 'maintenance');
+  assert.equal(last.refreshIntervalMs, 0, 'a display-budget repaint is not an acquisition refresh');
   await paintFeedback(40);
   await submit();
   await paintFeedback(40);
@@ -301,7 +303,9 @@ function append(count, interval = 1) {
   const start = cols.x.length;
   for (let i = start; i < start + count; i++)
     for (const [key, col] of Object.entries(cols))
-      col.push(key === 'x' ? (i * interval) / 1000 : key === 'voltage' ? i % 2 : 1);
+      col.push(
+        key === 'x' ? (i * interval) / 1000 : key === 'sampleIntervals' ? interval : key === 'voltage' ? i % 2 : 1,
+      );
   const end = cols.x.at(-1);
   chart.setChartXWindow(state.chartWindow.mode === 'follow' ? end - state.chartWindow.duration : 0, end);
 }
@@ -465,6 +469,85 @@ test('history preparation before draw does not falsely establish expensive fill'
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   assert.equal(performanceDiagnostics.frameDelaySince(time - 9, true, true) <= 9, true);
 });
+
+test('moving a dense window every frame retains feedback across the same gesture', async () => {
+  for (const recording of [true, false]) {
+    seed(recording);
+    chart.setRangeDragging(true);
+    await submit();
+    for (let i = 0; i < 8; i++) {
+      chart.setChartXWindow(0.1 + i * 0.01, 4.8 + i * 0.01);
+      chart.scheduleChartUpdate('interaction');
+      await frame(i < 2 ? 40 : 16);
+    }
+    chart.setRangeDragging(false);
+    chart.updateCharts('interaction');
+    await Promise.resolve();
+    const last = performanceDiagnostics.snapshot().charts.main.last;
+    assert.ok(last.pixelsPerBucket > 2, 'completed gesture observations can reduce excessive draw work');
+    assert.equal(last.refreshIntervalMs, 0);
+    assert.equal(last.refreshSource, 'interaction');
+    assert.equal(state.chartSeries.x.length, 5000);
+    await paintFeedback();
+  }
+});
+
+test('recording and review budgets are independent and release preserves the gesture budget', async () => {
+  seed(true);
+  await submit();
+  await frame(120);
+  await submit();
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 8);
+  chart.setRangeDragging(true);
+  chart.setChartXWindow(0.1, 4.9);
+  chart.updateCharts('interaction');
+  await Promise.resolve();
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
+  const during = state.mainChart.data.map((col) => col.slice());
+  chart.setRangeDragging(false);
+  chart.updateCharts('interaction');
+  await Promise.resolve();
+  assert.deepEqual(state.mainChart.data, during);
+  append(100);
+  await submit();
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 8);
+  await paintFeedback();
+});
+
+for (const source of ['interaction', 'maintenance'])
+  test(`${source} supersedes a pending high-rate live timer and submits at the next frame`, async () => {
+    seed(true);
+    await submit();
+    await paintFeedback();
+    const previousSetTimeout = globalThis.setTimeout;
+    const previousClearTimeout = globalThis.clearTimeout;
+    let paced = false;
+    let cancelled = false;
+    globalThis.setTimeout = () => {
+      paced = true;
+      return 9999;
+    };
+    globalThis.clearTimeout = () => {
+      cancelled = true;
+    };
+    try {
+      time -= 40; // The next append is due before the 50ms live refresh interval.
+      append(10);
+      chart.scheduleChartUpdate('live');
+      assert.equal(paced, true);
+      chart.setChartXWindow(0.2, 4.5);
+      chart.scheduleChartUpdate(source);
+      await frame(16);
+      assert.equal(cancelled, true);
+      const last = performanceDiagnostics.snapshot().charts.main.last;
+      assert.equal(last.refreshSource, source);
+      assert.equal(last.refreshIntervalMs, 0);
+    } finally {
+      globalThis.setTimeout = previousSetTimeout;
+      globalThis.clearTimeout = previousClearTimeout;
+      await paintFeedback();
+    }
+  });
 
 test('render diagnostics remain bounded while reporting next-frame delay', () => {
   performanceDiagnostics.reset();

@@ -1,12 +1,19 @@
 // @ts-check
 
 /** Reserve time for input, including raster work that finishes after the JS draw hook. */
-export function liveChartIntervalMs(workMs, dense = false, nextFrameDelayMs = 0, idleFrameMs = 1000 / 60) {
+export function liveChartIntervalMs(
+  workMs,
+  dense = false,
+  nextFrameDelayMs = 0,
+  idleFrameMs = 1000 / 60,
+  sampleIntervalMs = 10,
+) {
   const cpu = Number.isFinite(workMs) ? Math.max(0, workMs) : 0;
-  const raster = Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - idleFrameMs) : 0;
+  const raster = dense && Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - idleFrameMs) : 0;
   const work = cpu + raster;
-  if (!dense && work <= 8) return 0;
-  return Math.min(100, Math.max(dense ? 33 : 20, work * 3));
+  const highRate = Number.isFinite(sampleIntervalMs) && sampleIntervalMs > 0 && sampleIntervalMs <= 1;
+  if (!highRate && work <= 8) return 0;
+  return Math.min(100, Math.max(highRate ? 50 : 20, work * 3));
 }
 
 /** Display-only feedback; acquisition and the stored samples never use this policy. */
@@ -36,10 +43,10 @@ export class ChartRenderPolicy {
   }
 
   /**
-   * @param {{delayMs: number, at: number, idleFrameMs?: number, visible: boolean, dense: boolean}} sample
+   * @param {{delayMs: number, at: number, idleFrameMs?: number, visible: boolean, dense: boolean, interactive?: boolean}} sample
    * @returns {boolean} Whether the display density changed.
    */
-  observe({ delayMs, at, idleFrameMs = this.idleFrameMs, visible, dense }) {
+  observe({ delayMs, at, idleFrameMs = this.idleFrameMs, visible, dense, interactive = false }) {
     if (!visible || !dense || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(at)) {
       this.breakFeedback();
       return false;
@@ -56,7 +63,9 @@ export class ChartRenderPolicy {
     this.slowFrames = slow ? this.slowFrames + 1 : 0;
     if (slow) this.stableSince = null;
     const old = this.pixelsPerBucket;
-    if (delayMs > 100 || this.slowFrames >= 2) {
+    // Continuous input needs the next window promptly; a measured slow frame
+    // can lower its display budget immediately. Static/live paints still confirm.
+    if (delayMs > 100 || this.slowFrames >= 2 || (interactive && slow)) {
       this.pixelsPerBucket = Math.min(16, old * (delayMs > 100 ? 4 : 2));
       this.slowFrames = 0;
     } else if (delayMs <= this.idleFrameMs * 1.5) {
@@ -130,11 +139,12 @@ export class ChartFillPolicy {
           if (!this.suppressed) this.lastSuppressedAt = at;
           this.suppressed = true;
           this.reason = severe ? 'severe-frame' : largeBatch ? 'large-batch-slow-frame' : 'persistent-slow-frame';
-        } else if (nextDensity > paintedDensity) {
-          this.reducedDensity = nextDensity;
         }
         this.slowFrames = 0;
       }
+      // Gestures can lower density after their first measured slow paint. Keep
+      // that evidence too, so the next confirmed pair knows a cheaper draw ran.
+      if (!this.suppressed && nextDensity > paintedDensity) this.reducedDensity = nextDensity;
     } else if (delayMs <= idle * 1.5) {
       this.stableSince ??= at;
       if (at - this.stableSince >= 2000) {

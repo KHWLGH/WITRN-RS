@@ -227,7 +227,7 @@ export class SeriesBuckets {
    * @param {NumericColumn} xs @param {NumericColumn[]} series
    * @param {number} start @param {number} end @param {number} cap
    * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
-   * @returns {(maxSamples?: number) => boolean}
+   * @returns {(maxSamples?: number, maxBuckets?: number) => boolean}
    */
   beginRebuild(xs, series, start, end, cap, extrema = null) {
     this.reset(start);
@@ -243,9 +243,10 @@ export class SeriesBuckets {
     /** @type {DisplayBucket|null} */
     let bucket = null;
     let stripeEnd = start;
-    return (maxSamples = 4096) => {
+    return (maxSamples = 4096, maxBuckets = Infinity) => {
       let remaining = Math.max(1, maxSamples);
-      while (i < end && remaining > 0) {
+      let bucketsRemaining = Math.max(1, maxBuckets);
+      while (i < end && remaining > 0 && bucketsRemaining > 0) {
         if (!bucket) {
           stripeEnd = Math.min(i + ppb, end);
           bucket = makeBucketFromIndex(xs, series, i++);
@@ -268,6 +269,7 @@ export class SeriesBuckets {
         if (i === stripeEnd) {
           this.list.push(bucket);
           bucket = null;
+          bucketsRemaining--;
         }
       }
       this.srcEnd = i;

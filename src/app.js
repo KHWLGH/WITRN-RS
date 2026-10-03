@@ -290,10 +290,10 @@ function setupControls() {
     // 拖动中曲线已经换窗，数字不能停在旧窗口；scheduleStatsUpdate 自带 250ms 节流。
     if (state.settings.statsRange) scheduleStatsUpdate();
     if (preview) {
-      scheduleChartUpdate();
+      scheduleChartUpdate('interaction');
       return;
     }
-    updateCharts();
+    updateCharts('interaction');
   }
 
   /** @param {'start'|'end'} leader */
@@ -332,7 +332,7 @@ function setupControls() {
         updateStatsDisplay();
         updateEnergyDisplay();
       }
-      updateCharts();
+      updateCharts('interaction');
     };
 
     handle.addEventListener('pointerdown', (event) => {
@@ -400,7 +400,7 @@ function setupControls() {
         updateStatsDisplay();
         updateEnergyDisplay();
       }
-      updateCharts();
+      updateCharts('interaction');
     };
 
     sliderFill.addEventListener('pointerdown', (event) => {

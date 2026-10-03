@@ -15,7 +15,7 @@
  * 全量仍在 chartSeries；拖动中与松手后走同一句，没有低质量的预览态。
  * 极值金字塔只作为速度选择器（见 extremaForStripes），换慢路径不改变产出值。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
- * - setRangeDragging()    手柄拖动中推迟导航图重建与 Y 轴重算（不改变曲线内容）
+ * - setRangeDragging()    连续交互期间复用回看预算与绘制反馈（不改变曲线内容）
  * - setSeriesVisible()    显示 / 隐藏某条曲线（对应 Y 轴自动跟随显隐）
  * - setSeriesFill()       设置某条曲线的填充不透明度（0 = 关闭填充）
  */
@@ -111,8 +111,15 @@ let scannedLen = 0;
 let displayBuckets = new SeriesBuckets();
 // Small existing paths stay synchronous. Large replacements/window scans yield.
 const COOPERATIVE_POINTS = 32_768;
-const renderPolicy = new ChartRenderPolicy();
-const fillPolicy = new ChartFillPolicy();
+const INTERACTION_PREPARE_MS = 4;
+const recordingRenderPolicy = new ChartRenderPolicy();
+const reviewRenderPolicy = new ChartRenderPolicy();
+const recordingFillPolicy = new ChartFillPolicy();
+const reviewFillPolicy = new ChartFillPolicy();
+let renderPolicy = reviewRenderPolicy;
+let fillPolicy = reviewFillPolicy;
+/** @type {'recording'|'review'} */
+let displayContext = 'review';
 /** @type {{generation: number, start: number, cap: number, ppb: number, cancelled: boolean}|null} */
 let historyWork = null;
 /** @type {{generation: number, start: number, end: number, cap: number, ppb: number, cancelled: boolean}|null} */
@@ -220,7 +227,8 @@ let chartProbeFrame = null;
 let feedbackRepaintPending = false;
 let feedbackEpoch = 0;
 let paintBatchId = 0;
-/** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null }} PaintRequest */
+/** @typedef {'live'|'interaction'|'maintenance'} ChartRefreshSource */
+/** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null, source: ChartRefreshSource }} PaintRequest */
 /** @type {PaintRequest|null} */
 let paintRequest = null;
 /** @type {WeakMap<object, { first: PaintRequest, last: PaintRequest, count: number, firstDiagnostic: any, lastDiagnostic: any }>} */
@@ -425,7 +433,11 @@ function bindMainViews(start, end) {
 export function syncChartSeries() {
   cancelPreparation();
   cancelFrameProbe();
-  renderPolicy.reset();
+  selectDisplayContext(state.isRecording ? 'recording' : 'review');
+  recordingRenderPolicy.reset();
+  reviewRenderPolicy.reset();
+  recordingFillPolicy.reset();
+  reviewFillPolicy.reset();
   sourceRevision = chartRevision();
   submittedSourceLen = state.chartSeries.x.length;
   recentAppendCount = 0;
@@ -455,6 +467,10 @@ export function syncChartSeries() {
 
 /** @param {boolean} dragging */
 export function setRangeDragging(dragging) {
+  if (dragging && !rangeDragging) {
+    selectDisplayContext('review');
+    cancelFrameProbe();
+  }
   rangeDragging = !!dragging;
   state.__rangeDragging = rangeDragging;
 }
@@ -564,6 +580,7 @@ function liveRefreshInterval() {
     dense,
     dense ? renderPolicy.nextFrameDelayMs : 0,
     renderPolicy.idleFrameMs,
+    state.chartSeries.sampleIntervals.at(-1) || state.settings.sampleRate,
   );
 }
 
@@ -591,7 +608,10 @@ function extremaForStripes(series, end, ppb) {
   if (ppb <= BLOCK_SIZE) return null;
   // 窗口内已完成的块都建好了才算 warm；冷建是 O(全量) 的一次性开销，只留给足够密的窗口付。
   const warm = extremaIndex.blocks >= Math.floor(end / BLOCK_SIZE);
-  if (!warm && ppb < COLD_BUILD_PPB) return null;
+  // A shorter viewport is a query of the existing prefix, not a source shrink.
+  // sync() deliberately resets on actual truncation; never call it for a warm query.
+  if (warm) return extremaIndex;
+  if (ppb < COLD_BUILD_PPB) return null;
   extremaIndex.sync(series, end);
   return extremaIndex;
 }
@@ -683,16 +703,34 @@ function prepareLargeProjection(start, end, cap) {
   if (count <= COOPERATIVE_POINTS || stripesMatch(start, end, count, cap)) return false;
   // A short append still uses the existing cheap incremental path.
   if (canAdvanceBuckets(start, end, ppb)) return false;
+  const priorTarget = preparationTarget;
   const target = capturePreparationTarget(state.chartSeries.x.length, start, end, cap, ppb);
   const cs = state.chartSeries;
   const series = channelBufs().map((column) => column.snapshot());
   const index = extremaForStripes(series, end, ppb);
   const buckets = new SeriesBuckets();
   const step = buckets.beginRebuild(cs.x.snapshot(), series, start, end, cap, index);
+  // Indexed folds visit O(buckets) nodes and short raw boundaries. Charging the
+  // covered sample count forced even cheap warm queries through many task yields.
+  const advance = () => (index ? step(Infinity, 32) : step(4096));
+  if (index) {
+    const deadline = performance.now() + INTERACTION_PREPARE_MS;
+    do {
+      const complete = advance();
+      if (preparationInvalid(target)) break;
+      if (complete) {
+        displayBuckets = buckets;
+        bindFlattenedBuckets(displayBuckets, 'window');
+        appliedMainGen = -1;
+        if (!priorTarget) preparationTarget = null;
+        return false;
+      }
+    } while (performance.now() < deadline);
+  }
   const work = { generation: dataGen, start, end, cap, ppb, cancelled: false };
   projectionWork = work;
   setPreparing(true);
-  void runCooperativeSlices(() => step(4096), {
+  void runCooperativeSlices(advance, {
     isCancelled: () => {
       return work.cancelled || preparationInvalid(target);
     },
@@ -792,10 +830,13 @@ function bindDisplayData(args) {
   bindFlattenedBuckets(displayBuckets, 'window');
 }
 
-function requestPaint() {
+/** @param {ChartRefreshSource} [source='live'] */
+function requestPaint(source = 'live') {
+  if (rangeDragging) source = 'interaction';
   if (paintRequest == null) {
-    paintRequest = { batchId: ++paintBatchId, requestedAt: performance.now(), prepareMs: null };
-  }
+    paintRequest = { batchId: ++paintBatchId, requestedAt: performance.now(), prepareMs: null, source };
+  } else if (source === 'interaction' || (source === 'maintenance' && paintRequest.source === 'live'))
+    paintRequest.source = source;
   return paintRequest;
 }
 
@@ -821,7 +862,9 @@ function expectChartDraw(chart, request) {
     fillSuppressed: role === 'main' && fillSuppressed(),
     fillSuppressionReason: role === 'main' && fillSuppressed() ? fillPolicy.reason : null,
     recentAppendCount: role === 'main' ? recentAppendCount : 0,
-    refreshIntervalMs: role === 'main' && state.isRecording ? liveRefreshInterval() : 0,
+    refreshSource: request.source,
+    refreshIntervalMs:
+      role === 'main' && state.isRecording && request.source === 'live' && !rangeDragging ? liveRefreshInterval() : 0,
   });
   pendingDraws.set(chart, {
     first: pending?.first ?? request,
@@ -876,14 +919,18 @@ function finishChartDraw(chart) {
   const epoch = feedbackEpoch;
   const density = renderPolicy.pixelsPerBucket;
   const feedbackSince = pending?.last.requestedAt ?? drawStartedAt ?? drawEndedAt;
-  const live = state.isRecording;
+  const live = state.isRecording && displayContext === 'recording';
+  const interactive = rangeDragging;
   const dense = displayDense();
   const eligibleFill = fillDense() && hasEnabledFill();
   const appendCount = pending?.lastDiagnostic.recentAppendCount ?? 0;
   // Canvas work may stall the second or third frame after a fast first
   // callback. Treat this bounded observation window as one paint sample, so a
   // healthy intervening frame neither hides its lag nor counts one stall twice.
-  const probeFrames = dense ? 3 : 1;
+  // A continuous gesture supplies another paint each frame: consume each actual
+  // frame once so slow draws can adjust the budget before the gesture ends.
+  // Live/static paints and the final release retain the delayed-raster probe.
+  const probeFrames = dense && !interactive ? 3 : 1;
   let observedFrames = 0;
   let previousFrameAt = drawEndedAt;
   let nextFrameDelayMs = 0;
@@ -896,8 +943,9 @@ function finishChartDraw(chart) {
     const at = performance.now();
     if (
       !visible ||
-      live !== state.isRecording ||
+      live !== (state.isRecording && displayContext === 'recording') ||
       dense !== currentWindowDense() ||
+      eligibleFill !== (fillDense() && hasEnabledFill()) ||
       density !== renderPolicy.pixelsPerBucket
     ) {
       cancelFrameProbe();
@@ -933,6 +981,7 @@ function finishChartDraw(chart) {
       idleFrameMs: performanceDiagnostics.idleFrameIntervalMs(),
       visible,
       dense,
+      interactive,
     });
     // Without incoming samples, a first moderately slow review draw would never
     // receive its second observation. Force exactly one confirmation at this
@@ -951,7 +1000,7 @@ function finishChartDraw(chart) {
       !live && dense && ((renderPolicy.slowFrames === 1 && density < 16) || fillPolicy.needsConfirmation);
     if (densityChanged || fillChanged || confirmReview) {
       feedbackRepaintPending = true;
-      scheduleChartUpdate();
+      scheduleChartUpdate('maintenance');
     }
   };
   chartProbeFrame = requestAnimationFrame(observeFrame);
@@ -964,6 +1013,15 @@ function cancelFrameProbe() {
   feedbackEpoch++;
   renderPolicy.breakFeedback();
   if (fillPolicy.reset()) fillPaintDirty = true;
+}
+
+/** Display budgets from live recording never become the initial review budget. @param {'recording'|'review'} context */
+function selectDisplayContext(context) {
+  if (context === displayContext) return;
+  cancelFrameProbe();
+  displayContext = context;
+  renderPolicy = context === 'recording' ? recordingRenderPolicy : reviewRenderPolicy;
+  fillPolicy = context === 'recording' ? recordingFillPolicy : reviewFillPolicy;
 }
 
 /** 同步准备耗时仅作诊断，不据此猜测 GPU / Canvas 耗时或固定降帧。
@@ -994,6 +1052,14 @@ function applyData(opts = {}) {
   paintRequest = null;
   const t0 = performance.now();
   chartDirty = false;
+  if (feedbackRecording !== state.isRecording) {
+    cancelFrameProbe();
+    feedbackRecording = state.isRecording;
+    selectDisplayContext(state.isRecording && !rangeDragging ? 'recording' : 'review');
+  }
+  if (!state.isRecording || rangeDragging || request.source === 'interaction' || state.chartWindow.mode === 'frozen')
+    selectDisplayContext('review');
+  else if (request.source === 'live') selectDisplayContext('recording');
   if (preparationTarget && preparationInvalid(preparationTarget)) cancelPreparation();
   const target = preparationTarget;
   const srcLen = target?.length ?? state.chartSeries.x.length;
@@ -1001,10 +1067,6 @@ function applyData(opts = {}) {
   const windowCount = end - start;
   visiblePointCount = windowCount;
   visiblePlotWidth = plotCssWidth();
-  if (feedbackRecording !== state.isRecording) {
-    cancelFrameProbe();
-    feedbackRecording = state.isRecording;
-  }
   if ((!fillDense() || !hasEnabledFill()) && fillPolicy.reset()) fillPaintDirty = true;
   const cap = target?.cap ?? mainBucketCap(windowCount);
   const ppb = stripePpb(windowCount, cap);
@@ -1086,8 +1148,10 @@ function applyData(opts = {}) {
 }
 
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
-export function updateCharts() {
+/** @param {ChartRefreshSource} [source='maintenance'] */
+export function updateCharts(source = 'maintenance') {
   cancelChartFrame();
+  requestPaint(source);
   flushChart(true);
 }
 
@@ -1188,22 +1252,23 @@ function flushChart(force = false) {
 }
 
 /** 使用 requestAnimationFrame 合帧；后台数据照收，图表只记 dirty。 */
-export function scheduleChartUpdate() {
+/** @param {ChartRefreshSource} [source='live'] */
+export function scheduleChartUpdate(source = 'live') {
   chartDirty = true;
   if (!monitorVisible()) {
     cancelPreparation();
     return;
   }
   if (flushingChart) return;
-  requestPaint();
+  requestPaint(source);
   if (chartFramePending) return;
-  if (state.isRecording && !rangeDragging && !resizeDirty) {
+  if (state.isRecording && paintRequest?.source === 'live' && !rangeDragging && !resizeDirty) {
     const delay = lastLiveFlushAt + liveRefreshInterval() - performance.now();
     if (delay > 1) {
       if (chartPaceTimer === null)
         chartPaceTimer = setTimeout(() => {
           chartPaceTimer = null;
-          scheduleChartUpdate();
+          scheduleChartUpdate(source);
         }, delay);
       return;
     }
@@ -1253,7 +1318,9 @@ export function setChartXWindow(min, max) {
       (fullAdvance || followAdvance);
     if (!automaticAdvance) {
       windowIntent++;
-      cancelFrameProbe();
+      // A gesture may move every frame. Its paints must still finish their
+      // raster observations; unrelated windows continue to retire old evidence.
+      if (!rangeDragging) cancelFrameProbe();
     }
   }
   xWindow.min = min;
@@ -2032,7 +2099,7 @@ function bindChartWheel(u) {
       wheelEndTimer = setTimeout(() => {
         wheelEndTimer = null;
         setRangeDragging(false);
-        updateCharts();
+        updateCharts('interaction');
       }, 80);
     },
     { passive: false },

@@ -89,7 +89,7 @@ export function batchEnd(accepted, timing = {}) {
   });
 }
 
-/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number}} info */
+/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number, refreshSource?:'live'|'interaction'|'maintenance'}} info */
 export function chartRequest(role, info = {}) {
   return {
     at: Number.isFinite(info.requestedAt) ? /** @type {number} */ (info.requestedAt) : now(),
@@ -106,6 +106,7 @@ export function chartRequest(role, info = {}) {
     fillSuppressionReason: info.fillSuppressionReason ?? null,
     recentAppendCount: info.recentAppendCount ?? 0,
     refreshIntervalMs: info.refreshIntervalMs ?? null,
+    refreshSource: info.refreshSource ?? null,
     role,
   };
 }
@@ -139,6 +140,7 @@ export function chartPaint(role, request, drawEndedAt = now(), drawMs = null) {
     fillSuppressionReason: request.fillSuppressionReason,
     recentAppendCount: request.recentAppendCount,
     refreshIntervalMs: request.refreshIntervalMs,
+    refreshSource: request.refreshSource,
     drawMs,
     nextFrameDelayMs: /** @type {number|null} */ (null),
     frameDelayMs: /** @type {number|null} */ (null),

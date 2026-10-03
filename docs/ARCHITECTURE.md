@@ -162,7 +162,7 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 | 分组 | 模块 | 职责 |
 | --- | --- | --- |
 | 装配 | `app.js`、`shell.js`、`state.js` | 入口与事件绑定、视图注册表与 Tab 切换、共享状态与类型定义 |
-| 图表 | `chart.js`、`chart-buckets.js`、`chart-window.js`、`theme.js` | uPlot 初始化与渲染调度、可见窗口像素桶、时间窗缩放纯函数、把 CSS 设计令牌桥接给 canvas |
+| 图表 | `chart.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-pacing.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 渲染调度、窗口极值桶与历史索引、自动刷新和绘制反馈、时间窗缩放、性能诊断与 Canvas 主题 |
 | 数据 | `data.js`、`measurement.js`、`csv.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
 | 设备 | `device.js`、`temperature.js` | 连接管理、设置页 VID/PID/SN、TCP 温度源 |
@@ -176,6 +176,12 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 ### 图表渲染
 
 数据以列式数组存储（`F64Col`），不是 `{x, y}` 对象数组。可见数据量超过 1 倍视口宽度后切换为增量 min/max 像素桶：每个像素列只保留极值，但**完整数据仍在列里**，悬停时二分回查原始采样点，读到的是真实值。主图 X 窗是会话态的时间窗口（`full` / `follow` / `frozen`），录制中右沿可贴着最新数据滑动。uPlot 侧设 `series auto: false`，避免它每帧全量扫描 min/max。
+
+`ExactExtremaIndex` 按已完成的数据前缀复用，较早或较短的窗口只查询索引，追加样本补建尾部；清空、替换及修改原始列使索引失效。窗口变化取消过期投影，但保留已完成的索引。已有索引的投影每步最多查询 32 个桶，先在约 4 ms 内尝试完成并提交；未完成的查询、原始扫描和历史冷建使用约 1.5 ms 的协作片，只有完整投影可以发布。
+
+绘图请求区分 `live`、`interaction` 和 `maintenance`，同帧合并到最新窗口。实际采样间隔为 1 ms 时，自动绘图在 50–100 ms 间调节；交互及维护请求可打断自动刷新计时器。健康的 100 Hz 绘图不按历史长度固定限帧。采样间隔读取记录尾部的逐点间隔，没有有效值时回退到当前设置，设备协议、CSV 和设置格式兼容性保持不变。
+
+录制与回看各自维护密度及填充策略，连续交互保留有效的绘制反馈，拖动和松手在同一预算下采用相同投影规则。反馈结合 JS 绘制和后续帧延迟调整预算，稀疏窗口仍提交原始点；这些显示策略不参与采集、保存、统计或积分。诊断通过 `refreshSource`、`refreshIntervalMs`、准备与绘制耗时区分调度成本，测量结果及限制见 [性能基准与边界](PERFORMANCE.md#2026-10-04-高采样率窗口交互验收)。
 
 ## 数据流
 

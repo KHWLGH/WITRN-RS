@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { SeriesBuckets } from '../src/chart-buckets.js';
+import { ExactExtremaIndex } from '../src/chart-extrema.js';
 
 /**
  * 主图绑定的不变量：画什么只由可见窗口决定。
@@ -301,6 +302,83 @@ test('follow windows still submit every newly extended projection', async () => 
   assert.equal(u.data[0].length, 101);
   assert.equal(u.data[0][0], state.chartSeries.x.at(SAMPLES - 100));
   assert.equal(u.data[0].at(-1), state.chartSeries.x.at(SAMPLES));
+});
+
+test('continuous shrink and bidirectional pan paint warm windows without rebuilding the indexed prefix', async () => {
+  for (const recording of [false, true]) {
+    seed({ powerPeak: true });
+    const u = stubChart();
+    state.mainChart = u;
+    await commit(windowOf(0, SAMPLES - 1));
+    state.isRecording = recording;
+    chart.setRangeDragging(true);
+    const originalReset = ExactExtremaIndex.prototype.reset;
+    const originalSync = ExactExtremaIndex.prototype.syncStep;
+    const originalPerformance = globalThis.performance;
+    let resets = 0;
+    let extensions = 0;
+    ExactExtremaIndex.prototype.reset = function () {
+      resets++;
+      return originalReset.call(this);
+    };
+    ExactExtremaIndex.prototype.syncStep = function (...args) {
+      extensions++;
+      return originalSync.apply(this, args);
+    };
+    // Cost/slicing has separate tests; make this a deterministic no-yield query test.
+    globalThis.performance = { now: () => 1000 };
+    const ranges = [
+      [0, 180000],
+      [0, 150000],
+      [40000, 90000],
+      [45000, 95000],
+      [40000, 90000],
+      [30000, 80000],
+      [50001, 82768],
+      [50001, 82769],
+      [50001, 50100],
+    ];
+    try {
+      for (const [start, end] of ranges) {
+        const before = u.submissions;
+        const range = windowOf(start, end);
+        chart.setChartXWindow(...range);
+        chart.scheduleChartUpdate('interaction');
+        const frame = pendingFrame;
+        pendingFrame = null;
+        assert.ok(frame);
+        frame(1000);
+        assert.equal(preparing, false, 'a completed indexed query submits in the requesting frame');
+        assert.equal(u.submissions, before + 1, 'moving inputs must not starve the curve');
+        if (end - start + 1 > PLOT_WIDTH) {
+          const expected = new SeriesBuckets();
+          const cs = state.chartSeries;
+          expected.rebuild(
+            cs.x,
+            [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2],
+            start,
+            end + 1,
+            PLOT_WIDTH / 2,
+          );
+          const flat = expected.flatten();
+          assert.deepEqual(
+            u.data,
+            [flat.x, ...flat.ys].map((col) => Array.from(col)),
+          );
+        }
+      }
+      assert.equal(resets, 0, 'a viewport shrink cannot truncate the source index');
+      assert.equal(extensions, 0, 'fully indexed viewports never rescan the prefix');
+    } finally {
+      globalThis.performance = originalPerformance;
+      ExactExtremaIndex.prototype.reset = originalReset;
+      ExactExtremaIndex.prototype.syncStep = originalSync;
+      chart.setRangeDragging(false);
+    }
+    const lastFrame = u.data;
+    await commit(windowOf(...ranges.at(-1)));
+    assert.deepEqual(u.data, lastFrame, 'release retains the final window geometry');
+  }
 });
 
 // ─── 结构守卫 ────────────────────────────────────────────────────────────────

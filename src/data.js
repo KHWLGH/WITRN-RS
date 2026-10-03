@@ -518,7 +518,7 @@ export function applyChartXZoom(pivotSec, factor) {
     updateSliderFill();
     writeRangeLabels(xs);
   }
-  scheduleChartUpdate();
+  requestChartUpdate('interaction');
   if (state.settings.statsRange) scheduleStatsUpdate();
 }
 

@@ -43,6 +43,22 @@ test('cooperative work gives control back before its first step and stops on can
   assert.equal(steps, 2);
 });
 
+test('warm projection steps budget bucket queries rather than the raw samples they cover', () => {
+  const count = 100003;
+  const xs = Float64Array.from({ length: count }, (_, i) => Math.floor(i / 20) / 1000);
+  const ys = Array.from({ length: 8 }, (_, s) => Float64Array.from(xs, (_, i) => (i % 113 ? i % 2 : s * 100)));
+  const index = new ExactExtremaIndex();
+  index.sync(ys, count);
+  const reference = new SeriesBuckets();
+  reference.rebuild(xs, ys, 13, count - 7, 127);
+  const actual = new SeriesBuckets();
+  const step = actual.beginRebuild(xs, ys, 13, count - 7, 127, index);
+  let steps = 1;
+  while (!step(Infinity, 8)) steps++;
+  assert.equal(steps, Math.ceil(reference.list.length / 8));
+  assert.deepEqual(actual.flatten(), reference.flatten());
+});
+
 test('large chart preparations publish a complete projection and discard replaced history', async () => {
   const attrs = new Map();
   const host = { clientWidth: 1200, setAttribute: (key, value) => attrs.set(key, value) };
@@ -134,6 +150,82 @@ test('large chart preparations publish a complete projection and discard replace
   assert.equal(attrs.get('aria-busy'), 'false');
 });
 
+test('changing the window during cold indexing retains the completed prefix for the latest query', async () => {
+  let busy = false;
+  const host = {
+    clientWidth: 1200,
+    setAttribute(_key, value) {
+      busy = value === 'true';
+    },
+  };
+  globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const { state, emptyChartColumns, setChartColumns } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const columns = emptyChartColumns();
+  for (const [key, col] of Object.entries(columns))
+    col.set(Float64Array.from({ length: 100000 }, (_, i) => (key === 'x' ? i : i % 97)));
+  state.settings.activeView = 'monitor';
+  state.windowVisible = true;
+  state.isRecording = false;
+  state.mainChart = {
+    width: 1200,
+    setData(data) {
+      this.data = data;
+    },
+    setScale() {},
+  };
+  state.navigatorChart = null;
+  setChartColumns(columns);
+  chart.syncChartSeries();
+  const originalStep = ExactExtremaIndex.prototype.syncStep;
+  const originalReset = ExactExtremaIndex.prototype.reset;
+  let index = null;
+  let resets = 0;
+  let retired = false;
+  ExactExtremaIndex.prototype.reset = function () {
+    resets++;
+    return originalReset.call(this);
+  };
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    index = this;
+    const done = originalStep.apply(this, args);
+    if (!retired && this.blocks >= 128) {
+      retired = true;
+      chart.setChartXWindow(0, 3999);
+    }
+    return done;
+  };
+  try {
+    chart.setChartXWindow(0, 99999);
+    chart.updateCharts();
+    while (busy) await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(retired, true);
+    assert.equal(index.blocks, 128, 'cancellation keeps already completed leaves');
+    assert.equal(resets, 0);
+    const expected = new SeriesBuckets();
+    expected.rebuild(
+      columns.x,
+      [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
+      0,
+      4000,
+      600,
+    );
+    const flat = expected.flatten();
+    assert.deepEqual(state.mainChart.data, [flat.x, ...flat.ys], 'only the latest complete projection is published');
+    chart.setChartXWindow(0, 99999);
+    chart.updateCharts();
+    while (busy) await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(index.blocks, Math.floor(100000 / 32));
+    assert.equal(resets, 0, 'returning to the wider window extends the retained prefix');
+  } finally {
+    ExactExtremaIndex.prototype.syncStep = originalStep;
+    ExactExtremaIndex.prototype.reset = originalReset;
+    chart.handleMonitorHidden();
+  }
+});
+
 test('a dense follow window submits complete matching snapshots while samples advance between every slice', async () => {
   let busy = false;
   const host = {
@@ -182,6 +274,18 @@ test('a dense follow window submits complete matching snapshots while samples ad
   state.chartWindow = { mode: 'follow', duration: 199999, min: 100000, max: 299999 };
   chart.setChartXWindow(100000, 299999);
   const previousScheduler = globalThis.scheduler;
+  const previousPerformance = globalThis.performance;
+  const previousRebuild = SeriesBuckets.prototype.beginRebuild;
+  let simulatedWorkMs = 0;
+  globalThis.performance = { now: () => previousPerformance.now() + simulatedWorkMs };
+  SeriesBuckets.prototype.beginRebuild = function (...args) {
+    const step = previousRebuild.apply(this, args);
+    return (...budget) => {
+      const done = step(...budget);
+      simulatedWorkMs += 5; // Deterministically exercise the bounded warm continuation.
+      return done;
+    };
+  };
   let advances = 0;
   globalThis.scheduler = {
     postTask: async (callback) => {
@@ -214,6 +318,8 @@ test('a dense follow window submits complete matching snapshots while samples ad
     assert.deepEqual(submitted, [flat.x, ...flat.ys]);
   } finally {
     globalThis.scheduler = previousScheduler;
+    globalThis.performance = previousPerformance;
+    SeriesBuckets.prototype.beginRebuild = previousRebuild;
     state.isRecording = false;
     chart.handleMonitorHidden();
   }
