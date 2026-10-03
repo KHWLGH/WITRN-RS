@@ -107,13 +107,15 @@ let seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, I
 /** 已扫描过最大值的数据长度（增量扫描游标）。 */
 let scannedLen = 0;
 
-/** 主图窗口级显示桶：可见窗口点数超过 1×宽度后启用，存储仍走全量列。 */
+/** 主图窗口级显示桶：超过当前显示分辨率后启用，存储仍走全量列。 */
 let displayBuckets = new SeriesBuckets();
 // Small existing paths stay synchronous. Large replacements/window scans yield.
 const COOPERATIVE_POINTS = 32_768;
 const INTERACTION_PREPARE_MS = 4;
 const recordingRenderPolicy = new ChartRenderPolicy();
-const reviewRenderPolicy = new ChartRenderPolicy();
+// Review keeps screen-resolution detail, including throughout a gesture. Canvas
+// pressure can suppress fill, but must not leave a static curve at 8–16 px/bucket.
+const reviewRenderPolicy = new ChartRenderPolicy({ initialDensity: 1, maxDensity: 1 });
 const recordingFillPolicy = new ChartFillPolicy();
 const reviewFillPolicy = new ChartFillPolicy();
 let renderPolicy = reviewRenderPolicy;
@@ -126,7 +128,7 @@ let historyWork = null;
 let projectionWork = null;
 let windowIntent = 0;
 let sourceRevision = 0;
-/** @typedef {{generation:number,intent:number,revision:number,length:number,start:number,end:number,cap:number,ppb:number,xRange:[number,number],width:number,density:number}} PreparationTarget */
+/** @typedef {{generation:number,intent:number,revision:number,length:number,start:number,end:number,cap:number,ppb:number,xRange:[number,number],width:number,resolution:number,density:number}} PreparationTarget */
 /** @type {PreparationTarget|null} */
 let preparationTarget = null;
 
@@ -143,6 +145,7 @@ function preparationInvalid(target) {
     target.intent !== windowIntent ||
     target.revision !== chartRevision() ||
     target.width !== plotCssWidth() ||
+    target.resolution !== displayResolution() ||
     target.density !== renderPolicy.pixelsPerBucket
   );
 }
@@ -160,6 +163,7 @@ function capturePreparationTarget(length, start, end, cap, ppb) {
     ppb,
     xRange: xRange(),
     width: plotCssWidth(),
+    resolution: displayResolution(),
     density: renderPolicy.pixelsPerBucket,
   };
   return preparationTarget;
@@ -182,7 +186,7 @@ function setPreparing(busy) {
  * 金字塔冷建是 O(全量) 的一次性开销（实测 1M ≈ 26ms / 5M ≈ 118ms），只为这么密的条带付。
  * 已 warm 之后每个新块只有微秒级增量，所以下限可以放到 BLOCK_SIZE。
  */
-const COLD_BUILD_PPB = 128;
+const COLD_BUILD_PPB = 64;
 const extremaIndex = new ExactExtremaIndex();
 /** @typedef {'raw'|'window'} BoundKind */
 /** @type {BoundKind} */
@@ -225,6 +229,7 @@ const FILL_POINTS_PER_PIXEL = 4;
 let chartProbeFrame = null;
 // Static feedback can force a confirmation draw; fill transitions must also redraw.
 let feedbackRepaintPending = false;
+let filledPaintConfirmed = false;
 let feedbackEpoch = 0;
 let paintBatchId = 0;
 /** @typedef {'live'|'interaction'|'maintenance'} ChartRefreshSource */
@@ -393,6 +398,10 @@ const SPLINE_MAX_POINTS = 1000;
 let splineBuilder = null;
 /** @type {any} linear 路径构建器（密集视图，像素列聚合） */
 let linearBuilder = null;
+/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number}|null} */
+let bucketRaster = null;
+/** @type {Map<number, {base:number,segments:number[],clip:Path2D|null}>} */
+const bucketFills = new Map();
 
 /**
  * 自适应路径构建：稀疏时 spline 平滑，密集时 linear 聚合。
@@ -403,7 +412,194 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
     boundKind === 'raw' && splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS
       ? splineBuilder
       : (linearBuilder ?? splineBuilder);
-  return builder ? builder(u, seriesIdx, idx0, idx1) : null;
+  const paths = builder ? builder(u, seriesIdx, idx0, idx1) : null;
+  if (paths?.fill && boundKind === 'window' && displayContext === 'review' && u.series[seriesIdx].fill(u, seriesIdx)) {
+    bucketFills.set(seriesIdx, bucketFillGeometry(u, seriesIdx, idx0, idx1, paths.clip));
+    paths.fill = new Path2D();
+  } else bucketFills.delete(seriesIdx);
+  if (paths && useBucketRaster(u)) paths.stroke = new Path2D();
+  return paths;
+}
+
+/** Avoid a single filled contour with thousands of coincident vertical reversals. */
+function bucketFillGeometry(u, seriesIdx, idx0, idx1, clip) {
+  const segments = [];
+  const series = u.series[seriesIdx];
+  const xs = u.data[0];
+  const ys = u.data[seriesIdx];
+  const base = series.pxRound(u.valToPos(series.fillTo(u, seriesIdx, series.min, series.max, 0), series.scale, true));
+  if (!Number.isFinite(base)) return { base, segments, clip: clip ?? null };
+  for (let i = idx0 - (idx0 % 2); i + 2 <= idx1; i += 2) {
+    if (!Number.isFinite(ys[i + 1]) || !Number.isFinite(ys[i + 2])) continue;
+    const x0 = series.pxRound(u.valToPos(xs[i], 'x', true));
+    const x1 = series.pxRound(u.valToPos(xs[i + 2], 'x', true));
+    const y0 = series.pxRound(u.valToPos(ys[i + 1], series.scale, true));
+    const y1 = series.pxRound(u.valToPos(ys[i + 2], series.scale, true));
+    if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1)) continue;
+    if (x0 === x1) continue;
+    segments.push(x0, y0, x1, y1);
+  }
+  return { base, segments, clip: clip ?? null };
+}
+
+function drawBucketFill(u, seriesIdx) {
+  if (boundKind !== 'window' || displayContext !== 'review') return;
+  const geometry = bucketFills.get(seriesIdx);
+  const series = u.series[seriesIdx];
+  const fill = series.fill(u, seriesIdx);
+  if (!geometry || !fill) return;
+  const ctx = u.ctx,
+    bbox = u.bbox;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+  ctx.clip();
+  if (geometry.clip) ctx.clip(geometry.clip);
+  ctx.fillStyle = fill;
+  ctx.globalAlpha = series.alpha;
+  for (let i = 0; i < geometry.segments.length; i += 4) {
+    const x0 = geometry.segments[i],
+      y0 = geometry.segments[i + 1];
+    const x1 = geometry.segments[i + 2],
+      y1 = geometry.segments[i + 3];
+    ctx.beginPath();
+    ctx.moveTo(x0, geometry.base);
+    ctx.lineTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.lineTo(x1, geometry.base);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function useBucketRaster(u) {
+  return (
+    boundKind === 'window' &&
+    displayContext === 'review' &&
+    typeof OffscreenCanvas !== 'undefined' &&
+    u.series.slice(1).every((s) => !s.show || (s.alpha === 1 && /^#[\da-f]{6}$/i.test(s.stroke(u, 0))))
+  );
+}
+
+/**
+ * Keep the full display extrema at screen resolution when joined Canvas paths
+ * are too expensive. Opaque min/max column spans share one bounded bitmap and
+ * one upload; no wide buckets or source-sample changes are needed for pressure.
+ */
+function drawBucketRaster(u, seriesIdx) {
+  if (!useBucketRaster(u)) return;
+  const bbox = u.bbox;
+  const width = Math.ceil(bbox.width),
+    height = Math.ceil(bbox.height);
+  if (!bucketRaster || bucketRaster.canvas.width !== width || bucketRaster.canvas.height !== height) {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = /** @type {OffscreenCanvasRenderingContext2D} */ (canvas.getContext('2d'));
+    const image = ctx.createImageData(width, height);
+    bucketRaster = { canvas, ctx, image, pixels: new Uint32Array(image.data.buffer), dirtyTop: height, dirtyBottom: 0 };
+  }
+  const { pixels } = bucketRaster;
+  const combined = fillSuppressed() || !hasEnabledFill();
+  const firstVisible = u.series.findIndex((series, index) => index > 0 && series.show);
+  if (!combined || seriesIdx === firstVisible) {
+    pixels.fill(0);
+    bucketRaster.dirtyTop = height;
+    bucketRaster.dirtyBottom = 0;
+  }
+  let { dirtyTop, dirtyBottom } = bucketRaster;
+  {
+    const s = seriesIdx;
+    const series = u.series[s];
+    if (!series.show) return;
+    const hex = Number.parseInt(series.stroke(u, s).slice(1), 16);
+    const color = new Uint32Array(Uint8Array.of(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255).buffer)[0];
+    const half = (series.width * plotPixelRatio()) / 2;
+    let previousX = Number.NaN;
+    let previousY = Number.NaN;
+    for (let i = 0; i < u.data[0].length; i += 2) {
+      const min = u.data[s][i],
+        max = u.data[s][i + 1];
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        previousX = previousY = Number.NaN;
+        continue;
+      }
+      const x = u.valToPos(u.data[0][i], 'x', true) - bbox.left;
+      const a = u.valToPos(min, series.scale, true) - bbox.top;
+      const b = u.valToPos(max, series.scale, true) - bbox.top;
+      if (![x, a, b].every(Number.isFinite)) {
+        previousX = previousY = Number.NaN;
+        continue;
+      }
+      // Nonuniform timestamps can leave gaps between sample-count stripes.
+      // Retain their existing connecting segment instead of turning them into dots.
+      if (Number.isFinite(previousX) && x - previousX > Math.max(2, Math.ceil(half * 2))) {
+        let enter = 0;
+        let exit = 1;
+        for (const [position, delta, limit] of [
+          [previousX, x - previousX, width],
+          [previousY, a - previousY, height],
+        ]) {
+          if (delta === 0) {
+            if (position < -half || position > limit + half) exit = -1;
+          } else {
+            const t0 = (-half - position) / delta,
+              t1 = (limit + half - position) / delta;
+            enter = Math.max(enter, Math.min(t0, t1));
+            exit = Math.min(exit, Math.max(t0, t1));
+          }
+        }
+        const steps = enter <= exit ? Math.ceil(Math.max(x - previousX, Math.abs(a - previousY)) * (exit - enter)) : 0;
+        for (let step = 1; step < steps; step++) {
+          const t = enter + ((exit - enter) * step) / steps;
+          const cx = previousX + (x - previousX) * t;
+          const cy = previousY + (a - previousY) * t;
+          const x0 = Math.max(0, Math.floor(cx - half)),
+            x1 = Math.min(width, Math.ceil(cx + half));
+          const y0 = Math.max(0, Math.floor(cy - half)),
+            y1 = Math.min(height, Math.ceil(cy + half));
+          if (x0 < x1 && y0 < y1) {
+            dirtyTop = Math.min(dirtyTop, y0);
+            dirtyBottom = Math.max(dirtyBottom, y1);
+          }
+          for (let y = y0; y < y1; y++) for (let px = x0; px < x1; px++) pixels[y * width + px] = color;
+        }
+      }
+      const left = Math.max(0, Math.floor(x - half)),
+        right = Math.min(width, Math.ceil(x + half));
+      const top = Math.max(0, Math.floor(Math.min(a, b) - half)),
+        bottom = Math.min(height, Math.ceil(Math.max(a, b) + half));
+      if (left < right && top < bottom) {
+        dirtyTop = Math.min(dirtyTop, top);
+        dirtyBottom = Math.max(dirtyBottom, bottom);
+      }
+      for (let y = top; y < bottom; y++) for (let px = left; px < right; px++) pixels[y * width + px] = color;
+      previousX = x;
+      previousY = b;
+    }
+  }
+  bucketRaster.dirtyTop = dirtyTop;
+  bucketRaster.dirtyBottom = dirtyBottom;
+  // With no fill between channels, opaque strokes can share a single upload.
+  if (combined && u.series.slice(seriesIdx + 1).some((series) => series.show)) return;
+  if (dirtyBottom <= dirtyTop) return;
+  bucketRaster.ctx.putImageData(bucketRaster.image, 0, 0, 0, dirtyTop, width, dirtyBottom - dirtyTop);
+  const ctx = u.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+  ctx.clip();
+  ctx.drawImage(
+    bucketRaster.canvas,
+    0,
+    dirtyTop,
+    width,
+    dirtyBottom - dirtyTop,
+    bbox.left,
+    bbox.top + dirtyTop,
+    width,
+    dirtyBottom - dirtyTop,
+  );
+  ctx.restore();
 }
 
 // ─── Data binding ────────────────────────────────────────────────────────────
@@ -439,6 +635,8 @@ export function syncChartSeries() {
   recordingFillPolicy.reset();
   reviewFillPolicy.reset();
   sourceRevision = chartRevision();
+  bucketRaster = null;
+  bucketFills.clear();
   submittedSourceLen = state.chartSeries.x.length;
   recentAppendCount = 0;
   feedbackRecording = state.isRecording;
@@ -469,7 +667,7 @@ export function syncChartSeries() {
 export function setRangeDragging(dragging) {
   if (dragging && !rangeDragging) {
     selectDisplayContext('review');
-    cancelFrameProbe();
+    cancelFrameProbe(false);
   }
   rangeDragging = !!dragging;
   state.__rangeDragging = rangeDragging;
@@ -531,28 +729,35 @@ function sourceRange() {
  * `uPlot.pxRatio`，没有 `setPxRatio`。拿静态值去除会在改系统缩放 / 换屏后得到一个既不是旧宽也不是
  * 新宽的宽度。后备宽 ÷ CSS 宽 才是渲染真正在用的比值：画布陈旧时它一起陈旧，条带密度就仍匹配正在显示的画面。
  */
-function plotCssWidth() {
+function plotPixelRatio() {
   const chart = state.mainChart;
-  const bboxWidth = chart?.bbox?.width;
-  if (bboxWidth) {
-    const backing = chart.over?.width;
-    const css = chart.width;
-    if (backing && css && backing > 0 && css > 0) return bboxWidth / (backing / css);
-    const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-    return bboxWidth / (typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr);
-  }
+  const backing = chart?.ctx?.canvas?.width;
+  const css = chart?.width;
+  if (backing > 0 && css > 0) return backing / css;
+  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  return typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr;
+}
+
+function plotCssWidth() {
+  const bboxWidth = state.mainChart?.bbox?.width;
+  if (bboxWidth > 0) return bboxWidth / plotPixelRatio();
   return document.getElementById('main-chart')?.clientWidth || 600;
+}
+
+/** Review resolves physical pixels rather than widening stripes on high-DPI screens. */
+function displayResolution(width = plotCssWidth()) {
+  return width * (displayContext === 'review' ? plotPixelRatio() : 1);
 }
 
 /** Sparse windows retain raw samples even after a dense recording reduced its budget. @param {number} count */
 function mainBucketCap(count) {
   const width = plotCssWidth();
-  return bucketCap(width / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
+  return bucketCap(displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
 }
 
 /** Display projection and pacing eligibility; this does not suppress fill. */
 function displayDense(count = visiblePointCount, width = visiblePlotWidth) {
-  return count > width;
+  return count > displayResolution(width);
 }
 
 /** Fill needs a larger window AND measured pressure; raw history size alone never suppresses it. */
@@ -713,7 +918,7 @@ function prepareLargeProjection(start, end, cap) {
   // Indexed folds visit O(buckets) nodes and short raw boundaries. Charging the
   // covered sample count forced even cheap warm queries through many task yields.
   const advance = () => (index ? step(Infinity, 32) : step(4096));
-  if (index) {
+  {
     const deadline = performance.now() + INTERACTION_PREPARE_MS;
     do {
       const complete = advance();
@@ -796,7 +1001,7 @@ function applyXScale(range = xRange()) {
 
 /**
  * 「画什么」的唯一定义：把主图绑到窗口 `[start,end)` 在 `stripePpb(windowCount, cap)` 密度下的
- * min/max 条带；窗口不超过 1×绘图宽度时复制原始样本及裁剪邻点。拖动中与松手后都只经过这里。
+ * min/max 条带；窗口不超过显示分辨率时复制原始样本及裁剪邻点。拖动中与松手后都只经过这里。
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
@@ -857,7 +1062,8 @@ function expectChartDraw(chart, request) {
     batchId: request.batchId,
     sourcePointCount: role === 'main' ? visiblePointCount : state.chartSeries.x.length,
     displayPointCount: role === 'main' ? mainData[0].length : navData[0].length,
-    pixelsPerBucket: role === 'main' ? renderPolicy.pixelsPerBucket : undefined,
+    pixelsPerBucket:
+      role === 'main' ? renderPolicy.pixelsPerBucket / (displayContext === 'review' ? plotPixelRatio() : 1) : undefined,
     displayDense: role === 'main' && displayDense(),
     fillSuppressed: role === 'main' && fillSuppressed(),
     fillSuppressionReason: role === 'main' && fillSuppressed() ? fillPolicy.reason : null,
@@ -923,6 +1129,7 @@ function finishChartDraw(chart) {
   const interactive = rangeDragging;
   const dense = displayDense();
   const eligibleFill = fillDense() && hasEnabledFill();
+  const paintedFillSuppressed = fillSuppressed();
   const appendCount = pending?.lastDiagnostic.recentAppendCount ?? 0;
   // Canvas work may stall the second or third frame after a fast first
   // callback. Treat this bounded observation window as one paint sample, so a
@@ -930,7 +1137,8 @@ function finishChartDraw(chart) {
   // A continuous gesture supplies another paint each frame: consume each actual
   // frame once so slow draws can adjust the budget before the gesture ends.
   // Live/static paints and the final release retain the delayed-raster probe.
-  const probeFrames = dense && !interactive ? 3 : 1;
+  const probeFrames =
+    dense && (!interactive || (eligibleFill && !fillPolicy.suppressed && !filledPaintConfirmed)) ? 3 : 1;
   let observedFrames = 0;
   let previousFrameAt = drawEndedAt;
   let nextFrameDelayMs = 0;
@@ -976,7 +1184,9 @@ function finishChartDraw(chart) {
       return;
     }
     const densityChanged = renderPolicy.observe({
-      delayMs: frameDelayMs,
+      // Cold preparation and other work before draw cannot establish a coarse
+      // display budget. Use the same actual-paint pressure as fill protection.
+      delayMs: fillFrameDelayMs,
       at,
       idleFrameMs: performanceDiagnostics.idleFrameIntervalMs(),
       visible,
@@ -994,34 +1204,56 @@ function finishChartDraw(chart) {
       eligible: eligibleFill,
       paintedDensity: density,
       nextDensity: renderPolicy.pixelsPerBucket,
+      densityLimit: renderPolicy.maxDensity,
       largeBatch: live && appendCount >= visiblePlotWidth * FILL_POINTS_PER_PIXEL,
     });
+    const slowFill = fillFrameDelayMs > Math.max(33, renderPolicy.idleFrameMs * 2);
+    if (slowFill || (fillChanged && !fillPolicy.suppressed)) filledPaintConfirmed = false;
+    else if (eligibleFill && !paintedFillSuppressed && observedFrames >= 3) filledPaintConfirmed = true;
     const confirmReview =
-      !live && dense && ((renderPolicy.slowFrames === 1 && density < 16) || fillPolicy.needsConfirmation);
+      !live &&
+      dense &&
+      ((renderPolicy.slowFrames === 1 && density < renderPolicy.maxDensity) || fillPolicy.needsConfirmation);
     if (densityChanged || fillChanged || confirmReview) {
       feedbackRepaintPending = true;
       scheduleChartUpdate('maintenance');
-    }
+    } else if (rangeDragging && chartDirty) scheduleChartUpdate('interaction');
   };
   chartProbeFrame = requestAnimationFrame(observeFrame);
 }
 
-function cancelFrameProbe() {
+/** @param {boolean} [resetFill=true] */
+function cancelFrameProbe(resetFill = true) {
   if (chartProbeFrame !== null) cancelAnimationFrame(chartProbeFrame);
   chartProbeFrame = null;
   feedbackRepaintPending = false;
   feedbackEpoch++;
   renderPolicy.breakFeedback();
-  if (fillPolicy.reset()) fillPaintDirty = true;
+  if (resetFill) {
+    filledPaintConfirmed = false;
+    if (fillPolicy.reset()) fillPaintDirty = true;
+  } else fillPolicy.breakFeedback();
 }
 
 /** Display budgets from live recording never become the initial review budget. @param {'recording'|'review'} context */
 function selectDisplayContext(context) {
   if (context === displayContext) return;
-  cancelFrameProbe();
+  const previousFill = fillPolicy;
+  const previousRender = renderPolicy;
+  cancelFrameProbe(false);
   displayContext = context;
+  filledPaintConfirmed = false;
   renderPolicy = context === 'recording' ? recordingRenderPolicy : reviewRenderPolicy;
   fillPolicy = context === 'recording' ? recordingFillPolicy : reviewFillPolicy;
+  // The source is unchanged across pause/gesture transitions. Share known fill
+  // pressure, never the recording density, to avoid retrying a costly filled
+  // path just as a finer review window is requested.
+  if (context === 'review' && (previousFill.suppressed || previousRender.nextFrameDelayMs > 100)) {
+    fillPolicy.suppressed = true;
+    fillPolicy.reason = previousFill.reason ?? 'severe-frame';
+    fillPolicy.lastSuppressedAt = previousFill.lastSuppressedAt || performance.now();
+  }
+  fillPaintDirty = true;
 }
 
 /** 同步准备耗时仅作诊断，不据此猜测 GPU / Canvas 耗时或固定降帧。
@@ -1053,7 +1285,7 @@ function applyData(opts = {}) {
   const t0 = performance.now();
   chartDirty = false;
   if (feedbackRecording !== state.isRecording) {
-    cancelFrameProbe();
+    cancelFrameProbe(false);
     feedbackRecording = state.isRecording;
     selectDisplayContext(state.isRecording && !rangeDragging ? 'recording' : 'review');
   }
@@ -1262,6 +1494,19 @@ export function scheduleChartUpdate(source = 'live') {
   if (flushingChart) return;
   requestPaint(source);
   if (chartFramePending) return;
+  // Do not queue several expensive filled paths before delayed raster feedback
+  // from the first one arrives. Merge the latest gesture window until the bounded
+  // probe completes; protected/unfilled and raw windows keep their normal cadence.
+  if (
+    rangeDragging &&
+    currentWindowDense() &&
+    chartProbeFrame !== null &&
+    fillDense() &&
+    hasEnabledFill() &&
+    !fillPolicy.suppressed &&
+    !filledPaintConfirmed
+  )
+    return;
   if (state.isRecording && paintRequest?.source === 'live' && !rangeDragging && !resizeDirty) {
     const delay = lastLiveFlushAt + liveRefreshInterval() - performance.now();
     if (delay > 1) {
@@ -1320,7 +1565,7 @@ export function setChartXWindow(min, max) {
       windowIntent++;
       // A gesture may move every frame. Its paints must still finish their
       // raster observations; unrelated windows continue to retire old evidence.
-      if (!rangeDragging) cancelFrameProbe();
+      if (!rangeDragging) cancelFrameProbe(false);
     }
   }
   xWindow.min = min;
@@ -2256,6 +2501,7 @@ export function initChart() {
     ],
     hooks: {
       drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],
+      drawSeries: [drawBucketFill, drawBucketRaster],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],

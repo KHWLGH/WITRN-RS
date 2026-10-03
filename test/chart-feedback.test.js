@@ -38,6 +38,8 @@ globalThis.uPlot = class {
     this.data = data;
     queueMicrotask(() => {
       for (const hook of this.hooks.drawClear ?? []) hook(this);
+      for (let s = 1; s < (this.series?.length ?? 0); s++)
+        if (this.series[s].show) for (const hook of this.hooks.drawSeries ?? []) hook(this, s);
       time += 0.4;
       for (const hook of this.hooks.draw ?? []) hook(this);
     });
@@ -141,7 +143,7 @@ test('background callbacks and paints from replaced columns never degrade the cu
   chart.syncChartSeries();
 });
 
-test('paused review confirms a slow static draw, then reduces density without incoming samples', async () => {
+test('paused review confirms expensive fill without reducing curve detail', async () => {
   seed(false);
   await submit();
   const before = state.mainChart.data[0].length;
@@ -152,12 +154,12 @@ test('paused review confirms a slow static draw, then reduces density without in
   assert.equal(state.mainChart.submissions, 2, 'an unchanged static binding must actually redraw for confirmation');
   await paintFeedback(40);
   await frame(16);
-  assert.ok(state.mainChart.data[0].length < before);
+  assert.equal(state.mainChart.data[0].length, before);
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.equal(last.pixelsPerBucket, 4);
-  assert.equal(last.fillSuppressed, false, 'first confirmed slow draw only reduces density');
+  assert.equal(last.pixelsPerBucket, 1);
+  assert.equal(last.fillSuppressed, true, 'review protects detail by suppressing confirmed expensive fill');
   assert.equal(last.refreshIntervalMs, 0, 'review interactions are not paced like acquisition');
-  assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
+  assert.equal(state.mainChart.options.series[1].fill(), null);
   await paintFeedback(40);
   await frame(16);
   await paintFeedback(40);
@@ -181,36 +183,203 @@ test('a healthy confirmation stops review probes without reducing detail', async
   await paintFeedback();
   assert.equal(state.mainChart.submissions, 2);
   assert.equal(state.mainChart.data[0].length, before);
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
   assert.equal(frames.size, 0);
 });
 
-test('persistently slow static review has a bounded probe chain and stops at the coarsest level', async () => {
+test('persistently slow static review has bounded fill probes and keeps screen-resolution detail', async () => {
   seed(false);
   await submit();
   for (let i = 0; i < 40 && frames.size > 0; i++) await frame(i % 4 === 0 ? 40 : 16);
   assert.equal(frames.size, 0, 'there is no idle redraw loop at the budget limit');
-  assert.ok(state.mainChart.submissions <= 7);
+  assert.ok(state.mainChart.submissions <= 3);
   await submit();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 16);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
   await frame(120);
   assert.equal(frames.size, 0, 'even severe feedback at the limit cannot schedule another probe');
   assert.equal(state.chartSeries.x.length, 5000);
 });
 
-test('one severe review frame immediately coarsens the static projection', async () => {
+test('one severe review frame suppresses fill while retaining identical curve geometry', async () => {
   seed(false);
   await submit();
   const before = state.mainChart.data[0].length;
   await frame(120);
   await frame(16);
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.equal(last.pixelsPerBucket, 8);
+  assert.equal(last.pixelsPerBucket, 1);
   assert.equal(last.fillSuppressed, true);
   assert.equal(last.fillSuppressionReason, 'severe-frame');
-  assert.ok(state.mainChart.data[0].length < before);
+  assert.equal(state.mainChart.data[0].length, before);
   await paintFeedback();
   assert.equal(frames.size, 0);
+});
+
+test('pressured review paints exact extrema into a bounded transparent bitmap and returns to raw rendering on zoom', async () => {
+  const savedCanvas = globalThis.OffscreenCanvas;
+  const savedPath = globalThis.Path2D;
+  let allocations = 0;
+  globalThis.OffscreenCanvas = class {
+    constructor(width, height) {
+      allocations++;
+      this.width = width;
+      this.height = height;
+      this.context = {
+        createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+        putImageData: (image) => {
+          this.image = image;
+        },
+      };
+    }
+    getContext() {
+      return this.context;
+    }
+  };
+  globalThis.Path2D = class {};
+  try {
+    seed(false);
+    const u = state.mainChart;
+    u.series = u.options.series.map((series, i) => ({ ...series, alpha: 1, show: i === 1 }));
+    u.bbox = { left: 11, top: 7, width: 600, height: 20 };
+    u.valToPos = (value, scale) => (scale === 'x' ? 11 + (value / 4.999) * 600 : 7 + (1 - value) * 10);
+    let pixels = null,
+      paints = 0;
+    u.hooks.drawClear.unshift(() => {
+      pixels = null;
+    });
+    u.ctx = {
+      canvas: { width: 600 },
+      save() {},
+      restore() {},
+      beginPath() {},
+      rect() {},
+      clip() {},
+      drawImage: (canvas) => {
+        const image = canvas.image;
+        pixels ??= { ...image, data: new Uint8ClampedArray(image.data.length) };
+        for (let i = 0; i < image.data.length; i += 4)
+          if (image.data[i + 3]) pixels.data.set(image.data.subarray(i, i + 4), i);
+        paints++;
+      },
+    };
+    await submit();
+    await frame(120);
+    await frame(16);
+    assert.equal(allocations, 1);
+    assert.equal(pixels.width, 600);
+    assert.equal(pixels.height, 20);
+    const opaque = (x, y) => pixels.data[(y * 600 + x) * 4 + 3] === 255;
+    assert.ok(
+      Array.from({ length: 600 }, (_, x) => x).some((x) => opaque(x, 0)),
+      'upper extrema reach the clipped top',
+    );
+    assert.ok(
+      Array.from({ length: 600 }, (_, x) => x).some((x) => opaque(x, 10)),
+      'lower extrema are also painted',
+    );
+    for (let y = 12; y < 20; y++)
+      for (let x = 0; x < 600; x++) assert.equal(opaque(x, y), false, 'uncovered grid remains transparent');
+    const first = pixels.data.findIndex((value, i) => i % 4 === 3 && value === 255) - 3;
+    assert.deepEqual(Array.from(pixels.data.slice(first, first + 4)), [101, 173, 229, 255]);
+    await submit();
+    assert.equal(allocations, 1, 'repaints reuse the canvas-sized buffer');
+    const originalData = u.data;
+    const originalPosition = u.valToPos;
+    u.valToPos = (value, scale) => (scale === 'x' ? 11 + value : 7 + value);
+    u.data = [
+      [10, 10, 30, 30, 50, 50, 70, 70],
+      [5, 5, 5, 5, NaN, NaN, 5, 5],
+      ...Array.from({ length: 7 }, () => Array(8).fill(NaN)),
+    ];
+    pixels = null;
+    u.hooks.drawSeries[1](u, 1);
+    assert.equal(opaque(20, 5), true, 'nonuniform timestamps retain connecting lines');
+    assert.equal(opaque(60, 5), false, 'missing stripes break the line');
+    u.series[2].show = true;
+    u.data[2] = [3, 6, 3, 6, NaN, NaN, 3, 6];
+    u.hooks.drawSeries[1](u, 2);
+    assert.deepEqual(
+      Array.from(pixels.data.slice((5 * 600 + 30) * 4, (5 * 600 + 30) * 4 + 4)),
+      [52, 216, 137, 255],
+      'visible channels retain draw order',
+    );
+    u.series[2].show = false;
+    u.data[0] = [10, 10, 30, 30];
+    u.data[1] = [-1e12, -1e12, 1e12, 1e12];
+    pixels = null;
+    u.hooks.drawSeries[1](u, 1);
+    assert.equal(opaque(20, 10), true, 'off-screen segments clip before raster stepping');
+    u.data = originalData;
+    u.valToPos = originalPosition;
+    const densePaints = paints;
+    chart.setChartXWindow(2, 2.01);
+    await submit();
+    assert.equal(paints, densePaints, 'sparse windows use the original curve renderer');
+    assert.equal(state.mainChart.data[0].length, 13);
+    assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, false);
+  } finally {
+    globalThis.OffscreenCanvas = savedCanvas;
+    globalThis.Path2D = savedPath;
+    chart.handleMonitorHidden();
+  }
+});
+
+test('review splits fill into independent stripes with the same area and missing-value breaks', async () => {
+  const savedLinear = uPlot.paths.linear;
+  const savedPath = globalThis.Path2D;
+  uPlot.paths.linear = () => () => ({ stroke: 'stroke', fill: 'fill', clip: null });
+  globalThis.Path2D = class {};
+  try {
+    seed(false);
+    await submit();
+    const u = state.mainChart;
+    u.series = u.options.series.map((series) => ({ ...series, alpha: 1, pxRound: Math.round, fillTo: () => 0 }));
+    u.valToPos = (value) => value;
+    u.bbox = { left: 0, top: 0, width: 600, height: 20 };
+    u.data = [[0, 0, 10, 10, 20, 20], [1, 3, 2, 4, 6, 9], ...Array.from({ length: 7 }, () => Array(6).fill(NaN))];
+    const polygons = [];
+    let points = [];
+    u.ctx = {
+      save() {},
+      restore() {},
+      rect() {},
+      clip() {},
+      closePath() {},
+      beginPath: () => {
+        points = [];
+      },
+      moveTo: (x, y) => points.push([x, y]),
+      lineTo: (x, y) => points.push([x, y]),
+      fill: () => polygons.push(points),
+    };
+    const paths = u.options.series[1].paths(u, 1, 0, 5);
+    assert.ok(paths.fill instanceof Path2D);
+    assert.equal(paths.stroke, 'stroke');
+    u.hooks.drawSeries[0](u, 1);
+    assert.equal(polygons.length, 2);
+    const area = (polygon) =>
+      Math.abs(
+        polygon.reduce((sum, [x, y], i) => {
+          const [nextX, nextY] = polygon[(i + 1) % polygon.length];
+          return sum + x * nextY - y * nextX;
+        }, 0),
+      ) / 2;
+    const original = u.data[0].map((x, i) => [x, u.data[1][i]]);
+    original.push([20, 0], [0, 0]);
+    assert.equal(
+      polygons.reduce((sum, polygon) => sum + area(polygon), 0),
+      area(original),
+    );
+    u.data[1][2] = u.data[1][3] = NaN;
+    polygons.length = 0;
+    u.options.series[1].paths(u, 1, 0, 5);
+    u.hooks.drawSeries[0](u, 1);
+    assert.equal(polygons.length, 0, 'fill does not bridge missing stripes');
+  } finally {
+    uPlot.paths.linear = savedLinear;
+    globalThis.Path2D = savedPath;
+    chart.handleMonitorHidden();
+  }
 });
 
 test('changing a review window retires its queued confirmation and sparse feedback', async () => {
@@ -223,7 +392,7 @@ test('changing a review window retires its queued confirmation and sparse feedba
   await frame(120);
   assert.equal(frames.size, 0);
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.equal(last.pixelsPerBucket, 2);
+  assert.equal(last.pixelsPerBucket, 1);
   assert.equal(last.fillSuppressed, false);
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   chart.setChartXWindow(2, 4.999);
@@ -231,7 +400,7 @@ test('changing a review window retires its queued confirmation and sparse feedba
   await paintFeedback(40);
   assert.equal(
     performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket,
-    2,
+    1,
     'an unrelated window cannot inherit the first slow sample',
   );
   await frame(16);
@@ -255,7 +424,7 @@ test('backgrounding and replacing the source retire queued review probes', async
   seed(false);
   await submit();
   await paintFeedback();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
   assert.equal(state.mainChart.submissions, 1);
   assert.equal(frames.size, 0);
 });
@@ -284,8 +453,9 @@ test('static review catches delayed raster frames after a cheap first callback',
   await frame(16);
   await paintFeedback(40, true);
   await frame(16);
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 4);
-  assert.ok(state.mainChart.data[0].length < before);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
+  assert.equal(state.mainChart.data[0].length, before);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, true);
   await paintFeedback();
   assert.equal(frames.size, 0);
 });
@@ -430,7 +600,7 @@ test('stable live paints restore fill with a real submission, without a tight re
   assert.equal(last.recentAppendCount, 10);
 });
 
-test('live user zoom cancels fill evidence while natural follow appends retain it', async () => {
+test('dense live window changes retain protection, while sparse windows restore fill', async () => {
   seed(true);
   state.chartWindow = { mode: 'follow', min: 0, max: 4.999, duration: 4.999 };
   await submit();
@@ -450,11 +620,15 @@ test('live user zoom cancels fill evidence while natural follow appends retain i
   state.chartWindow = { mode: 'follow', min: 2, max: 5.299, duration: 3.299 };
   chart.setChartXWindow(2, 5.299);
   await submit();
+  assert.equal(state.mainChart.options.series[1].fill(), null);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, true);
+  chart.setChartXWindow(2, 2.1);
+  await submit();
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, false);
 });
 
-test('history preparation before draw does not falsely establish expensive fill', async () => {
+test('history preparation before draw does not falsely degrade detail or suppress fill', async () => {
   seed(true);
   performanceDiagnostics.reset();
   performanceDiagnostics.start();
@@ -464,7 +638,7 @@ test('history preparation before draw does not falsely establish expensive fill'
   await frame(8);
   await submit();
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.ok(last.pixelsPerBucket > 2, 'projection can react to overall request pressure');
+  assert.equal(last.pixelsPerBucket, 2, 'preparation is not evidence of expensive Canvas work');
   assert.equal(last.fillSuppressed, false, 'fill must observe its own draw rather than pre-paint work');
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   assert.equal(performanceDiagnostics.frameDelaySince(time - 9, true, true) <= 9, true);
@@ -478,18 +652,67 @@ test('moving a dense window every frame retains feedback across the same gesture
     for (let i = 0; i < 8; i++) {
       chart.setChartXWindow(0.1 + i * 0.01, 4.8 + i * 0.01);
       chart.scheduleChartUpdate('interaction');
-      await frame(i < 2 ? 40 : 16);
+      await frame(i < 6 ? 40 : 16);
     }
     chart.setRangeDragging(false);
     chart.updateCharts('interaction');
     await Promise.resolve();
     const last = performanceDiagnostics.snapshot().charts.main.last;
-    assert.ok(last.pixelsPerBucket > 2, 'completed gesture observations can reduce excessive draw work');
+    assert.equal(last.pixelsPerBucket, 1, 'slow gestures must retain screen-resolution detail');
+    assert.equal(last.fillSuppressed, true, 'gesture pressure feedback remains effective for fill');
     assert.equal(last.refreshIntervalMs, 0);
     assert.equal(last.refreshSource, 'interaction');
     assert.equal(state.chartSeries.x.length, 5000);
     await paintFeedback();
   }
+});
+
+test('filled gestures merge the latest window until delayed raster feedback, then release immediately', async () => {
+  seed(false);
+  chart.setRangeDragging(true);
+  await submit();
+  const u = state.mainChart;
+  for (const min of [0.1, 0.2]) {
+    chart.setChartXWindow(min, 4.9 - min);
+    chart.scheduleChartUpdate('interaction');
+    await frame(16);
+    assert.equal(u.submissions, 1, 'the first cheap callback cannot queue another costly filled path');
+  }
+  chart.setChartXWindow(0.3, 4.6);
+  chart.scheduleChartUpdate('interaction');
+  await frame(120);
+  await frame(16);
+  assert.equal(u.submissions, 2, 'confirmed pressure unblocks the latest target');
+  const last = performanceDiagnostics.snapshot().charts.main.last;
+  assert.equal(last.sourcePointCount, 4301);
+  assert.equal(last.pixelsPerBucket, 1);
+  assert.equal(last.fillSuppressed, true);
+  const before = u.data.map((col) => col.slice());
+  chart.setRangeDragging(false);
+  chart.updateCharts('interaction');
+  await Promise.resolve();
+  assert.equal(u.submissions, 3, 'release bypasses the feedback wait');
+  assert.deepEqual(u.data, before);
+  await paintFeedback();
+});
+
+test('confirmed healthy fill keeps updating through every subsequent gesture frame', async () => {
+  seed(false);
+  chart.setRangeDragging(true);
+  await submit();
+  await paintFeedback();
+  const u = state.mainChart;
+  const before = u.submissions;
+  for (let i = 0; i < 8; i++) {
+    chart.setChartXWindow(0.1 + i * 0.01, 4.8 + i * 0.01);
+    chart.scheduleChartUpdate('interaction');
+    await frame(16);
+    assert.equal(u.submissions, before + i + 1, 'healthy fill does not retain the initial feedback wait');
+  }
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, false);
+  chart.setRangeDragging(false);
+  await paintFeedback();
 });
 
 test('recording and review budgets are independent and release preserves the gesture budget', async () => {
@@ -502,7 +725,7 @@ test('recording and review budgets are independent and release preserves the ges
   chart.setChartXWindow(0.1, 4.9);
   chart.updateCharts('interaction');
   await Promise.resolve();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
   const during = state.mainChart.data.map((col) => col.slice());
   chart.setRangeDragging(false);
   chart.updateCharts('interaction');

@@ -194,6 +194,44 @@ test('sparse windows bind only visible raw samples and neighbours in both states
   assert.deepEqual(whileDragging, u.data);
 });
 
+test('review detail tracks the actual canvas resolution and matches a short recording of the same window', async () => {
+  const savedRatio = globalThis.devicePixelRatio;
+  try {
+    for (const ratio of [1, 1.5, 2]) {
+      seed();
+      const u = stubChart();
+      u.bbox = { width: PLOT_WIDTH * ratio };
+      u.ctx = { canvas: { width: PLOT_WIDTH * ratio } };
+      state.mainChart = u;
+      // Simulate a system DPI change before the existing canvas has resized.
+      globalThis.devicePixelRatio = 3;
+      const full = windowOf(0, SAMPLES - 1);
+      await commit(full);
+      assert.ok(u.data[0].length > PLOT_WIDTH * ratio, 'dense review retains at least screen-resolution extrema');
+      const range = windowOf(10_000, 10_000 + Math.floor(PLOT_WIDTH * ratio) - 1);
+      chart.setRangeDragging(true);
+      const during = await dragFrame(u, range);
+      chart.setRangeDragging(false);
+      await commit(range);
+      assert.deepEqual(u.data, during);
+      assert.equal(during[0].length, Math.floor(PLOT_WIDTH * ratio) + 2, 'one sample per canvas pixel remains raw');
+      for (let s = 0; s < during.length; s++) {
+        const field = ['x', 'voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'][s];
+        assert.deepEqual(
+          during[s],
+          Array.from(state.chartSeries[field].copyRange(9_999, 10_001 + Math.floor(PLOT_WIDTH * ratio))),
+        );
+        state.chartSeries[field].set(during[s]);
+      }
+      chart.syncChartSeries();
+      await commit(range);
+      assert.deepEqual(u.data, during, 'large history and an isolated short record render identical samples');
+    }
+  } finally {
+    globalThis.devicePixelRatio = savedRatio;
+  }
+});
+
 function appendSample({ voltage = 5, current = 2, power = 10 } = {}) {
   const cs = state.chartSeries;
   cs.x.push(cs.x.at(-1) + 0.02);
@@ -358,7 +396,7 @@ test('continuous shrink and bidirectional pan paint warm windows without rebuild
             [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2],
             start,
             end + 1,
-            PLOT_WIDTH / 2,
+            PLOT_WIDTH,
           );
           const flat = expected.flatten();
           assert.deepEqual(
@@ -440,7 +478,7 @@ test('full-history budget reductions merge the prefix and retain raw extrema wit
     [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2],
     0,
     SAMPLES + 1,
-    300,
+    600,
   );
   const flat = expected.flatten();
   assert.deepEqual(

@@ -94,7 +94,7 @@ test('large chart preparations publish a complete projection and discard replace
     ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'].map((key) => columns[key].view()),
     0,
     columns.x.length,
-    600,
+    1200,
   );
   const flat = expected.flatten();
   assert.deepStrictEqual(state.mainChart.data, [flat.x, ...flat.ys]);
@@ -116,7 +116,7 @@ test('large chart preparations publish a complete projection and discard replace
     while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 2));
     assert.equal(obsoleteSteps, 1, 'shrinking the right edge cancels work even at the same density');
     const replacement = new SeriesBuckets();
-    originalBeginRebuild.call(replacement, columns.x, [columns.voltage], 0, 180001, 600)(Infinity);
+    originalBeginRebuild.call(replacement, columns.x, [columns.voltage], 0, 180001, 1200)(Infinity);
     assert.deepStrictEqual(state.mainChart.data[0], replacement.flatten().x);
   } finally {
     SeriesBuckets.prototype.beginRebuild = originalBeginRebuild;
@@ -210,7 +210,7 @@ test('changing the window during cold indexing retains the completed prefix for 
       [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
       0,
       4000,
-      600,
+      1200,
     );
     const flat = expected.flatten();
     assert.deepEqual(state.mainChart.data, [flat.x, ...flat.ys], 'only the latest complete projection is published');
