@@ -4,6 +4,7 @@
  */
 
 import {
+  handleMonitorHidden,
   handleMonitorShown,
   initChart,
   refreshChartScales,
@@ -24,6 +25,7 @@ import {
   scheduleStatsUpdate,
   startRecording,
   stopRecording,
+  suspendMonitorDisplay,
   updateChartEmptyState,
   updateChartRange,
   updateDurationDisplay,
@@ -38,12 +40,13 @@ import {
   initializeDeviceStream,
   onDeviceSelect,
   refreshDeviceList,
+  setConnectionReady,
   shutdownDeviceStream,
 } from './device.js';
 import { enhanceSelects } from './dropdown.js';
-import { listSpoolRecoveries } from './file-io.js';
-import { deviceSupportsControl } from './km003c-model.js';
+import { registerListeners } from './event-listeners.js';
 import { clampLimitMb } from './recording-limit.js';
+import { scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
   applyRealtimePanelWidth,
@@ -54,7 +57,7 @@ import {
   resetSettings,
   saveSettings,
 } from './settings.js';
-import { getActiveView, onSelectionChange, registerView, restoreView, showView } from './shell.js';
+import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
 import { state } from './state.js';
 import {
   connectTempService,
@@ -81,7 +84,7 @@ import {
   markPdDisconnect,
   syncPdView,
 } from './views/pd.js';
-import { initSettingsView, showSpoolRecoveries } from './views/settings-view.js';
+import { initSettingsView } from './views/settings-view.js';
 import {
   handlePdmState,
   handleTriggerProgress,
@@ -135,13 +138,15 @@ async function confirmAndExit() {
 async function setupCloseConfirm() {
   const appWindow = window.__TAURI__.window.getCurrentWindow();
 
-  await appWindow.onCloseRequested((/** @type {any} */ event) => {
-    event.preventDefault();
-    void confirmAndExit();
-  });
-  await listen('app-exit-requested', () => {
-    void confirmAndExit();
-  });
+  await registerListeners([
+    appWindow.onCloseRequested((/** @type {any} */ event) => {
+      event.preventDefault();
+      void confirmAndExit();
+    }),
+    listen('app-exit-requested', () => {
+      void confirmAndExit();
+    }),
+  ]);
   document.addEventListener('keydown', (event) => {
     if (document.documentElement.dataset.os !== 'macos' || !event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key.toLowerCase() !== 'w' && event.key.toLowerCase() !== 'q') return;
@@ -817,36 +822,19 @@ function initMonitorSplitter() {
 
 // ─── Shell（多 Tab 工作区 + 标题栏） ─────────────────────────────────────────
 
-/** @type {ReturnType<typeof initTabBar>|null} */
-let tabbar = null;
-/** 上次停在协议控制页：设备列表就绪、确认选中的是 POWER-Z 后再切过去。 */
-let restoreTriggerPending = false;
-
-/** 下拉框当前指向的设备（已连接时就是连接中的那台）。 */
-function selectedDeviceInfo() {
-  return state.connectedDevice ?? state.deviceList.find((d) => d.path === state.selectedDevicePath) ?? null;
-}
-
-/** 协议控制 Tab 只在选中支持控制的设备时出现；隐藏时若正停在该页则回到监控。 */
-function syncControlTab() {
-  const device = selectedDeviceInfo();
-  const visible = deviceSupportsControl(device);
-  tabbar?.setHidden('trigger', !visible);
+/** Only the 1000 Hz option depends on the connected device; all workspace tabs stay visible. */
+function syncDeviceCapabilities() {
   const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   const highRate = state.isConnected && state.connectedDevice?.family === 'km003c';
   const highRateOption = /** @type {HTMLOptionElement|null} */ (rateSelect?.querySelector('option[value="1"]') ?? null);
-  if (highRateOption) highRateOption.hidden = !highRate;
+  if (highRateOption) {
+    highRateOption.hidden = !highRate;
+    highRateOption.disabled = !highRate;
+  }
   if (!highRate && state.settings.sampleRate === 1) {
     state.settings.sampleRate = 10;
-    state.dataIntervalMs = 10;
     if (rateSelect) setSampleRateOption(rateSelect, 10);
     updateSampleRateStatus();
-  }
-  if (visible && restoreTriggerPending) {
-    restoreTriggerPending = false;
-    showView('trigger');
-  } else if (!visible && getActiveView() === 'trigger') {
-    showView('monitor');
   }
 }
 
@@ -855,10 +843,17 @@ function setupShell() {
     refreshMonitorDisplay();
     handleMonitorShown();
   };
-  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: showMonitor });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) refreshMonitorDisplay();
-  });
+  const hideMonitor = () => {
+    handleMonitorHidden();
+    suspendMonitorDisplay();
+  };
+  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: showMonitor, onHide: hideMonitor });
+  const visibilityChanged = () => {
+    if (state.windowVisible && !document.hidden) refreshMonitorDisplay();
+    else hideMonitor();
+  };
+  document.addEventListener('visibilitychange', visibilityChanged);
+  document.addEventListener('witrn:window-visibility', visibilityChanged);
   registerView({ id: 'pd', icon: 'flash', label: 'PD 分析', init: initPdView, onShow: syncPdView });
   registerView({ id: 'trigger', icon: 'options', label: '协议控制', init: initTriggerView, onShow: syncTriggerView });
   // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
@@ -877,11 +872,10 @@ function setupShell() {
       [
         { id: 'monitor', icon: 'pulse', label: '监控' },
         { id: 'pd', icon: 'flash', label: 'PD 分析' },
-        { id: 'trigger', icon: 'options', label: '协议控制', hidden: true },
+        { id: 'trigger', icon: 'options', label: '协议控制' },
       ],
       showView,
     );
-    tabbar = bar;
     onSelectionChange((id) => {
       bar.select(id);
       gearBtn?.classList.toggle('active', id === 'settings');
@@ -903,66 +897,62 @@ function setupShell() {
   applyWindowStyle(state.settings.windowStyle);
   initWindowControls();
 
-  // 恢复上次的工作区（默认监控）。协议控制页要等设备列表确认是 POWER-Z 才出现，
-  // 先停在监控：activeView 同时决定监控显示是否刷新，不能让它指着一个没显示的页。
-  if (state.settings.activeView === 'trigger') {
-    restoreTriggerPending = true;
-    state.settings.activeView = 'monitor';
-  }
   restoreView(state.settings.activeView);
-  document.addEventListener('witrn:device-selection', syncControlTab);
+  document.addEventListener('witrn:device-selection', syncDeviceCapabilities);
+  syncDeviceCapabilities();
 }
 
 // ─── Event listeners ─────────────────────────────────────────────────────────
 
 async function setupEventListener() {
-  await initializeDeviceStream();
+  await registerListeners([
+    initializeDeviceStream(),
+    // PD 报文启动即监听（插拔瞬间的握手最有价值，不等用户打开 PD Tab）
+    listen('pd-data-batch', (/** @type {{ payload: unknown }} */ event) => {
+      ingestPdBatch(event.payload);
+    }),
 
-  // PD 报文启动即监听（插拔瞬间的握手最有价值，不等用户打开 PD Tab）
-  await listen('pd-data-batch', (/** @type {{ payload: unknown }} */ event) => {
-    ingestPdBatch(event.payload);
-  });
+    // 协议控制的进度与 PDM 状态：视图没打开时也要收，命令可能在别的 Tab 上结束。
+    listen('km003c-trigger-progress', (/** @type {{ payload: unknown }} */ event) => {
+      handleTriggerProgress(event.payload);
+    }),
+    listen('km003c-pdm-state', (/** @type {{ payload: unknown }} */ event) => {
+      handlePdmState(event.payload);
+    }),
+    listen('km003c-high-rate', (/** @type {{ payload: { ok?: boolean; message?: string } }} */ event) => {
+      if (event.payload?.ok === false) {
+        void applySampleRate(10);
+        toast.warning(`POWER-Z 高速采样不可用，已退回 100 次/秒：${event.payload.message ?? ''}`);
+      }
+    }),
 
-  // 协议控制的进度与 PDM 状态：视图没打开时也要收，命令可能在别的 Tab 上结束。
-  await listen('km003c-trigger-progress', (/** @type {{ payload: unknown }} */ event) => {
-    handleTriggerProgress(event.payload);
-  });
-  await listen('km003c-pdm-state', (/** @type {{ payload: unknown }} */ event) => {
-    handlePdmState(event.payload);
-  });
-  await listen('km003c-high-rate', (/** @type {{ payload: { ok?: boolean; message?: string } }} */ event) => {
-    if (event.payload?.ok === false) {
-      void applySampleRate(10);
-      toast.warning(`POWER-Z 高速采样不可用，已退回 100 次/秒：${event.payload.message ?? ''}`);
-    }
-  });
+    listen('device-disconnected', async () => {
+      if (state.isConnected) {
+        await disconnectDevice();
+        markPdDisconnect();
+        toast.warning('设备连接已断开');
+      }
+    }),
+
+    listen('temp-data', (/** @type {{ payload: number }} */ event) => {
+      state.currentTemp = event.payload;
+      if (state.isTempConnected) {
+        const el = document.getElementById('rt-temp');
+        if (el) el.textContent = state.currentTemp.toFixed(1);
+      }
+    }),
+
+    listen('temp-disconnected', () => {
+      setTempConnected(false);
+      console.info('Temperature service disconnected');
+    }),
+  ]);
   document.addEventListener('witrn:monitor-changed', syncTriggerConnection);
-
-  await listen('device-disconnected', async () => {
-    if (state.isConnected) {
-      await disconnectDevice();
-      markPdDisconnect();
-      toast.warning('设备连接已断开');
-    }
-  });
-
-  await listen('temp-data', (/** @type {{ payload: number }} */ event) => {
-    state.currentTemp = event.payload;
-    if (state.isTempConnected) {
-      const el = document.getElementById('rt-temp');
-      if (el) el.textContent = state.currentTemp.toFixed(1);
-    }
-  });
-
-  await listen('temp-disconnected', () => {
-    setTempConnected(false);
-    console.info('Temperature service disconnected');
-  });
 }
 
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
-window.addEventListener('DOMContentLoaded', async () => {
+async function probePlatform() {
   // theme-boot 已按 UA 同步写入 data-os；这里用原生探测覆盖为权威值。
   // 探测失败不能阻断后续初始化（否则关闭确认、设置加载全部跳过），回退到 UA 值。
   try {
@@ -972,15 +962,40 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (error) {
     console.error('运行时平台探测失败，沿用首屏 UA 判定:', error);
   }
+}
 
+window.addEventListener('DOMContentLoaded', async () => {
   // 禁用右键菜单
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // 必须早于 loadSettings()，否则它对 select.value 的赋值发生在拦截器安装之前。
-  enhanceSelects();
+  setConnectionReady(false);
+  const platformReady = probePlatform();
+  const settingsReady = loadSettings();
+  const closeReady = setupCloseConfirm()
+    .then(() => true)
+    .catch((error) => {
+      console.error('关闭监听初始化失败:', error);
+      toast.error(`关闭监听初始化失败: ${error}`);
+      return false;
+    });
+  const listenersReady = setupEventListener()
+    .then(() => {
+      window.__WITRN_BOOT__?.mark('listenersReady');
+      return true;
+    })
+    .catch((error) => {
+      console.error('设备监听初始化失败:', error);
+      toast.error(`设备监听初始化失败，无法连接设备: ${error}`);
+      return false;
+    });
+  const devicesReady = refreshDeviceList().then(() => {
+    window.__WITRN_BOOT__?.mark('devicesScanned');
+  });
 
-  await setupCloseConfirm();
-  await loadSettings();
+  // Start IPC before constructing dropdowns; setting reads await replies, so interceptors are
+  // still installed in this synchronous turn before loadSettings can echo select.value.
+  enhanceSelects();
+  await Promise.all([platformReady, settingsReady]);
   initChart();
   setupChartToggles();
   setupControls();
@@ -993,19 +1008,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Clean recording state on load
   state.isRecording = false;
-
-  await setupEventListener();
-  await refreshDeviceList();
-  // Scan asynchronously so startup stays quiet and does not block device enumeration.
-  void listSpoolRecoveries()
-    .then((entries) => {
-      showSpoolRecoveries(entries);
-      if (entries.length) toast.info(`发现 ${entries.length} 份可恢复的临时记录，请在设置页查看。`);
+  updateTempUIVisibility();
+  window.__WITRN_BOOT__?.mark('uiReady');
+  void scanRecoveries()
+    .then(() => {
+      window.__WITRN_BOOT__?.mark('recoveriesScanned');
     })
     .catch((error) => console.error('扫描临时恢复文件失败:', error));
-  // 列表里没有 POWER-Z 时不再等待恢复协议控制页。
-  restoreTriggerPending = false;
-  window.__WITRN_BOOT__?.mark('appReady');
-
-  updateTempUIVisibility();
+  const ready = await listenersReady;
+  setConnectionReady(ready);
+  const [canClose] = await Promise.all([closeReady, devicesReady]);
+  if (ready && canClose) window.__WITRN_BOOT__?.mark('appReady');
 });

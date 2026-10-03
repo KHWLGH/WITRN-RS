@@ -918,6 +918,14 @@ html[data-ui-scale-css] .app-shell {
   gap: 8px;
 }
 
+.about-icon {
+  display: block;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
 .settings-kv-row {
   display: flex;
   align-items: baseline;

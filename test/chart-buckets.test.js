@@ -78,9 +78,63 @@ test('rebuild then appendThrough only folds new tail samples', () => {
   assert.ok(buckets.list.length >= before);
 });
 
+test('fixed-density append preserves an existing projection until an explicit rebuild', () => {
+  const n = 4096;
+  const xs = Float64Array.from({ length: n }, (_, i) => i);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, xs), 0, 1024, 64);
+  const ppb = buckets.ppb;
+  buckets.appendThroughFixed(xs, channels(xs, xs), n);
+  assert.equal(buckets.ppb, ppb);
+  assert.equal(buckets.srcEnd, n);
+  assert.ok(buckets.list.length <= Math.ceil(n / ppb));
+});
+
+test('fixed-density append has the same buckets as a rebuild while the target density is stable', () => {
+  const end = 1200;
+  const split = 1000;
+  const xs = Float64Array.from({ length: end }, (_, i) => i * 0.001);
+  const series = channels(
+    xs,
+    Float64Array.from({ length: end }, (_, i) => Math.sin(i / 11)),
+  );
+  const actual = new SeriesBuckets();
+  actual.rebuild(xs, series, 0, split, 64);
+  const ppb = actual.ppb;
+  actual.appendThroughFixed(xs, series, end);
+
+  const expected = new SeriesBuckets();
+  expected.rebuild(xs, series, 0, end, Math.ceil(end / ppb));
+  assert.equal(expected.ppb, ppb);
+  assert.deepEqual(actual.list, expected.list);
+});
+
+test('fixed-density append exposes capacity exhaustion for an explicit rebuild', () => {
+  const end = 2049;
+  const xs = Float64Array.from({ length: end }, (_, i) => i);
+  const series = channels(
+    xs,
+    Float64Array.from({ length: end }, (_, i) => i % 37),
+  );
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, series, 0, 1024, 64);
+  const stablePpb = buckets.ppb;
+  const headroomCap = buckets.cap;
+  buckets.appendThroughFixed(xs, series, end);
+  assert.equal(buckets.ppb, stablePpb);
+  assert.ok(buckets.list.length > headroomCap);
+
+  buckets.rebuild(xs, series, 0, end, 64);
+  assert.ok(buckets.list.length <= 64);
+  assert.ok(buckets.ppb > stablePpb);
+});
+
 test('stripePpb is the density both rebuild and the reuse check agree on', () => {
   assert.equal(stripePpb(1, 64), 1);
   assert.equal(stripePpb(1000, 64), 16);
+  assert.equal(stripePpb(1024, 64), 16);
+  assert.equal(stripePpb(1025, 64), 32);
+  assert.equal(stripePpb(2048, 64), 32);
   // cap 低于 BUCKET_MIN 时按 64 算；调用方若自己算一遍就会与桶内实际密度不一致。
   assert.equal(stripePpb(1000, 8), stripePpb(1000, BUCKET_MIN));
 
@@ -89,6 +143,22 @@ test('stripePpb is the density both rebuild and the reuse check agree on', () =>
   const buckets = new SeriesBuckets();
   buckets.rebuild(xs, channels(xs, xs), 0, n, 8);
   assert.equal(buckets.ppb, stripePpb(n, 8));
+});
+
+test('a growing 1KSPS history changes projection density only logarithmically', () => {
+  const cap = 800;
+  const seconds = 600;
+  let rebuilds = 0;
+  let previous = stripePpb(cap + 1, cap);
+  for (let points = cap + 2; points <= seconds * 1000; points += 20) {
+    const next = stripePpb(points, cap);
+    if (next !== previous) {
+      assert.equal(next, previous * 2);
+      previous = next;
+      rebuilds++;
+    }
+  }
+  assert.ok(rebuilds <= Math.ceil(Math.log2((seconds * 1000) / cap)));
 });
 
 test('rebuild leaves merge headroom so an appended sample cannot halve resolution', () => {
@@ -119,7 +189,7 @@ test('rebuild folds a window in one pass and stays within cap', () => {
   assert.equal(buckets.srcEnd, 900);
   assert.ok(buckets.list.length <= 64);
   assert.ok(buckets.list.length > 0);
-  assert.equal(buckets.ppb, Math.ceil(800 / 64));
+  assert.equal(buckets.ppb, stripePpb(800, 64));
 
   let min = Infinity;
   let max = -Infinity;
@@ -164,4 +234,44 @@ test('flatten emits two vertices per bucket at the midpoint', () => {
   assert.equal(flat.x[1], 1);
   assert.equal(flat.ys[0][0], 1);
   assert.equal(flat.ys[0][1], 3);
+});
+
+test('coarsening and appending equal raw reconstruction, including signed zero, gaps and partial tails', () => {
+  const n = 8201;
+  const xs = Float64Array.from({ length: n }, (_, i) => Math.floor(i / 2) / 1000);
+  const ys = Array.from({ length: 8 }, (_, s) =>
+    Float64Array.from(xs, (_, i) =>
+      s === 7 ? (i % 2 ? 0 : -0) : i % 19 === 0 ? NaN : i % 23 === 0 ? Infinity : (i % 71) - s,
+    ),
+  );
+  for (const start of [0, 17]) {
+    const actual = new SeriesBuckets();
+    actual.rebuild(xs, ys, start, 4099, 512);
+    actual.flatten();
+    for (const [end, cap] of [
+      [4103, 256],
+      [n, 128],
+      [n, 64],
+    ]) {
+      actual.coarsenTo(stripePpb(end - start, cap));
+      actual.appendThroughFixed(xs, ys, end);
+      const expected = new SeriesBuckets();
+      expected.rebuild(xs, ys, start, end, cap);
+      assert.deepEqual(actual.list, expected.list);
+      assert.deepEqual(actual.flatten(), expected.flatten());
+      assert.equal(actual.srcStart, start);
+      assert.equal(actual.srcEnd, end);
+    }
+  }
+});
+
+test('coarsening rejects finer and non-power-of-two densities without changing the projection', () => {
+  const xs = Float64Array.from({ length: 1000 }, (_, i) => i);
+  const buckets = new SeriesBuckets();
+  buckets.rebuild(xs, channels(xs, xs), 0, 1000, 64);
+  const before = structuredClone(buckets.list);
+  for (const ppb of [buckets.ppb / 2, buckets.ppb * 3, Infinity, NaN]) {
+    assert.throws(() => buckets.coarsenTo(ppb), RangeError);
+    assert.deepEqual(buckets.list, before);
+  }
 });

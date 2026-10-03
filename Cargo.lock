@@ -2074,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "km003c"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "anyhow",
@@ -2084,6 +2084,25 @@ dependencies = [
  "serde_json",
  "serialport",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "lapower"
+version = "0.2.2"
+dependencies = [
+ "criterion",
+ "hidapi",
+ "km003c",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-decorum",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-store",
+ "windows-sys 0.61.2",
+ "witrn-hid",
 ]
 
 [[package]]
@@ -4570,7 +4589,7 @@ dependencies = [
 
 [[package]]
 name = "usbpd-parser"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -5382,31 +5401,12 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "witrn-hid"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "hidapi",
  "serde",
  "usbpd-parser",
-]
-
-[[package]]
-name = "witrn-rs"
-version = "0.2.1"
-dependencies = [
- "criterion",
- "hidapi",
- "km003c",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-decorum",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-store",
- "windows-sys 0.61.2",
- "witrn-hid",
 ]
 
 [[package]]

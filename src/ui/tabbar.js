@@ -3,7 +3,7 @@
  * @file 顶栏 Tab 条（Fluent TabView 习惯用法，参考 Windows Terminal）。
  *
  * 只负责渲染与键盘导航（WAI-ARIA tabs 模式：方向键 / Home / End 漫游焦点），
- * 视图切换逻辑在 src/shell.js。个别 Tab 只在对应设备可用时显示（setHidden）。
+ * 视图切换逻辑在 src/shell.js。工作区入口始终可见，设备能力由各视图启停操作。
  */
 
 /** @typedef {{ id: string, icon: string, label: string, hidden?: boolean }} TabSpec */

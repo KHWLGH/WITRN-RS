@@ -65,10 +65,16 @@ interface StreamDiagnostics {
   lastError: string | null;
 }
 
+interface PerformanceDiagnostics {
+  [key: string]: unknown;
+}
+
 interface Window {
   __TAURI__: TauriAPI.Tauri;
   __WITRN_BOOT__?: BootTiming;
   __WITRN_STREAM__?: (() => StreamDiagnostics) | null;
+  __WITRN_PERF__?: (() => PerformanceDiagnostics) | null;
+  __WITRN_PERF_RESET__?: (() => void) | null;
 }
 
 // uPlot global (loaded via <script> tag from vendor/uPlot.iife.min.js)

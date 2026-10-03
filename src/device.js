@@ -5,6 +5,9 @@
 
 import { refreshRecordButton, stopRecording } from './data.js';
 import { deviceStream } from './device-stream.js';
+import { registerListeners } from './event-listeners.js';
+import { cancelPdExport } from './pd-export.js';
+import { performanceDiagnostics } from './performance-diagnostics.js';
 import { finalizeSpool } from './recording-spool.js';
 import { state } from './state.js';
 import { resetTempForDevice } from './temperature.js';
@@ -14,10 +17,23 @@ const { invoke } = window.__TAURI__.core;
 
 /** @type {Promise<() => void>|null} */
 let streamInitialization = null;
+let connectionReady = false;
+
+/** Enable connecting only after all acquisition and protocol listeners are registered. @param {boolean} ready */
+export function setConnectionReady(ready) {
+  connectionReady = ready;
+  const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-connect'));
+  if (button) {
+    button.disabled = !ready;
+    button.title = ready ? (state.isConnected ? '断开连接' : '连接设备') : '设备事件监听尚未就绪';
+    button.setAttribute('aria-label', button.title);
+  }
+}
 
 /** Call once at app startup, before a device can connect. PD listeners remain in app.js. */
 export function initializeDeviceStream() {
   if (streamInitialization) return streamInitialization;
+  performanceDiagnostics.start();
   deviceStream.configure({
     onEnd: () => setConnected(false),
     onError: (error) => {
@@ -29,23 +45,25 @@ export function initializeDeviceStream() {
     },
   });
   deviceStream.enable();
-  // 发版验收要的是"应用自己看到的数字"，不是人转述的数字：`scripts/verify-hardware-receipt.mjs`
+  // 诊断数据必须来自应用自己的采集状态，而不是人工转述，便于核心录制与数据完整性测试复用。
   // 的回执里那两个 declared 字段就是从这里的返回值读的。只读，不影响采集路径。
   window.__WITRN_STREAM__ = () => deviceStream.diagnostics();
+  window.__WITRN_PERF__ = () => performanceDiagnostics.snapshot();
+  window.__WITRN_PERF_RESET__ = () => performanceDiagnostics.reset();
   streamInitialization = (async () => {
     const { listen } = window.__TAURI__.event;
-    const unlisten = [];
     try {
-      unlisten.push(await listen('device-stream-open', (event) => deviceStream.open(event.payload)));
-      unlisten.push(await listen('device-data-batch', (event) => deviceStream.handleBatch(event.payload)));
-      unlisten.push(await listen('stream-error', (event) => deviceStream.handleError(event.payload)));
-      unlisten.push(await listen('device-stream-end', (event) => deviceStream.handleEnd(event.payload)));
+      const release = await registerListeners([
+        listen('device-stream-open', (event) => deviceStream.open(event.payload)),
+        listen('device-data-batch', (event) => deviceStream.handleBatch(event.payload)),
+        listen('stream-error', (event) => deviceStream.handleError(event.payload)),
+        listen('device-stream-end', (event) => deviceStream.handleEnd(event.payload)),
+      ]);
       return () => {
-        for (const stop of unlisten) stop();
+        release();
         streamInitialization = null;
       };
     } catch (error) {
-      for (const stop of unlisten) stop();
       streamInitialization = null;
       throw error;
     }
@@ -58,6 +76,7 @@ const SPOOL_EXIT_TIMEOUT_MS = 3000;
 
 /** Replaces app.js invoke('shutdown'); rejects rather than destroy with a missing tail. */
 export async function shutdownDeviceStream() {
+  await cancelPdExport();
   await initializeDeviceStream();
   // 末包排空之后再收尾落盘：退出前最后一批点也要进文件。
   await deviceStream.shutdown(() =>
@@ -169,7 +188,7 @@ let connecting = false;
 
 /** 连接到当前选中的设备。 */
 export async function connectDevice() {
-  if (connecting) return;
+  if (connecting || !connectionReady) return;
   try {
     if (!state.selectedDevicePath) {
       toast.warning('请先选择一个设备');
@@ -237,7 +256,7 @@ export function setConnected(connected) {
     if (el) el.disabled = disabled;
   };
 
-  setDisabled('btn-connect', false);
+  setDisabled('btn-connect', !connectionReady);
   setDisabled('device-select', connected);
   setDisabled('btn-refresh-devices', connected);
 
@@ -261,6 +280,9 @@ export function setConnected(connected) {
     resetTempForDevice();
   }
 
+  // Even while recording, disconnect must immediately hide unsupported high-rate options.
+  announceDeviceSelection();
+
   if (!connected) {
     const wasRecording = state.isRecording;
     void stopRecording({ discard: true }).catch(() => {});
@@ -270,5 +292,4 @@ export function setConnected(connected) {
   // PD 视图的采集按钮在「跟随记录」开启时就是记录开关，未连接时要禁用 —— 连接
   // 状态变化同样要广播（stopRecording 只覆盖「拔设备时正在记录」这一种情况）
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
-  announceDeviceSelection();
 }

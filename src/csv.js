@@ -9,7 +9,8 @@
 
 import { syncChartSeries, updateCharts } from './chart.js';
 import { yieldToMainThread } from './cooperative.js';
-import { formatCsvChunks, snapshotCsvColumns } from './csv-codec.js';
+import { formatCsvHeader, snapshotCsvColumns } from './csv-codec.js';
+import { formatCsvRangeAsync } from './csv-export.js';
 import {
   clearAndResetStats,
   refreshRecordButton,
@@ -57,7 +58,7 @@ export async function exportCSV(withTemp = false) {
   /** @type {import('./file-io.js').OpenedFile|null} */
   let file = null;
   try {
-    file = await pickExportFile(`witrn_data_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
+    file = await pickExportFile(`lapower_data_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
   } catch (e) {
     console.error(e);
     toast.error(`导出失败: ${e}`);
@@ -73,14 +74,16 @@ export async function exportCSV(withTemp = false) {
   }
   const snapshot = snapshotCsvColumns(cols, {
     withTemp,
-    sampleRate: state.settings.sampleRate,
+    sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
     startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
   });
   if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(`正在导出 ${snapshot.length} 行…`);
   try {
     // 逐块等待写完再格式化下一块：背压留在这里，内存里最多一块文本。
-    for (const chunk of formatCsvChunks(snapshot, EXPORT_CHUNK_ROWS)) {
-      await writeText(file.handle, chunk);
+    await writeText(file.handle, formatCsvHeader(snapshot));
+    for (let from = 0; from < snapshot.length; from += EXPORT_CHUNK_ROWS) {
+      const to = Math.min(snapshot.length, from + EXPORT_CHUNK_ROWS);
+      await writeText(file.handle, await formatCsvRangeAsync(snapshot, from, to));
       await yieldToMainThread();
     }
     await closeWriter(file.handle, { sync: true });
@@ -194,7 +197,13 @@ function restoreColumns(raw) {
 }
 
 /** 从已打开的 CSV 句柄导入数据。 */
-async function importOpenedFile(file, generation) {
+async function importOpenedFile(
+  file,
+  generation,
+  reportFailure = (error) => {
+    toast.error(`导入失败: ${error.message ?? error}`);
+  },
+) {
   if (!file) return false;
   if (generation !== importGeneration) return false;
   if (file.size >= LARGE_IMPORT_BYTES) toast.info(`正在导入 ${file.name}（${(file.size / 1048576).toFixed(0)} MB）…`);
@@ -260,7 +269,7 @@ async function importOpenedFile(file, generation) {
   } catch (e) {
     if (generation !== importGeneration) return false;
     console.error(e);
-    toast.error(`导入失败: ${/** @type {Error} */ (e).message ?? e}`);
+    reportFailure(/** @type {Error} */ (e));
     return false;
   } finally {
     void closeReader(file.handle).catch(() => {});
@@ -283,17 +292,31 @@ export async function importCSV() {
   }
 }
 
-/** 恢复一份异常退出留下的临时记录。 */
-export async function importSpoolRecovery(id) {
+/** 恢复并清理一份异常退出留下的临时记录；取消或失败时保留文件。
+ * @param {string} id
+ * @param {(message: string) => void} [reportFailure]
+ * @returns {Promise<boolean>}
+ */
+export async function importSpoolRecovery(id, reportFailure = toast.error) {
   const generation = ++importGeneration;
   cancelActiveImport?.();
   let file = null;
   try {
     file = await openSpoolRecovery(id);
-    const imported = await importOpenedFile(file, generation);
-    if (imported && generation === importGeneration) await deleteSpoolRecovery(id);
+    const imported = await importOpenedFile(file, generation, (error) =>
+      reportFailure(`恢复临时记录失败: ${error.message ?? error}`),
+    );
+    if (!imported || generation !== importGeneration) return false;
+    try {
+      await deleteSpoolRecovery(id);
+    } catch (error) {
+      reportFailure(`记录已恢复，但临时文件清理失败，请重试删除: ${error}`);
+      return false;
+    }
+    return true;
   } catch (error) {
     console.error(error);
-    toast.error(`恢复临时记录失败: ${error}`);
+    reportFailure(`恢复临时记录失败: ${error}`);
+    return false;
   }
 }

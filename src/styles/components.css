@@ -52,6 +52,13 @@
   color: var(--text-on-accent);
 }
 
+.btn-accent:disabled,
+.btn-danger:disabled {
+  background: var(--fill-control);
+  border-color: var(--stroke-control);
+  color: var(--text-disabled);
+}
+
 .btn-danger {
   background: var(--danger-fill);
   border-color: var(--danger-fill);
@@ -234,6 +241,14 @@
   min-width: 0;
   padding: 2px 10px;
   flex: none;
+}
+
+.toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: none;
+  max-width: 50%;
 }
 
 .toast-close {

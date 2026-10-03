@@ -4,7 +4,7 @@ description = "A Rust API for WITRN HID devices (K2, U3, C5 and friends)."
 readme = "README.md"
 keywords = ["witrn", "hid", "usb-pd", "usb-meter"]
 categories = ["hardware-support", "embedded"]
-# Maintained inside the WITRN-RS workspace and versioned with the application.
+# Maintained inside the laPower workspace and versioned with the application.
 publish = false
 version.workspace = true
 edition.workspace = true

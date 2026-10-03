@@ -4,8 +4,7 @@
  * 首次打开时由 shell 的 init 钩子调用。
  */
 
-import { deleteSpoolRecovery, listSpoolRecoveries } from '../file-io.js';
-import { toast } from '../ui/toast.js';
+import { processRecovery, recoveryActionDisabled, scanRecoveries, subscribeRecoveries } from '../recording-recovery.js';
 
 /** @typedef {{id:string, name:string, size:number, modified_ms:number}} RecoveryEntry */
 
@@ -34,24 +33,10 @@ export function showSpoolRecoveries(entries) {
     recover.type = 'button';
     recover.className = 'btn';
     recover.textContent = '恢复';
-    recover.addEventListener('click', async () => {
-      try {
-        const module = await import('../csv.js');
-        await module.importSpoolRecovery(entry.id);
-        row.remove();
-      } catch (error) {
-        toast.error(`恢复临时记录失败: ${error}`);
-      }
-    });
-    remove.addEventListener('click', async () => {
-      try {
-        await deleteSpoolRecovery(entry.id);
-        row.remove();
-        toast.success('临时记录已删除');
-      } catch (error) {
-        toast.error(`删除临时记录失败: ${error}`);
-      }
-    });
+    recover.disabled = recoveryActionDisabled(entry.id, 'recover');
+    remove.disabled = recoveryActionDisabled(entry.id, 'delete');
+    recover.addEventListener('click', () => void processRecovery(entry.id, 'recover'));
+    remove.addEventListener('click', () => void processRecovery(entry.id, 'delete'));
     row.append(label, recover, remove);
     el.append(row);
   }
@@ -69,9 +54,8 @@ export function initSettingsView() {
     });
   }
 
-  listSpoolRecoveries()
-    .then(showSpoolRecoveries)
-    .catch((/** @type {unknown} */ error) => console.error('读取临时恢复文件失败:', error));
+  subscribeRecoveries(showSpoolRecoveries);
+  scanRecoveries().catch((/** @type {unknown} */ error) => console.error('读取临时恢复文件失败:', error));
 
   const versionEl = document.getElementById('about-version');
   if (!versionEl) return;

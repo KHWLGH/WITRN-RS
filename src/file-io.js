@@ -24,6 +24,11 @@ export function pickExportFile(defaultName) {
   return invoke('csv_export_pick', { defaultName });
 }
 
+/** @param {string} defaultName @returns {Promise<OpenedFile|null>} */
+export function pickPdExportFile(defaultName) {
+  return invoke('pd_export_pick', { defaultName });
+}
+
 /** @returns {Promise<OpenedFile|null>} 选择要导入的 CSV；取消时为 null。 */
 export function pickImportFile() {
   return invoke('csv_import_pick');
@@ -53,7 +58,12 @@ export function closeReader(handle) {
  * @param {string} text
  */
 export function writeText(handle, text) {
-  return invoke('csv_write_chunk', encoder.encode(text), { headers: { 'x-handle': String(handle) } });
+  return writeBytes(handle, encoder.encode(text));
+}
+
+/** @param {number} handle @param {Uint8Array} bytes */
+export function writeBytes(handle, bytes) {
+  return invoke('csv_write_chunk', bytes, { headers: { 'x-handle': String(handle) } });
 }
 
 /**
@@ -75,7 +85,8 @@ export function syncFile(handle) {
 
 /**
  * @param {number} handle
- * @param {{ sync?: boolean, abort?: boolean }} [options] abort 删除失败导出或正常结束的临时文件
+ * @param {{ sync?: boolean, abort?: boolean, removeOnSuccess?: boolean }} [options]
+ * abort 丢弃失败导出；removeOnSuccess 仅成功同步后删除恢复文件，二者互斥。
  */
 export function closeWriter(handle, options = {}) {
   return invoke('csv_write_close', { handle, options });

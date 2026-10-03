@@ -7,7 +7,7 @@ import { F64_CHUNK_SIZE } from './state.js';
 export const BUCKET_MIN = 64;
 export const DISPLAY_SERIES = 8;
 
-/** @typedef {ArrayLike<number>|import('./state.js').F64Col} NumericColumn */
+/** @typedef {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64Snapshot} NumericColumn */
 
 /** @param {NumericColumn} column @param {number} index */
 export function columnValue(column, index) {
@@ -39,7 +39,10 @@ export function bucketCap(width) {
  * @param {number} count @param {number} cap
  */
 export function stripePpb(count, cap) {
-  return Math.max(1, Math.ceil(count / Math.max(BUCKET_MIN, cap | 0)));
+  const required = Math.max(1, Math.ceil(count / Math.max(BUCKET_MIN, cap | 0)));
+  // Keep a live projection's density stable as history grows. A one-step increase
+  // would rebuild the entire history every ~cap incoming samples at 1KSPS.
+  return 2 ** Math.ceil(Math.log2(required));
 }
 
 /**
@@ -150,6 +153,16 @@ export class SeriesBuckets {
    * @param {number[]} values
    */
   pushSample(x, values) {
+    this.pushSampleInternal(x, values, true);
+  }
+
+  /** Append without pairwise merging; used by a live projection with fixed density. @param {number} x @param {number[]} values */
+  pushSampleFixed(x, values) {
+    this.pushSampleInternal(x, values, false);
+  }
+
+  /** @param {number} x @param {number[]} values @param {boolean} merge */
+  pushSampleInternal(x, values, merge) {
     const lastIndex = this.list.length - 1;
     const last = this.list[lastIndex];
     this._flatDirty = Math.min(this._flatDirty, last && last.n < this.ppb ? lastIndex : this.list.length);
@@ -159,13 +172,21 @@ export class SeriesBuckets {
       foldValues(last, values);
     } else {
       this.list.push(makeBucket(x, values));
-      this.mergeDown();
+      if (merge) this.mergeDown();
     }
     this.srcEnd += 1;
   }
 
   mergeDown() {
-    while (this.list.length > this.cap) {
+    while (this.list.length > this.cap) this.coarsenTo(this.ppb * 2);
+  }
+
+  /** Coarsen a fixed prefix without rereading samples; the final partial bucket stays appendable. @param {number} ppb */
+  coarsenTo(ppb) {
+    if (!Number.isFinite(ppb) || ppb < this.ppb || Math.log2(ppb / this.ppb) % 1 !== 0) {
+      throw new RangeError('Bucket density must be a power-of-two multiple of the current density');
+    }
+    while (this.ppb < ppb) {
       /** @type {DisplayBucket[]} */
       const merged = [];
       for (let i = 0; i < this.list.length; i += 2) {
@@ -264,6 +285,16 @@ export class SeriesBuckets {
    * @param {number} end
    */
   appendThrough(xs, series, end) {
+    this.appendThroughMode(xs, series, end, false);
+  }
+
+  /** Append a live tail while preserving the existing samples-per-bucket density. @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end */
+  appendThroughFixed(xs, series, end) {
+    this.appendThroughMode(xs, series, end, true);
+  }
+
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end @param {boolean} fixedDensity */
+  appendThroughMode(xs, series, end, fixedDensity) {
     const values = new Array(DISPLAY_SERIES);
     for (let i = this.srcEnd; i < end; ) {
       const xSpan = columnSpan(xs, i, end);
@@ -274,7 +305,8 @@ export class SeriesBuckets {
           const span = spans[s];
           values[s] = span ? Number(span.values[i - span.base]) : Number.NaN;
         }
-        this.pushSample(Number(xSpan.values[i - xSpan.base]), values);
+        if (fixedDensity) this.pushSampleFixed(Number(xSpan.values[i - xSpan.base]), values);
+        else this.pushSample(Number(xSpan.values[i - xSpan.base]), values);
       }
     }
   }
@@ -431,12 +463,12 @@ function mergeBucket(a, b) {
 function nanMin(a, b) {
   if (!Number.isFinite(a)) return b;
   if (!Number.isFinite(b)) return a;
-  return a < b ? a : b;
+  return a <= b ? a : b;
 }
 
 /** @param {number} a @param {number} b */
 function nanMax(a, b) {
   if (!Number.isFinite(a)) return b;
   if (!Number.isFinite(b)) return a;
-  return a > b ? a : b;
+  return a >= b ? a : b;
 }

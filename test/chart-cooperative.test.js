@@ -78,10 +78,52 @@ test('large chart preparations publish a complete projection and discard replace
     ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'].map((key) => columns[key].view()),
     0,
     columns.x.length,
-    1200,
+    600,
   );
   const flat = expected.flatten();
   assert.deepStrictEqual(state.mainChart.data, [flat.x, ...flat.ys]);
+  const originalBeginRebuild = SeriesBuckets.prototype.beginRebuild;
+  let obsoleteSteps = 0;
+  SeriesBuckets.prototype.beginRebuild = function (xs, series, start, end, ...args) {
+    const step = originalBeginRebuild.call(this, xs, series, start, end, ...args);
+    if (end !== 200001) return step;
+    return (maxSamples) => {
+      obsoleteSteps++;
+      const complete = step(maxSamples);
+      chart.setChartXWindow(0, 180000);
+      return complete;
+    };
+  };
+  try {
+    chart.setChartXWindow(0, 200000);
+    chart.updateCharts();
+    while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(obsoleteSteps, 1, 'shrinking the right edge cancels work even at the same density');
+    const replacement = new SeriesBuckets();
+    originalBeginRebuild.call(replacement, columns.x, [columns.voltage], 0, 180001, 600)(Infinity);
+    assert.deepStrictEqual(state.mainChart.data[0], replacement.flatten().x);
+  } finally {
+    SeriesBuckets.prototype.beginRebuild = originalBeginRebuild;
+  }
+  chart.setChartXWindow(0, columns.x.length - 1);
+  const originalSyncStep = ExactExtremaIndex.prototype.syncStep;
+  let indexSteps = 0;
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    indexSteps++;
+    return originalSyncStep.apply(this, args);
+  };
+  try {
+    chart.syncChartSeries();
+    chart.updateCharts();
+    chart.setChartXWindow(columns.x.length - 8, columns.x.length - 1);
+    chart.updateCharts();
+    while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.equal(indexSteps, 0, 'a sparse replacement window cancels the obsolete cold index');
+    assert.ok(state.mainChart.data[0].length <= 10, 'the replacement window publishes raw samples');
+  } finally {
+    ExactExtremaIndex.prototype.syncStep = originalSyncStep;
+  }
+  chart.setChartXWindow(0, columns.x.length - 1);
   chart.syncChartSeries();
   chart.updateCharts();
   setChartColumns(emptyChartColumns(1));
@@ -90,4 +132,144 @@ test('large chart preparations publish a complete projection and discard replace
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(state.mainChart.data[0].length, 0);
   assert.equal(attrs.get('aria-busy'), 'false');
+});
+
+test('a dense follow window submits complete matching snapshots while samples advance between every slice', async () => {
+  let busy = false;
+  const host = {
+    clientWidth: 1200,
+    setAttribute(_key, value) {
+      busy = value === 'true';
+    },
+  };
+  globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const { state, emptyChartColumns, setChartColumns } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const columns = emptyChartColumns();
+  const append = (count) => {
+    const start = columns.x.length;
+    for (let i = start; i < start + count; i++)
+      for (const [key, col] of Object.entries(columns))
+        col.push(key === 'x' ? i : key === 'recordingSegments' ? 1 : key === 'sampleIntervals' ? 1000 : i % 101);
+  };
+  append(300000);
+  let submissions = 0;
+  let submitted = null;
+  let scale = null;
+  state.settings.activeView = 'monitor';
+  state.mainChart = {
+    width: 1200,
+    setData(data) {
+      submissions++;
+      submitted = data;
+    },
+    setScale(_key, value) {
+      scale = value;
+    },
+  };
+  state.navigatorChart = null;
+  state.isRecording = false;
+  state.chartWindow = { mode: 'full', duration: 0, min: 0, max: 299999 };
+  setChartColumns(columns);
+  chart.syncChartSeries();
+  chart.setChartXWindow(0, 299999);
+  chart.updateCharts();
+  while (busy) await new Promise((resolve) => setTimeout(resolve, 1));
+  submissions = 0;
+  state.isRecording = true;
+  state.chartWindow = { mode: 'follow', duration: 199999, min: 100000, max: 299999 };
+  chart.setChartXWindow(100000, 299999);
+  const previousScheduler = globalThis.scheduler;
+  let advances = 0;
+  globalThis.scheduler = {
+    postTask: async (callback) => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (advances < 200) {
+        append(500);
+        advances++;
+        const max = columns.x.at(-1);
+        state.chartWindow = { mode: 'follow', duration: 199999, min: max - 199999, max };
+        chart.setChartXWindow(max - 199999, max);
+      }
+      return callback();
+    },
+  };
+  try {
+    chart.updateCharts();
+    for (let turn = 0; turn < 1000 && !submissions; turn++) await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.ok(submissions > 0, 'continuous arrival must not starve the main chart');
+    assert.ok(advances > 0 && advances < 200, 'a snapshot finishes while the window is still advancing');
+    assert.deepEqual(scale, { min: 100000, max: 299999 }, 'submitted buckets retain their captured X range');
+    const expected = new SeriesBuckets();
+    expected.rebuild(
+      columns.x,
+      [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
+      100000,
+      300000,
+      600,
+    );
+    const flat = expected.flatten();
+    assert.deepEqual(submitted, [flat.x, ...flat.ys]);
+  } finally {
+    globalThis.scheduler = previousScheduler;
+    state.isRecording = false;
+    chart.handleMonitorHidden();
+  }
+});
+
+test('a minimized native window cancels preparation even when document.hidden remains false', async () => {
+  let busy = false;
+  const host = {
+    clientWidth: 600,
+    setAttribute(_key, value) {
+      busy = value === 'true';
+    },
+  };
+  globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
+  const { state, emptyChartColumns, setChartColumns } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const columns = emptyChartColumns();
+  for (const [key, col] of Object.entries(columns))
+    col.set(Float64Array.from({ length: 1000000 }, (_, i) => (key === 'x' ? i : 1)));
+  state.settings.activeView = 'monitor';
+  state.chartWindow = { mode: 'full', duration: 0, min: 0, max: 999999 };
+  setChartColumns(columns);
+  chart.syncChartSeries();
+  chart.setChartXWindow(0, 999999);
+  const previousScheduler = globalThis.scheduler;
+  let yields = 0;
+  let steps = 0;
+  const original = ExactExtremaIndex.prototype.syncStep;
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    steps++;
+    return original.apply(this, args);
+  };
+  globalThis.scheduler = {
+    postTask: async (callback) => {
+      if (++yields === 2) {
+        state.windowVisible = false;
+        chart.handleMonitorHidden();
+      }
+      return callback();
+    },
+  };
+  try {
+    chart.updateCharts();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(steps, 0);
+    assert.equal(busy, false);
+    assert.equal(document.hidden, false, 'WebView2 may report the document visible while minimized');
+    state.windowVisible = true;
+    globalThis.scheduler = previousScheduler;
+    chart.updateCharts();
+    while (busy) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.ok(steps > 0, 'showing the monitor resumes preparation');
+  } finally {
+    globalThis.scheduler = previousScheduler;
+    ExactExtremaIndex.prototype.syncStep = original;
+    chart.handleMonitorHidden();
+    state.windowVisible = true;
+  }
 });

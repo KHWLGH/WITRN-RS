@@ -5,8 +5,10 @@
  * @typedef {{generation:number, wall_anchor_ms:number}} StreamOpen
  * @typedef {{generation:number, after_seq:number, segment:number, received_us:number, wall_anchor_ms:number, rate_ms:number}} StreamBoundary
  * @typedef {{id:number, generation:number, columns:object, baseSeconds:number, lastX:number|null, first:boolean}} RecordingSegment
- * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onBatch?:(count:number)=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
+ * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onBatchStart?: (size:number)=>void, onBatch?:(count:number)=>void, onBatchEnd?: (count:number, timing:{startedAt:number, endedAt:number, durationMs:number, firstReceivedWallMs?:number|null, lastReceivedWallMs?:number|null, lastSeq:(number|null)|undefined})=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
  */
+
+import { performanceDiagnostics } from './performance-diagnostics.js';
 
 /** No DOM, rAF or timers on the consumption path.
  * Every selected point is processed in seq order; only UI work may coalesce.
@@ -47,6 +49,13 @@ export function createDeviceStream(options = {}) {
   let controlTail = Promise.resolve();
   let ackTail = Promise.resolve();
   let ackQueued = false;
+  let batchCount = 0;
+  let batchPoints = 0;
+  let lastBatchSize = 0;
+  let lastBatchDurationMs = 0;
+  let maxBatchDurationMs = 0;
+  let lastBatchStartedAt = 0;
+  let lastBatchEndedAt = 0;
   /** @type {Set<{generation:number, seq:number, resolve:()=>void, reject:(e:Error)=>void, timer:ReturnType<typeof setTimeout>}>} */
   const waiters = new Set();
 
@@ -163,35 +172,63 @@ export function createDeviceStream(options = {}) {
   function handleBatch(batch) {
     if (!Array.isArray(batch) || failed) return;
     if (columns !== hooks.getColumns()) replace();
+    const startedAt = performanceDiagnostics.batchStart(batch.length);
+    batchCount += 1;
+    lastBatchSize = batch.length;
+    lastBatchStartedAt = startedAt;
+    hooks.onBatchStart?.(batch.length);
     let accepted = 0;
-    for (const sample of batch) {
-      if (sample.generation !== generation || ended) continue;
-      if (sample.seq <= seq) continue; // duplicate delivery is harmless
-      if (sample.seq !== seq + 1) {
-        fail(`stream seq gap: expected ${seq + 1}, received ${sample.seq}`);
-        return;
+    let firstReceivedWallMs = null;
+    let lastReceivedWallMs = null;
+    try {
+      for (const sample of batch) {
+        if (sample.generation !== generation || ended) continue;
+        if (sample.seq <= seq) continue; // duplicate delivery is harmless
+        if (sample.seq !== seq + 1) {
+          fail(`stream seq gap: expected ${seq + 1}, received ${sample.seq}`);
+          return;
+        }
+        if (
+          ![sample.received_us, sample.wall_anchor_ms, sample.segment_start_us, sample.rate_ms].every(Number.isFinite)
+        ) {
+          fail('invalid stream receive timestamp');
+          return;
+        }
+        const record =
+          segment &&
+          sample.segment === segment.id &&
+          segment.generation === generation &&
+          segment.columns === hooks.getColumns()
+            ? segment
+            : null;
+        try {
+          if (!displayBlocked) hooks.onSample(sample, record);
+        } catch (error) {
+          fail(`sample ingestion failed: ${error}`);
+          return;
+        }
+        seq = sample.seq;
+        accepted += 1;
+        const receivedWallMs = sample.wall_anchor_ms + sample.received_us / 1000;
+        if (firstReceivedWallMs == null) firstReceivedWallMs = receivedWallMs;
+        lastReceivedWallMs = receivedWallMs;
       }
-      if (
-        ![sample.received_us, sample.wall_anchor_ms, sample.segment_start_us, sample.rate_ms].every(Number.isFinite)
-      ) {
-        fail('invalid stream receive timestamp');
-        return;
-      }
-      const record =
-        segment &&
-        sample.segment === segment.id &&
-        segment.generation === generation &&
-        segment.columns === hooks.getColumns()
-          ? segment
-          : null;
-      try {
-        if (!displayBlocked) hooks.onSample(sample, record);
-      } catch (error) {
-        fail(`sample ingestion failed: ${error}`);
-        return;
-      }
-      seq = sample.seq;
-      accepted += 1;
+    } finally {
+      const endedAt = performance.now();
+      lastBatchEndedAt = endedAt;
+      lastBatchDurationMs = endedAt - startedAt;
+      maxBatchDurationMs = Math.max(maxBatchDurationMs, lastBatchDurationMs);
+      batchPoints += accepted;
+      const timing = {
+        startedAt,
+        endedAt,
+        durationMs: lastBatchDurationMs,
+        firstReceivedWallMs,
+        lastReceivedWallMs,
+        lastSeq: accepted ? seq : null,
+      };
+      performanceDiagnostics.batchEnd(accepted, timing);
+      hooks.onBatchEnd?.(accepted, timing);
     }
     if (accepted) hooks.onBatch?.(accepted);
     notify();
@@ -346,6 +383,13 @@ export function createDeviceStream(options = {}) {
       streamErrors: terminalErrors.length,
       capacityErrors: terminalErrors.filter((e) => String(e.error ?? '').includes('capacity exceeded')).length,
       lastError: terminalErrors.at(-1)?.error ?? null,
+      batchCount,
+      batchPoints,
+      lastBatchSize,
+      lastBatchDurationMs,
+      maxBatchDurationMs,
+      lastBatchStartedAt,
+      lastBatchEndedAt,
     }),
     /** @param {() => Promise<unknown>} [beforeExit] 末包已消费、窗口销毁之前执行（写完落盘尾部） */
     async shutdown(beforeExit) {

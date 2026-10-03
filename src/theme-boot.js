@@ -1,15 +1,15 @@
 /**
  * 首屏引导：在样式表之前同步写入 <html data-theme> 与 <html data-os>。
- * data-theme 避免 LazyStore 异步读完之前闪暗色（键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致）。
+ * data-theme 避免 LazyStore 异步读完之前闪错主题（键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致）。
  * data-os 让 tokens.css 在首帧就选对平台原生字体。
  */
 (() => {
-  let pref = 'dark';
+  let pref = 'system';
   try {
-    const stored = localStorage.getItem('witrn-theme');
+    const stored = localStorage.getItem('lapower-theme');
     if (stored === 'light' || stored === 'system' || stored === 'dark') pref = stored;
   } catch {
-    /* 隐私模式等读失败时保持深色 */
+    /* 隐私模式等读失败时跟随系统 */
   }
   let systemDark = true;
   try {
@@ -29,7 +29,7 @@
   // 与 window-style.js 的归一化规则及镜像键保持一致；异步 LazyStore 最终覆盖。
   let windowStyle = 'auto';
   try {
-    const stored = localStorage.getItem('witrn-window-style');
+    const stored = localStorage.getItem('lapower-window-style');
     if (stored === 'windows' || stored === 'macos') windowStyle = stored;
   } catch {
     /* 镜像不可用时跟随真实平台。 */

@@ -1,5 +1,5 @@
 /*
- * WITRN-RS 设计令牌（Fluent UI webLight / webDark；:root 为暗色，[data-theme="light"] 为浅色）
+ * laPower 设计令牌（Fluent UI webLight / webDark；:root 为暗色，[data-theme="light"] 为浅色）
  *
  * 三层结构：
  *   1. 原始色（primitives）  — 官方 grey / brand / shared 色阶，组件禁止直接引用

@@ -7,9 +7,21 @@
 import { estimateIntervalMsFromX, mapCsvColumns, parseRelativeTime } from './measurement.js';
 import { emptyChartColumns, F64Col } from './state.js';
 
-/** @typedef {'x'|'timestamps'|'voltage'|'current'|'power'|'temp'|'dp'|'dn'|'cc1'|'cc2'} ColumnKey */
+/** @typedef {'x'|'timestamps'|'voltage'|'current'|'power'|'temp'|'dp'|'dn'|'cc1'|'cc2'|'sampleIntervals'} ColumnKey */
 /** @type {ColumnKey[]} */
-const COLUMN_KEYS = ['x', 'timestamps', 'voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'];
+const COLUMN_KEYS = [
+  'x',
+  'timestamps',
+  'voltage',
+  'current',
+  'power',
+  'temp',
+  'dp',
+  'dn',
+  'cc1',
+  'cc2',
+  'sampleIntervals',
+];
 const TIME_HEADER = 'Time(D.hh:mm:ss.ms)';
 /** 摘要行里声明采样间隔的前缀，导入时用它决定能量积分的空档阈值。 */
 const SAMP_TIME_HEADER = 'SampTime(ms),';
@@ -46,11 +58,19 @@ export function snapshotCsvColumns(columns, options) {
   return {
     columns: views,
     length,
-    sampleRate: options.sampleRate,
+    sampleRate: nominalIntervalMs(columns, options.sampleRate),
     startTime: options.startTime,
     withTemp: options.withTemp ?? false,
     recordingSegments: segments ? segments.snapshot() : null,
   };
+}
+
+/** @param {import('./state.js').ChartSeriesColumns} columns @param {number} fallback */
+export function nominalIntervalMs(columns, fallback) {
+  for (const { values } of columns.sampleIntervals.chunks()) {
+    for (const value of values) if (Number.isFinite(value) && value > 0) return value;
+  }
+  return fallback;
 }
 
 /** 有限 Number 使用最短可往返十进制；缺失值留空，保留 -0。 @param {number} value */
@@ -73,7 +93,7 @@ export function formatExcelTime(seconds) {
 
 /** 数据区列标题。温度列与段号列可选，其余列位置固定。 @param {boolean} withTemp @param {boolean} withSegments */
 function columnHeader(withTemp, withSegments) {
-  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},`;
+  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),`;
 }
 
 /** 本地时间的 `YYYY-MM-DD HH:MM:SS`。 @param {number} ms */
@@ -99,9 +119,15 @@ export function formatCsvRange(snapshot, from, to) {
   for (let i = start; i < end; i++) {
     const signals = `${numericCell(c.dp.valueAt(i))},${numericCell(c.dn.valueAt(i))},${numericCell(c.cc1.valueAt(i))},${numericCell(c.cc2.valueAt(i))}`;
     lines[i - start] =
-      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},`;
+      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},`;
   }
   return `${lines.join('\n')}\n`;
+}
+
+/** Fixed header used by both the main-thread and Worker streaming exporters. @param {CsvSnapshot} snapshot */
+export function formatCsvHeader(snapshot) {
+  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments } = snapshot;
+  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments)}\n`;
 }
 
 /**
@@ -111,9 +137,8 @@ export function formatCsvRange(snapshot, from, to) {
  */
 export function* formatCsvChunks(snapshot, chunkRows = CSV_CHUNK_ROWS) {
   if (!Number.isSafeInteger(chunkRows) || chunkRows < 1) throw new RangeError('Invalid CSV chunk size');
-  const { columns: c, length, withTemp, recordingSegments } = snapshot;
-  const header = columnHeader(withTemp, !!recordingSegments);
-  yield `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(snapshot.sampleRate)}\nDateTime,${formatDateTime(snapshot.startTime)}\n\n${header}\n`;
+  const { length } = snapshot;
+  yield formatCsvHeader(snapshot);
 
   for (let from = 0; from < length; from += chunkRows) {
     yield formatCsvRange(snapshot, from, Math.min(length, from + chunkRows));
@@ -255,6 +280,7 @@ export function createCsvParser(options) {
   let relativeIndex = -1;
   let timestampIndex = -1;
   let segmentIndex = -1;
+  let intervalIndex = -1;
   let precise = false;
   let readCell = optionalCell;
   const columns = emptyChartColumns();
@@ -271,6 +297,7 @@ export function createCsvParser(options) {
     relativeIndex = headers.indexOf('RelativeTime(s)');
     timestampIndex = headers.indexOf('Timestamp(ms)');
     segmentIndex = headers.indexOf('RecordingSegment');
+    intervalIndex = headers.indexOf('SampleInterval(ms)');
     precise = relativeIndex !== -1 && timestampIndex !== -1;
     readCell = precise ? exactCell : optionalCell;
   }
@@ -308,6 +335,7 @@ export function createCsvParser(options) {
     columns.cc1.push(readCell(parts, map.cc1Idx));
     columns.cc2.push(readCell(parts, map.cc2Idx));
     columns.recordingSegments.push(exactCell(parts, segmentIndex));
+    columns.sampleIntervals.push(exactCell(parts, intervalIndex));
     if (seconds < previous) sorted = false;
     previous = seconds;
   }
@@ -370,6 +398,12 @@ export function createCsvParser(options) {
       }
       if (!sorted) stableSortColumns(columns);
       const intervalMs = declaredIntervalMs ?? estimateIntervalMsFromX(columns.x);
+      const intervals = new F64Col();
+      for (const { values } of columns.sampleIntervals.chunks()) {
+        for (const value of values)
+          intervals.push(Number.isFinite(value) && value > 0 && value <= 60000 ? value : (intervalMs ?? NaN));
+      }
+      columns.sampleIntervals = intervals;
       return {
         columns,
         startTime,

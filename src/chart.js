@@ -11,7 +11,7 @@
  * - scheduleChartUpdate() rAF 节流刷新（流式追加数据用）
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
- * 「画什么」只由可见窗口决定：窗口超过 1×绘图宽度时按 stripePpb(窗口, 宽度) 折叠 min/max 桶，
+ * 「画什么」由可见窗口和统一的显示预算决定：密集窗口折叠为 min/max 桶，
  * 全量仍在 chartSeries；拖动中与松手后走同一句，没有低质量的预览态。
  * 极值金字塔只作为速度选择器（见 extremaForStripes），换慢路径不改变产出值。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
@@ -30,9 +30,11 @@ import {
   stripePpb,
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
+import { ChartFillPolicy, ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
 import { wheelZoomFactor } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
+import { performanceDiagnostics } from './performance-diagnostics.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
 import { formatRelativeHMS, hexToRgba } from './utils.js';
@@ -108,17 +110,60 @@ let scannedLen = 0;
 /** 主图窗口级显示桶：可见窗口点数超过 1×宽度后启用，存储仍走全量列。 */
 let displayBuckets = new SeriesBuckets();
 // Small existing paths stay synchronous. Large replacements/window scans yield.
-const COOPERATIVE_POINTS = 250_000;
-/** @type {{generation: number, cancelled: boolean}|null} */
+const COOPERATIVE_POINTS = 32_768;
+const renderPolicy = new ChartRenderPolicy();
+const fillPolicy = new ChartFillPolicy();
+/** @type {{generation: number, start: number, cap: number, ppb: number, cancelled: boolean}|null} */
 let historyWork = null;
-/** @type {{generation: number, start: number, end: number, cap: number, cancelled: boolean}|null} */
+/** @type {{generation: number, start: number, end: number, cap: number, ppb: number, cancelled: boolean}|null} */
 let projectionWork = null;
+let windowIntent = 0;
+let sourceRevision = 0;
+/** @typedef {{generation:number,intent:number,revision:number,length:number,start:number,end:number,cap:number,ppb:number,xRange:[number,number],width:number,density:number}} PreparationTarget */
+/** @type {PreparationTarget|null} */
+let preparationTarget = null;
+
+function chartRevision() {
+  const cs = state.chartSeries;
+  return cs.x.revision + FIELDS.reduce((sum, key) => sum + cs[key].revision, 0);
+}
+
+/** @param {PreparationTarget} target */
+function preparationInvalid(target) {
+  return (
+    !monitorVisible() ||
+    target.generation !== dataGen ||
+    target.intent !== windowIntent ||
+    target.revision !== chartRevision() ||
+    target.width !== plotCssWidth() ||
+    target.density !== renderPolicy.pixelsPerBucket
+  );
+}
+
+/** @param {number} length @param {number} start @param {number} end @param {number} cap @param {number} ppb */
+function capturePreparationTarget(length, start, end, cap, ppb) {
+  preparationTarget ??= {
+    generation: dataGen,
+    intent: windowIntent,
+    revision: chartRevision(),
+    length,
+    start,
+    end,
+    cap,
+    ppb,
+    xRange: xRange(),
+    width: plotCssWidth(),
+    density: renderPolicy.pixelsPerBucket,
+  };
+  return preparationTarget;
+}
 
 function cancelPreparation() {
   if (historyWork) historyWork.cancelled = true;
   if (projectionWork) projectionWork.cancelled = true;
   historyWork = null;
   projectionWork = null;
+  preparationTarget = null;
   setPreparing(false);
 }
 
@@ -155,20 +200,41 @@ let chartDirty = false;
 const tooltipThemeGen = 0;
 let chartFramePending = false;
 let flushingChart = false;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let chartPaceTimer = null;
+let lastLiveFlushAt = 0;
+let liveChartPrepareMs = 0;
+let liveMainDrawMs = 0;
+let liveNavDrawMs = 0;
+let visiblePointCount = 0;
+let visiblePlotWidth = 600;
+// Imported/preloaded history is not a live append batch. Count only since the last main submission.
+let submittedSourceLen = 0;
+let recentAppendCount = 0;
+let fillPaintDirty = false;
+let feedbackRecording = false;
+const FILL_POINTS_PER_PIXEL = 4;
+/** @type {number|null} */
+let chartProbeFrame = null;
+// Static feedback can force a confirmation draw; fill transitions must also redraw.
+let feedbackRepaintPending = false;
+let feedbackEpoch = 0;
 let paintBatchId = 0;
 /** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null }} PaintRequest */
 /** @type {PaintRequest|null} */
 let paintRequest = null;
-/** @type {WeakMap<object, { first: PaintRequest, last: PaintRequest, count: number }>} */
+/** @type {WeakMap<object, { first: PaintRequest, last: PaintRequest, count: number, firstDiagnostic: any, lastDiagnostic: any }>} */
 const pendingDraws = new WeakMap();
+/** @type {WeakMap<object, number>} */
+const drawStarts = new WeakMap();
 let chartListenersRegistered = false;
 
 function monitorVisible() {
-  return state.settings.activeView === 'monitor' && !document.hidden;
+  return state.settings.activeView === 'monitor' && state.windowVisible && !document.hidden;
 }
 
 /**
- * 导航图 minmax 桶。点数不超过 2×宽度时复制短列；超过后按桶聚合，
+ * 导航图 minmax 桶。采用每 2 CSS 像素一桶的固定预算；超过后按桶聚合，
  * 新点只更新最后一桶，桶数超上限则两两合并。
  * @typedef {{ x0: number, x1: number, min: number, max: number, n: number }} NavBucket
  */
@@ -191,7 +257,9 @@ const NAV_PAINT_MIN_MS = 100;
 function navMaxBuckets() {
   const host = document.getElementById('navigator-chart');
   const w = host?.clientWidth || 600;
-  return Math.max(64, Math.floor(w * 2));
+  // A thumbnail does not need four vertices per CSS pixel. Keep its raster load
+  // bounded too, otherwise reducing the main plot leaves a dense navigator behind.
+  return bucketCap(w / 2);
 }
 
 function resetNavBuckets() {
@@ -264,9 +332,9 @@ function flattenNavBuckets() {
 }
 
 /** 把新样本折进导航桶；不 flatten、不 setData。 */
-function syncNavBuckets() {
+function syncNavBuckets(through = state.chartSeries.x.length) {
   const cs = state.chartSeries;
-  const n = cs.x.length;
+  const n = Math.min(through, cs.x.length);
   const cap = navMaxBuckets();
   const xs = cs.x;
   const ps = cs.power;
@@ -356,6 +424,13 @@ function bindMainViews(start, end) {
 
 export function syncChartSeries() {
   cancelPreparation();
+  cancelFrameProbe();
+  renderPolicy.reset();
+  sourceRevision = chartRevision();
+  submittedSourceLen = state.chartSeries.x.length;
+  recentAppendCount = 0;
+  feedbackRecording = state.isRecording;
+  liveChartPrepareMs = liveMainDrawMs = liveNavDrawMs = lastLiveFlushAt = 0;
   mainData = [[], [], [], [], [], [], [], [], []];
   rawStart = 0;
   rawEnd = 0;
@@ -369,6 +444,9 @@ export function syncChartSeries() {
   seriesMin = [Number.NaN, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
   scannedLen = 0;
   dataGen++;
+  for (const chart of [state.mainChart, state.navigatorChart]) {
+    if (chart) pendingDraws.delete(chart);
+  }
   if (state.chartSeries.x.length <= COOPERATIVE_POINTS) {
     bindNavData();
     trackNewPoints();
@@ -450,6 +528,45 @@ function plotCssWidth() {
   return document.getElementById('main-chart')?.clientWidth || 600;
 }
 
+/** Sparse windows retain raw samples even after a dense recording reduced its budget. @param {number} count */
+function mainBucketCap(count) {
+  const width = plotCssWidth();
+  return bucketCap(width / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
+}
+
+/** Display projection and pacing eligibility; this does not suppress fill. */
+function displayDense(count = visiblePointCount, width = visiblePlotWidth) {
+  return count > width;
+}
+
+/** Fill needs a larger window AND measured pressure; raw history size alone never suppresses it. */
+function fillDense(count = visiblePointCount, width = visiblePlotWidth) {
+  return count >= Math.max(1, width) * FILL_POINTS_PER_PIXEL;
+}
+
+function hasEnabledFill() {
+  return fillStyles.some((fill, i) => i > 0 && fill !== null && state.mainChart?.series?.[i]?.show !== false);
+}
+
+function fillSuppressed() {
+  return fillDense() && hasEnabledFill() && fillPolicy.suppressed;
+}
+
+function currentWindowDense() {
+  const { start, end } = sourceRange();
+  return displayDense(end - start, plotCssWidth());
+}
+
+function liveRefreshInterval() {
+  const dense = currentWindowDense();
+  return liveChartIntervalMs(
+    liveChartPrepareMs + liveMainDrawMs + liveNavDrawMs,
+    dense,
+    dense ? renderPolicy.nextFrameDelayMs : 0,
+    renderPolicy.idleFrameMs,
+  );
+}
+
 function channelBufs() {
   const cs = state.chartSeries;
   return [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
@@ -484,17 +601,26 @@ function extremaForStripes(series, end, ppb) {
  * the requesting frame. Appends do not invalidate the fixed prefix in progress.
  * @param {number} length @param {number} end @param {number} ppb
  */
-function prepareLargeHistory(length, end, ppb) {
+function prepareLargeHistory(length, end, ppb, reuseProjection = false) {
   if (historyWork) return true;
   const cap = navMaxBuckets();
-  const needIndex = ppb >= COLD_BUILD_PPB && end - extremaIndex.blocks * BLOCK_SIZE > COOPERATIVE_POINTS;
+  const range = preparationTarget ?? sourceRange();
+  const needIndex =
+    !reuseProjection && ppb >= COLD_BUILD_PPB && end - extremaIndex.blocks * BLOCK_SIZE > COOPERATIVE_POINTS;
   if (
     length - scannedLen <= COOPERATIVE_POINTS &&
     (length <= cap || length - navSrcLen <= COOPERATIVE_POINTS) &&
     !needIndex
   )
     return false;
-  const work = { generation: dataGen, cancelled: false };
+  const work = {
+    generation: dataGen,
+    start: range.start,
+    cap: mainBucketCap(range.end - range.start),
+    ppb,
+    cancelled: false,
+  };
+  const target = capturePreparationTarget(length, range.start, end, work.cap, ppb);
   historyWork = work;
   const cs = state.chartSeries;
   const series = channelBufs();
@@ -512,13 +638,18 @@ function prepareLargeHistory(length, end, ppb) {
       }
       return !needIndex || extremaIndex.syncStep(series, end);
     },
-    { isCancelled: () => work.cancelled || work.generation !== dataGen },
+    {
+      isCancelled: () => {
+        return work.cancelled || preparationInvalid(target);
+      },
+    },
   )
     .then((complete) => {
       if (historyWork !== work) return;
       historyWork = null;
       setPreparing(false);
-      if (complete) updateCharts();
+      if (!complete) preparationTarget = null;
+      if (!work.cancelled && work.generation === dataGen) updateCharts();
     })
     .catch((error) => {
       if (historyWork === work) {
@@ -530,41 +661,54 @@ function prepareLargeHistory(length, end, ppb) {
   return true;
 }
 
+/** Only a full history can change density through pairwise merging. @param {number} start @param {number} end @param {number} ppb */
+function canAdvanceBuckets(start, end, ppb) {
+  return (
+    displayBuckets.list.length > 0 &&
+    displayBuckets.canAppend(start, end) &&
+    end - displayBuckets.srcEnd <= 4096 &&
+    (ppb === displayBuckets.ppb || (start === 0 && end === state.chartSeries.x.length && ppb > displayBuckets.ppb))
+  );
+}
+
 /** @param {number} start @param {number} end @param {number} cap */
 function prepareLargeProjection(start, end, cap) {
   const count = end - start;
   const ppb = stripePpb(count, cap);
-  if (projectionWork && (projectionWork.start !== start || projectionWork.end !== end || projectionWork.cap !== cap)) {
+  if (projectionWork && (!preparationTarget || preparationInvalid(preparationTarget))) {
     projectionWork.cancelled = true;
     projectionWork = null;
   }
   if (projectionWork) return true;
   if (count <= COOPERATIVE_POINTS || stripesMatch(start, end, count, cap)) return false;
   // A short append still uses the existing cheap incremental path.
-  if (ppb === displayBuckets.ppb && displayBuckets.canAppend(start, end) && end - displayBuckets.srcEnd <= 4096)
-    return false;
+  if (canAdvanceBuckets(start, end, ppb)) return false;
+  const target = capturePreparationTarget(state.chartSeries.x.length, start, end, cap, ppb);
   const cs = state.chartSeries;
-  const series = channelBufs();
+  const series = channelBufs().map((column) => column.snapshot());
   const index = extremaForStripes(series, end, ppb);
   const buckets = new SeriesBuckets();
-  const step = buckets.beginRebuild(cs.x, series, start, end, cap, index);
-  const work = { generation: dataGen, start, end, cap, cancelled: false };
+  const step = buckets.beginRebuild(cs.x.snapshot(), series, start, end, cap, index);
+  const work = { generation: dataGen, start, end, cap, ppb, cancelled: false };
   projectionWork = work;
   setPreparing(true);
-  void runCooperativeSlices(() => step(index ? Math.max(4096, ppb * 16) : 4096), {
-    isCancelled: () => work.cancelled || work.generation !== dataGen,
+  void runCooperativeSlices(() => step(4096), {
+    isCancelled: () => {
+      return work.cancelled || preparationInvalid(target);
+    },
   })
     .then((complete) => {
       if (projectionWork !== work) return;
       projectionWork = null;
       setPreparing(false);
-      const latest = sourceRange();
-      if (complete && latest.start === start && latest.end === end && bucketCap(plotCssWidth()) === cap) {
+      if (complete && !preparationInvalid(target)) {
+        // Publish only internally here. The next apply appends a bounded live tail
+        // before submitting, or prepares a new snapshot if the tail grew too far.
         displayBuckets = buckets;
         bindFlattenedBuckets(displayBuckets, 'window');
         appliedMainGen = -1;
-      }
-      if (complete) updateCharts();
+      } else preparationTarget = null;
+      if (!work.cancelled && work.generation === dataGen) updateCharts();
     })
     .catch((error) => {
       if (projectionWork === work) {
@@ -606,9 +750,9 @@ function bindingCovers(start, end, windowCount, cap) {
   return boundKind === 'window' && stripesMatch(start, end, windowCount, cap);
 }
 
-function applyXScale() {
+function applyXScale(range = xRange()) {
   if (!state.mainChart) return;
-  const [min, max] = xRange();
+  const [min, max] = range;
   state.mainChart.setScale('x', { min, max });
 }
 
@@ -618,7 +762,7 @@ function applyXScale() {
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
-  const { cap, start, end, windowCount, force } = args;
+  const { cap, start, end, windowCount } = args;
   const cs = state.chartSeries;
 
   if (windowCount <= cap) {
@@ -635,9 +779,11 @@ function bindDisplayData(args) {
     return;
   }
 
-  // 左边界与密度都没动、只是窗口向右延长：追加比整表重扫便宜得多（流式跟随常用）。
-  if (!force && ppb === displayBuckets.ppb && displayBuckets.canAppend(start, end)) {
-    displayBuckets.appendThrough(cs.x, series, end);
+  // Full-history growth and budget reductions merge the fixed prefix in O(width).
+  // The existing partial tail then absorbs new samples at the new density.
+  if (canAdvanceBuckets(start, end, ppb)) {
+    displayBuckets.coarsenTo(ppb);
+    displayBuckets.appendThroughFixed(cs.x, series, end);
     bindFlattenedBuckets(displayBuckets, 'window');
     return;
   }
@@ -656,31 +802,168 @@ function requestPaint() {
 /** @param {any} chart @param {PaintRequest} request */
 function expectChartDraw(chart, request) {
   if (!chart) return;
+  const role = chart === state.navigatorChart ? 'navigator' : 'main';
   const pending = pendingDraws.get(chart);
   if (pending?.last === request) return;
-  pendingDraws.set(chart, { first: pending?.first ?? request, last: request, count: (pending?.count ?? 0) + 1 });
+  if (role === 'main') {
+    recentAppendCount = Math.max(0, state.chartSeries.x.length - submittedSourceLen);
+    submittedSourceLen = state.chartSeries.x.length;
+  }
+  const diagnostic = performanceDiagnostics.chartRequest(role, {
+    requestedAt: request.requestedAt,
+    submittedAt: performance.now(),
+    prepareMs: request.prepareMs,
+    batchId: request.batchId,
+    sourcePointCount: role === 'main' ? visiblePointCount : state.chartSeries.x.length,
+    displayPointCount: role === 'main' ? mainData[0].length : navData[0].length,
+    pixelsPerBucket: role === 'main' ? renderPolicy.pixelsPerBucket : undefined,
+    displayDense: role === 'main' && displayDense(),
+    fillSuppressed: role === 'main' && fillSuppressed(),
+    fillSuppressionReason: role === 'main' && fillSuppressed() ? fillPolicy.reason : null,
+    recentAppendCount: role === 'main' ? recentAppendCount : 0,
+    refreshIntervalMs: role === 'main' && state.isRecording ? liveRefreshInterval() : 0,
+  });
+  pendingDraws.set(chart, {
+    first: pending?.first ?? request,
+    last: request,
+    count: (pending?.count ?? 0) + 1,
+    firstDiagnostic: pending?.firstDiagnostic ?? diagnostic,
+    lastDiagnostic: diagnostic,
+  });
 }
 
 /**
  * uPlot 的 setData/setScale 通常在微任务中合并绘制；draw 才是实际绘制终点。
  * 这里只报告请求到 draw 的延迟（含排队 / 准备），不是 draw 执行耗时。
- * 绘制执行耗时不单列：终点 hook 拿不到 uPlot 那次绘制的起点，它本来就在合并后的 requestToDrawMs 里。
+ * drawClear→draw 测 JS 绘制耗时；draw→下一帧另外测量，捕捉后续 Canvas 栅格化的影响。
  * @param {any} chart
  */
 function finishChartDraw(chart) {
-  const pending = pendingDraws.get(chart);
-  if (!pending) return;
   const drawEndedAt = performance.now();
-  pendingDraws.delete(chart);
-  chart.__chartPaintTiming = {
-    firstBatchId: pending.first.batchId,
-    batchId: pending.last.batchId,
-    coalescedRequests: pending.count,
-    requestedAt: pending.first.requestedAt,
-    drawEndedAt,
-    requestToDrawMs: drawEndedAt - pending.first.requestedAt,
-    prepareMs: pending.last.prepareMs,
+  const drawStartedAt = drawStarts.get(chart);
+  const duration = drawStartedAt === undefined ? null : drawEndedAt - drawStartedAt;
+  if (drawStartedAt !== undefined) {
+    drawStarts.delete(chart);
+    const role = chart === state.navigatorChart ? 'navigator' : 'main';
+    const workMs = /** @type {number} */ (duration);
+    performanceDiagnostics.domCommit(`${role}-chart-draw`, drawStartedAt, drawEndedAt);
+    if (state.isRecording) {
+      if (role === 'main') liveMainDrawMs = liveMainDrawMs ? liveMainDrawMs * 0.75 + workMs * 0.25 : workMs;
+      else liveNavDrawMs = liveNavDrawMs ? liveNavDrawMs * 0.75 + workMs * 0.25 : workMs;
+      lastLiveFlushAt = drawEndedAt;
+    }
+  }
+  const pending = pendingDraws.get(chart);
+  let entry;
+  if (pending) {
+    pendingDraws.delete(chart);
+    const role = chart === state.navigatorChart ? 'navigator' : 'main';
+    // Keep the earliest request latency, with the metadata of the submitted data.
+    pending.lastDiagnostic.requestedAt = pending.firstDiagnostic.requestedAt;
+    entry = performanceDiagnostics.chartPaint(role, pending.lastDiagnostic, drawEndedAt, duration);
+    chart.__chartPaintTiming = {
+      firstBatchId: pending.first.batchId,
+      batchId: pending.last.batchId,
+      coalescedRequests: pending.count,
+      requestedAt: pending.first.requestedAt,
+      drawEndedAt,
+      requestToDrawMs: drawEndedAt - pending.first.requestedAt,
+      prepareMs: pending.last.prepareMs,
+    };
+  }
+  if (chart !== state.mainChart || appliedMainGen !== dataGen || !monitorVisible() || chartProbeFrame !== null) return;
+  const generation = dataGen;
+  const epoch = feedbackEpoch;
+  const density = renderPolicy.pixelsPerBucket;
+  const feedbackSince = pending?.last.requestedAt ?? drawStartedAt ?? drawEndedAt;
+  const live = state.isRecording;
+  const dense = displayDense();
+  const eligibleFill = fillDense() && hasEnabledFill();
+  const appendCount = pending?.lastDiagnostic.recentAppendCount ?? 0;
+  // Canvas work may stall the second or third frame after a fast first
+  // callback. Treat this bounded observation window as one paint sample, so a
+  // healthy intervening frame neither hides its lag nor counts one stall twice.
+  const probeFrames = dense ? 3 : 1;
+  let observedFrames = 0;
+  let previousFrameAt = drawEndedAt;
+  let nextFrameDelayMs = 0;
+  let frameDelayMs = 0;
+  let fillFrameDelayMs = 0;
+  const observeFrame = () => {
+    chartProbeFrame = null;
+    if (epoch !== feedbackEpoch || generation !== dataGen || chart !== state.mainChart) return;
+    const visible = monitorVisible();
+    const at = performance.now();
+    if (
+      !visible ||
+      live !== state.isRecording ||
+      dense !== currentWindowDense() ||
+      density !== renderPolicy.pixelsPerBucket
+    ) {
+      cancelFrameProbe();
+      return;
+    }
+    const delayMs = Math.max(0, at - previousFrameAt);
+    if (observedFrames === 0) nextFrameDelayMs = delayMs;
+    frameDelayMs = Math.max(
+      frameDelayMs,
+      delayMs,
+      performanceDiagnostics.frameDelaySince(
+        observedFrames === 0 ? feedbackSince : previousFrameAt,
+        observedFrames === 0,
+      ),
+    );
+    // Preparation/import work before draw cannot establish an expensive fill.
+    fillFrameDelayMs = Math.max(
+      fillFrameDelayMs,
+      delayMs,
+      duration ?? 0,
+      performanceDiagnostics.frameDelaySince(drawEndedAt, true, true),
+    );
+    previousFrameAt = at;
+    observedFrames++;
+    performanceDiagnostics.chartNextFrame(entry, nextFrameDelayMs, frameDelayMs);
+    if (observedFrames < probeFrames && frameDelayMs <= 100) {
+      chartProbeFrame = requestAnimationFrame(observeFrame);
+      return;
+    }
+    const densityChanged = renderPolicy.observe({
+      delayMs: frameDelayMs,
+      at,
+      idleFrameMs: performanceDiagnostics.idleFrameIntervalMs(),
+      visible,
+      dense,
+    });
+    // Without incoming samples, a first moderately slow review draw would never
+    // receive its second observation. Force exactly one confirmation at this
+    // density; a healthy result stops, a second slow result coarsens the budget.
+    const fillChanged = fillPolicy.observe({
+      delayMs: fillFrameDelayMs,
+      at,
+      idleFrameMs: renderPolicy.idleFrameMs,
+      visible,
+      eligible: eligibleFill,
+      paintedDensity: density,
+      nextDensity: renderPolicy.pixelsPerBucket,
+      largeBatch: live && appendCount >= visiblePlotWidth * FILL_POINTS_PER_PIXEL,
+    });
+    const confirmReview =
+      !live && dense && ((renderPolicy.slowFrames === 1 && density < 16) || fillPolicy.needsConfirmation);
+    if (densityChanged || fillChanged || confirmReview) {
+      feedbackRepaintPending = true;
+      scheduleChartUpdate();
+    }
   };
+  chartProbeFrame = requestAnimationFrame(observeFrame);
+}
+
+function cancelFrameProbe() {
+  if (chartProbeFrame !== null) cancelAnimationFrame(chartProbeFrame);
+  chartProbeFrame = null;
+  feedbackRepaintPending = false;
+  feedbackEpoch++;
+  renderPolicy.breakFeedback();
+  if (fillPolicy.reset()) fillPaintDirty = true;
 }
 
 /** 同步准备耗时仅作诊断，不据此猜测 GPU / Canvas 耗时或固定降帧。
@@ -688,6 +971,11 @@ function finishChartDraw(chart) {
  */
 function finishPreparation(t0, request) {
   request.prepareMs = performance.now() - t0;
+  for (const chart of [state.mainChart, state.navigatorChart]) {
+    const pending = chart && pendingDraws.get(chart);
+    if (pending?.last === request) pending.lastDiagnostic.prepareMs = request.prepareMs;
+    if (pending?.first === request) pending.firstDiagnostic.prepareMs = request.prepareMs;
+  }
 }
 
 /**
@@ -696,19 +984,34 @@ function finishPreparation(t0, request) {
  */
 function applyData(opts = {}) {
   if (!monitorVisible()) {
+    cancelPreparation();
     chartDirty = true;
     return;
   }
 
+  if (sourceRevision !== chartRevision()) syncChartSeries();
   const request = requestPaint();
   paintRequest = null;
   const t0 = performance.now();
   chartDirty = false;
-  const srcLen = state.chartSeries.x.length;
-  const { start, end } = sourceRange();
-  const cap = bucketCap(plotCssWidth());
+  if (preparationTarget && preparationInvalid(preparationTarget)) cancelPreparation();
+  const target = preparationTarget;
+  const srcLen = target?.length ?? state.chartSeries.x.length;
+  const { start, end } = target ?? sourceRange();
   const windowCount = end - start;
-  if (prepareLargeHistory(srcLen, end, stripePpb(windowCount, cap)) || prepareLargeProjection(start, end, cap)) {
+  visiblePointCount = windowCount;
+  visiblePlotWidth = plotCssWidth();
+  if (feedbackRecording !== state.isRecording) {
+    cancelFrameProbe();
+    feedbackRecording = state.isRecording;
+  }
+  if ((!fillDense() || !hasEnabledFill()) && fillPolicy.reset()) fillPaintDirty = true;
+  const cap = target?.cap ?? mainBucketCap(windowCount);
+  const ppb = stripePpb(windowCount, cap);
+  if (
+    prepareLargeHistory(srcLen, end, ppb, canAdvanceBuckets(start, end, ppb)) ||
+    prepareLargeProjection(start, end, cap)
+  ) {
     chartDirty = true;
     // Keep the original request timestamp across slices so draw latency includes
     // deferred preparation instead of starting over when its result is ready.
@@ -717,13 +1020,14 @@ function applyData(opts = {}) {
     return;
   }
   const appended = srcLen > scannedLen;
-  const yChanged = trackNewPoints();
-  const force = !!opts.force;
+  const yChanged = trackNewPoints(srcLen);
+  const force = !!opts.force || fillPaintDirty;
+  fillPaintDirty = false;
   const dataChanged = appended || appliedMainGen !== dataGen;
   // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
   const preview = rangeDragging && !force;
 
-  const nextXRange = xRange();
+  const nextXRange = target?.xRange ?? xRange();
   const sameXRange = appliedXRange?.[0] === nextXRange[0] && appliedXRange?.[1] === nextXRange[1];
   const covers = bindingCovers(start, end, windowCount, cap);
   const frozenAppend = appended && state.chartWindow.mode === 'frozen' && sameXRange && covers && !yChanged;
@@ -732,25 +1036,29 @@ function applyData(opts = {}) {
   if (reuseBinding) {
     if (!sameXRange) {
       expectChartDraw(state.mainChart, request);
-      applyXScale();
+      applyXScale(nextXRange);
     }
   } else {
     bindDisplayData({ cap, start, end, windowCount, force });
     if (state.mainChart) {
       expectChartDraw(state.mainChart, request);
       // Y 量程来自全量 seriesMax，与是否分桶无关；极值未破时跳过四轴量化。
+      const mainStartedAt = performance.now();
       if (appended && !yChanged && xWindow.min != null && xWindow.max != null && !force) {
         state.mainChart.setData(/** @type {any} */ (mainData), false);
-        applyXScale();
+        applyXScale(nextXRange);
       } else {
         state.mainChart.setData(/** @type {any} */ (mainData));
+        const liveRange = xRange();
+        if (target && (liveRange[0] !== nextXRange[0] || liveRange[1] !== nextXRange[1])) applyXScale(nextXRange);
       }
+      performanceDiagnostics.domCommit('main-chart-submit', mainStartedAt);
     }
   }
   appliedXRange = nextXRange;
 
   if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
-    syncNavBuckets();
+    syncNavBuckets(srcLen);
     const nav = state.navigatorChart;
     const now = performance.now();
     const cap = navMaxBuckets();
@@ -759,7 +1067,9 @@ function applyData(opts = {}) {
     if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       bindNavData();
       expectChartDraw(nav, request);
+      const navStartedAt = performance.now();
       nav.setData(/** @type {any} */ (navData));
+      performanceDiagnostics.domCommit('navigator-chart-submit', navStartedAt);
       appliedNavGen = dataGen;
       appliedNavLen = srcLen;
       lastNavPaint = now;
@@ -768,6 +1078,11 @@ function applyData(opts = {}) {
 
   appliedMainGen = dataGen;
   finishPreparation(t0, request);
+  if (target) {
+    preparationTarget = null;
+    const latest = sourceRange();
+    if (latest.start !== start || latest.end !== end || state.chartSeries.x.length !== srcLen) scheduleChartUpdate();
+  }
 }
 
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
@@ -790,12 +1105,25 @@ export function refreshChartScales() {
 
 /** 恢复可见性时把尺寸补偿、积累的数据和已有请求合到同一帧。 */
 export function handleMonitorShown() {
+  cancelFrameProbe();
   resizeDirty = true;
   scheduleChartUpdate();
 }
 
+export function handleMonitorHidden() {
+  chartDirty = true;
+  paintRequest = null;
+  cancelPreparation();
+  cancelChartFrame();
+  cancelFrameProbe();
+}
+
 function cancelChartFrame() {
   displayFrames.cancel('chart');
+  if (chartPaceTimer !== null) {
+    clearTimeout(chartPaceTimer);
+    chartPaceTimer = null;
+  }
   chartFramePending = false;
   state.__chartUpdatePending = false;
 }
@@ -804,24 +1132,30 @@ function registerChartListeners() {
   if (chartListenersRegistered) return;
   chartListenersRegistered = true;
   onThemeChange(applyChartTheme);
-  document.addEventListener('visibilitychange', () => {
+  const visibilityChanged = () => {
     if (!monitorVisible()) {
       chartDirty = true;
       paintRequest = null;
       cancelChartFrame();
+      cancelFrameProbe();
+      cancelPreparation();
       return;
     }
     handleMonitorShown();
-  });
+  };
+  document.addEventListener('visibilitychange', visibilityChanged);
+  document.addEventListener('witrn:window-visibility', visibilityChanged);
 }
 
 /** @param {boolean} [force=false] */
 function flushChart(force = false) {
   if (!monitorVisible()) {
+    cancelPreparation();
     chartDirty = true;
     paintRequest = null;
     return;
   }
+  const startedAt = performance.now();
   flushingChart = true;
   try {
     flushResizes();
@@ -830,20 +1164,54 @@ function flushChart(force = false) {
       dataGen++;
       chartDirty = true;
     }
-    if (chartDirty || force || forceResizePaint) applyData({ force: force || forceResizePaint });
+    const feedbackRepaint = feedbackRepaintPending;
+    feedbackRepaintPending = false;
+    if (chartDirty || force || forceResizePaint || feedbackRepaint)
+      applyData({ force: force || forceResizePaint || feedbackRepaint });
     forceResizePaint = false;
   } finally {
+    const endedAt = performance.now();
+    performanceDiagnostics.domCommit('chart-flush', startedAt, endedAt);
+    if (state.isRecording) {
+      const workMs = endedAt - startedAt;
+      liveChartPrepareMs = liveChartPrepareMs ? liveChartPrepareMs * 0.75 + workMs * 0.25 : workMs;
+      lastLiveFlushAt = endedAt;
+    } else {
+      liveChartPrepareMs = 0;
+      liveMainDrawMs = 0;
+      liveNavDrawMs = 0;
+    }
     flushingChart = false;
-    paintRequest = null;
+    if (!chartDirty) paintRequest = null;
+    else if (!historyWork && !projectionWork) scheduleChartUpdate();
   }
 }
 
 /** 使用 requestAnimationFrame 合帧；后台数据照收，图表只记 dirty。 */
 export function scheduleChartUpdate() {
   chartDirty = true;
-  if (!monitorVisible() || flushingChart) return;
+  if (!monitorVisible()) {
+    cancelPreparation();
+    return;
+  }
+  if (flushingChart) return;
   requestPaint();
   if (chartFramePending) return;
+  if (state.isRecording && !rangeDragging && !resizeDirty) {
+    const delay = lastLiveFlushAt + liveRefreshInterval() - performance.now();
+    if (delay > 1) {
+      if (chartPaceTimer === null)
+        chartPaceTimer = setTimeout(() => {
+          chartPaceTimer = null;
+          scheduleChartUpdate();
+        }, delay);
+      return;
+    }
+  }
+  if (chartPaceTimer !== null) {
+    clearTimeout(chartPaceTimer);
+    chartPaceTimer = null;
+  }
   chartFramePending = true;
   state.__chartUpdatePending = true;
   displayFrames.schedule(
@@ -866,6 +1234,28 @@ export function scheduleChartUpdate() {
  * @param {number|null} max
  */
 export function setChartXWindow(min, max) {
+  // Natural full/follow appends retain evidence. User window changes retire it
+  // in recording and review alike.
+  if (xWindow.min !== min || xWindow.max !== max) {
+    const latest = state.chartSeries.x.at(-1);
+    const fullAdvance = state.chartWindow.mode === 'full' && xWindow.min === min;
+    const followAdvance =
+      state.chartWindow.mode === 'follow' &&
+      min !== null &&
+      max !== null &&
+      xWindow.min !== null &&
+      xWindow.max !== null &&
+      Math.abs(max - min - (xWindow.max - xWindow.min)) < 1e-6;
+    const automaticAdvance =
+      state.isRecording &&
+      max === latest &&
+      (xWindow.max === null || max >= xWindow.max) &&
+      (fullAdvance || followAdvance);
+    if (!automaticAdvance) {
+      windowIntent++;
+      cancelFrameProbe();
+    }
+  }
   xWindow.min = min;
   xWindow.max = max;
 }
@@ -879,6 +1269,7 @@ export function setSeriesVisible(datasetIndex, show) {
   const chart = state.mainChart;
   const si = datasetIndex + 1;
   if (!chart || !chart.series[si]) return;
+  cancelFrameProbe();
   chart.setSeries(si, { show: !!show });
   renderLegend();
 }
@@ -891,6 +1282,7 @@ export function setSeriesVisible(datasetIndex, show) {
 export function setSeriesFill(datasetIndex, opacityPercent) {
   const field = FIELDS[datasetIndex];
   if (!field) return;
+  cancelFrameProbe();
   fillStyles[datasetIndex + 1] =
     opacityPercent > 0 ? hexToRgba(/** @type {any} */ (chartTheme)[field], opacityPercent) : null;
   if (state.mainChart) state.mainChart.redraw();
@@ -1682,6 +2074,8 @@ function observeResize(host, chart, onSize = null) {
   if (resizeTargets.has(chart)) return;
   resizeTargets.set(chart, { host, onSize });
   chart.hooks.draw ??= [];
+  chart.hooks.drawClear ??= [];
+  chart.hooks.drawClear.push(() => drawStarts.set(chart, performance.now()));
   chart.hooks.draw.push(finishChartDraw);
   const ro = new ResizeObserver(() => {
     resizeDirty = true;
@@ -1694,6 +2088,7 @@ function observeResize(host, chart, onSize = null) {
     ro.disconnect();
     resizeTargets.delete(chart);
     pendingDraws.delete(chart);
+    drawStarts.delete(chart);
   });
 }
 
@@ -1767,7 +2162,8 @@ export function initChart() {
         width: i >= 4 ? 1 : 1.5,
         points: { show: false },
         ...(hasPaths ? { paths: adaptivePaths } : {}),
-        fill: () => fillStyles[i + 1],
+        // Keep the user's fill until measured pressure survives density reduction.
+        fill: () => (fillSuppressed() ? null : fillStyles[i + 1]),
         show: showInitial[i],
       })),
     ],
@@ -1801,7 +2197,7 @@ export function initChart() {
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
   bindChartWheel(state.mainChart);
   observeResize(host, state.mainChart, () => {
-    displayBuckets.reset(0);
+    cancelFrameProbe();
   });
   renderLegend();
   registerChartListeners();

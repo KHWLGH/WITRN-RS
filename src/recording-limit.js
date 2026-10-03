@@ -2,12 +2,12 @@
 /**
  * @file 单次记录上限：MB ↔ 点数 ↔ 时长的换算与剩余量，纯函数。
  *
- * 内存按 100 字节 / 点估算：11 列 Float64 各 8 字节（88 B），另计分块余量与极值索引。
- * 落盘 CSV 按 120 字节 / 行估算（精确格式、带温度与段号）。两者都是估算，界面标「约」。
+ * 内存按 112 字节 / 点估算：12 列 Float64（96 B），另计分块余量与极值索引。
+ * 落盘 CSV 按 128 字节 / 行估算（带温度、段号及逐点间隔）。界面标「约」。
  */
 
-export const BYTES_PER_POINT = 100;
-export const CSV_BYTES_PER_ROW = 120;
+export const BYTES_PER_POINT = 112;
+export const CSV_BYTES_PER_ROW = 128;
 export const LIMIT_MB_MIN = 64;
 export const LIMIT_MB_MAX = 8192;
 export const DEFAULT_LIMIT_MB = 512;

@@ -5,6 +5,7 @@
 //! to the trigger through a [`PdoCache`], and tells it to forget the CDC port whenever
 //! the bulk handle had to be reopened (the meter may have re-enumerated).
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -34,6 +35,8 @@ const TRIGGER_IDLE: Duration = Duration::from_millis(100);
 const QUEUE_POLL: Duration = Duration::from_millis(20);
 const QUEUE_START_TIMEOUT: Duration = Duration::from_millis(1500);
 const KM003C_MAX_RATE_HZ: u32 = 1000;
+// A USB response holds at most 204 queue samples (4096 / 20 bytes).
+const QUEUE_HISTORY: usize = 256;
 
 /// Handles the trigger commands need, kept outside the device slot so a draining stream
 /// never blocks a cancel.
@@ -324,10 +327,12 @@ struct QueueMode {
     saw_sample: bool,
     clock: QueueClock,
     holes_reported: bool,
+    replays_reported: bool,
+    recent: VecDeque<QueueSample>,
 }
 
 /// Expand the meter's wrapping 1 kHz sequence into host-relative microseconds.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct QueueClock {
     last_seq: Option<u16>,
     last_us: u64,
@@ -450,7 +455,7 @@ impl Source for Km003cSource {
         match step {
             Ok(Step::Data(response)) => {
                 if queue_mode {
-                    self.deliver_queue(response, received_us, out);
+                    self.deliver_queue(response, received_us, out)?;
                 } else {
                     self.deliver(response, received_us, out);
                 }
@@ -518,7 +523,7 @@ impl Km003cSource {
         self.next_poll = next_on_grid(self.next_poll, QUEUE_POLL, Instant::now());
         match step {
             Ok(Step::Data(response)) => {
-                self.deliver_queue(response, received_us, out);
+                self.deliver_queue(response, received_us, out)?;
                 if self.queue.as_ref().is_some_and(|mode| !mode.saw_sample)
                     && self
                         .queue
@@ -611,6 +616,8 @@ impl Km003cSource {
             saw_sample: false,
             clock: QueueClock::default(),
             holes_reported: false,
+            replays_reported: false,
+            recent: VecDeque::with_capacity(QUEUE_HISTORY),
         });
         self.next_poll = Instant::now();
         Ok(())
@@ -665,7 +672,12 @@ impl Km003cSource {
         }
     }
 
-    fn deliver_queue(&mut self, response: DataResponse, received_us: u64, out: &mut Vec<Arrival>) {
+    fn deliver_queue(
+        &mut self,
+        response: DataResponse,
+        received_us: u64,
+        out: &mut Vec<Arrival>,
+    ) -> Result<(), Stop> {
         if let Some(adc) = response.adc {
             let temperature = adc.temp_c() as f32;
             self.last_temperature = (-40.0..=150.0)
@@ -673,15 +685,25 @@ impl Km003cSource {
                 .then_some(temperature);
         }
         let Some(mode) = self.queue.as_mut() else {
-            return;
+            return Ok(());
         };
-        let first_us =
-            received_us.saturating_sub((response.queue.len().saturating_sub(1) as u64) * 1000);
-        for (index, sample) in response.queue.iter().enumerate() {
-            let observed_us = first_us + index as u64 * 1000;
-            let timestamp_us = mode
-                .clock
-                .observe(sample.sequence, observed_us, mode.rate_index);
+        let (skip, timestamps) = queue_timestamps(
+            &mut mode.clock,
+            &mode.recent,
+            &response.queue,
+            received_us,
+            mode.rate_index,
+        )
+        .map_err(Stop::Failed)?;
+        if skip > 0 && !mode.replays_reported {
+            mode.replays_reported = true;
+            eprintln!("KM003C AdcQueue 已核实并跳过 {skip} 个重放样本");
+        }
+        for (sample, timestamp_us) in response.queue[skip..].iter().zip(timestamps) {
+            if mode.recent.len() == QUEUE_HISTORY {
+                mode.recent.pop_front();
+            }
+            mode.recent.push_back(*sample);
             let mut data = map_queue(sample, mode.rate_index);
             data.temperature = self.last_temperature;
             out.push(Arrival {
@@ -696,6 +718,7 @@ impl Km003cSource {
             eprintln!("KM003C AdcQueue 检测到 {holes} 个序号空洞");
         }
         self.deliver_pd(&response, received_us, out);
+        Ok(())
     }
 
     fn deliver_pd(&self, response: &DataResponse, received_us: u64, out: &mut Vec<Arrival>) {
@@ -720,6 +743,49 @@ impl Km003cSource {
             }
         }
     }
+}
+
+/// Firmware can replay an old queue prefix. Verify its complete wire values before
+/// omitting it, and validate the new timestamps before publishing any of the batch.
+fn queue_timestamps(
+    clock: &mut QueueClock,
+    recent: &VecDeque<QueueSample>,
+    samples: &[QueueSample],
+    received_us: u64,
+    rate_index: u8,
+) -> Result<(usize, Vec<u64>), String> {
+    let mut skip = 0;
+    if let Some(previous) = clock.last_seq {
+        for sample in samples {
+            let delta = sample.sequence.wrapping_sub(previous);
+            if delta != 0 && delta < 0x8000 {
+                break;
+            }
+            if !recent.contains(sample) {
+                return Err("KM003C AdcQueue 返回无法核实的倒序样本；采集已停止".into());
+            }
+            skip += 1;
+        }
+    }
+    let first_us = received_us.saturating_sub(samples.len().saturating_sub(1) as u64 * 1000);
+    let mut next = clock.clone();
+    let mut timestamps = Vec::with_capacity(samples.len() - skip);
+    for (index, sample) in samples.iter().enumerate().skip(skip) {
+        if next.last_seq.is_some_and(|previous| {
+            let delta = sample.sequence.wrapping_sub(previous);
+            delta == 0 || delta >= 0x8000
+        }) {
+            return Err("KM003C AdcQueue 返回无法核实的倒序样本；采集已停止".into());
+        }
+        let previous_us = next.last_seq.map(|_| next.last_us);
+        let timestamp = next.observe(sample.sequence, first_us + index as u64 * 1000, rate_index);
+        if previous_us.is_some_and(|previous| timestamp <= previous) {
+            return Err("KM003C AdcQueue 时间未递增；采集已停止".into());
+        }
+        timestamps.push(timestamp);
+    }
+    *clock = next;
+    Ok((skip, timestamps))
 }
 
 impl Drop for Km003cSource {
@@ -905,6 +971,132 @@ mod tests {
         assert_eq!(clock.observe(1, 7_000, 3), 1_007);
         // Even after a full second, the correction budget is one millisecond.
         assert_eq!(clock.observe(2, 1_007_000, 3), 3_007);
+    }
+
+    fn queued_sample(sequence: u16) -> QueueSample {
+        QueueSample {
+            sequence,
+            marker: 0x3C,
+            vbus_uv: 9_000_000,
+            ibus_ua: -2_000_000,
+            cc1_mv: 1650,
+            cc2_mv: 0,
+            dp_mv: 600,
+            dm_mv: 0,
+        }
+    }
+
+    #[test]
+    fn queue_replay_prefix_preserves_new_samples_and_sequence_wrap() {
+        let recent: VecDeque<_> = [0xFFFE, 0xFFFF, 0].map(queued_sample).into();
+        let mut clock = QueueClock::default();
+        clock.observe(0, 102_000, 3);
+        let samples = [0xFFFF, 0, 1, 2].map(queued_sample);
+        let (skip, timestamps) =
+            queue_timestamps(&mut clock, &recent, &samples, 104_000, 3).unwrap();
+        assert_eq!(skip, 2);
+        assert_eq!(timestamps, [103_000, 104_000]);
+        assert_eq!(clock.last_seq, Some(2));
+        assert_eq!(clock.take_holes(), 0);
+    }
+
+    #[test]
+    fn fully_replayed_queue_does_not_advance_the_clock() {
+        let recent: VecDeque<_> = [10, 11].map(queued_sample).into();
+        let mut clock = QueueClock::default();
+        clock.observe(11, 100_000, 3);
+        let samples = [10, 11].map(queued_sample);
+        let (skip, timestamps) =
+            queue_timestamps(&mut clock, &recent, &samples, 120_000, 3).unwrap();
+        assert_eq!(skip, 2);
+        assert!(timestamps.is_empty());
+        assert_eq!(clock.last_seq, Some(11));
+        assert_eq!(clock.last_us, 100_000);
+        assert_eq!(clock.last_observed_us, 100_000);
+    }
+
+    #[test]
+    fn equal_measurements_with_new_sequences_are_not_replay() {
+        let recent: VecDeque<_> = [10, 11].map(queued_sample).into();
+        let mut clock = QueueClock::default();
+        clock.observe(11, 100_000, 3);
+        let samples = [12, 13].map(queued_sample);
+        let (skip, timestamps) =
+            queue_timestamps(&mut clock, &recent, &samples, 102_000, 3).unwrap();
+        assert_eq!(skip, 0);
+        assert_eq!(timestamps, [101_000, 102_000]);
+    }
+
+    #[test]
+    fn replay_must_match_every_wire_field() {
+        let mut clock = QueueClock::default();
+        clock.observe(11, 100_000, 3);
+        let recent: VecDeque<_> = [queued_sample(11)].into();
+        let original = queued_sample(11);
+        let conflicts = [
+            QueueSample {
+                marker: 0,
+                ..original
+            },
+            QueueSample {
+                vbus_uv: 1,
+                ..original
+            },
+            QueueSample {
+                ibus_ua: 1,
+                ..original
+            },
+            QueueSample {
+                cc1_mv: 1,
+                ..original
+            },
+            QueueSample {
+                cc2_mv: 1,
+                ..original
+            },
+            QueueSample {
+                dp_mv: 1,
+                ..original
+            },
+            QueueSample {
+                dm_mv: 1,
+                ..original
+            },
+        ];
+        for conflict in conflicts {
+            assert!(queue_timestamps(&mut clock, &recent, &[conflict], 101_000, 3).is_err());
+            assert_eq!(clock.last_seq, Some(11));
+            assert_eq!(clock.last_us, 100_000);
+        }
+    }
+
+    #[test]
+    fn unrecognised_reversal_and_invalid_tail_publish_no_clock_changes() {
+        let recent: VecDeque<_> = [10, 11].map(queued_sample).into();
+        let mut clock = QueueClock::default();
+        clock.observe(11, 100_000, 3);
+        assert!(queue_timestamps(&mut clock, &recent, &[queued_sample(9)], 101_000, 3).is_err());
+        let bad_tail = [12, 11].map(queued_sample);
+        assert!(queue_timestamps(&mut clock, &recent, &bad_tail, 102_000, 3).is_err());
+        assert_eq!(clock.last_seq, Some(11));
+        assert_eq!(clock.last_us, 100_000);
+        assert_eq!(clock.last_observed_us, 100_000);
+        assert_eq!(clock.take_holes(), 0);
+        assert!(queue_timestamps(&mut clock, &recent, &[queued_sample(12)], 99_000, 3).is_err());
+        assert_eq!(clock.last_us, 100_000);
+    }
+
+    #[test]
+    fn replay_does_not_hide_a_gap_in_new_samples() {
+        let recent: VecDeque<_> = [10, 11].map(queued_sample).into();
+        let mut clock = QueueClock::default();
+        clock.observe(11, 100_000, 3);
+        let samples = [11, 14].map(queued_sample);
+        let (skip, timestamps) =
+            queue_timestamps(&mut clock, &recent, &samples, 103_000, 3).unwrap();
+        assert_eq!(skip, 1);
+        assert_eq!(timestamps, [103_000]);
+        assert_eq!(clock.take_holes(), 2);
     }
 
     #[test]

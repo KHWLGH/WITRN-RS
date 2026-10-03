@@ -100,7 +100,16 @@ function renderEnabled() {
   /** @param {string} id @param {boolean} enabled */
   const enable = (id, enabled) => {
     const node = /** @type {HTMLButtonElement|HTMLInputElement|HTMLSelectElement|null} */ (el(id));
-    if (node) node.disabled = !enabled;
+    if (node) {
+      node.disabled = !enabled;
+      node.title = enabled
+        ? ''
+        : !available
+          ? '请先连接支持协议控制的 KM003C 或 KM002C'
+          : busy
+            ? '等待当前命令完成'
+            : '请先打开 PDM';
+    }
   };
   for (const id of ['btn-km-pdm-open', 'btn-km-pdm-close', 'btn-km-raw']) enable(id, ready);
   for (const id of [
@@ -126,7 +135,9 @@ function renderEnabled() {
     banner.hidden = available && pdmOpen;
     banner.textContent = available
       ? '先打开 PDM：除自定义命令外，协议命令都在 PDM 会话中执行。'
-      : '连接 POWER-Z 设备后可用。';
+      : state.isConnected
+        ? '当前设备不支持协议控制，请连接 KM003C 或 KM002C。'
+        : '连接 KM003C 或 KM002C 后可用。';
   }
   const list = el('km-pdo-list');
   list?.classList.toggle('is-disabled', !withPdm);

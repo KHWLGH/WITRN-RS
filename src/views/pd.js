@@ -10,8 +10,8 @@
  */
 
 import { runCooperativeSlices } from '../cooperative.js';
+import { exportPdFile } from '../pd-export.js';
 import {
-  buildPdCaptureFile,
   buildRowOffsets,
   createPdProjection,
   directionClass,
@@ -843,24 +843,22 @@ export async function requestPdClear() {
 
 // ─── 导入 / 导出 ─────────────────────────────────────────────────────────────
 
+let exportPending = false;
 async function exportPdCapture() {
+  if (exportPending) return;
   if (log.length === 0) {
     toast.warning('没有可导出的报文');
     return;
   }
-  const { save } = window.__TAURI__.dialog;
-  const { writeTextFile } = window.__TAURI__.fs;
+  exportPending = true;
   try {
-    const path = await save({
-      filters: [{ name: 'PD Capture', extensions: ['json'] }],
-      defaultPath: `witrn_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
-    });
-    if (!path) return;
-    await writeTextFile(path, JSON.stringify(buildPdCaptureFile(log)));
-    toast.success(`已导出 ${log.length} 条报文`);
+    const count = await exportPdFile(() => log);
+    if (count !== null) toast.success(`已导出 ${count} 条报文`);
   } catch (e) {
     console.error(e);
     toast.error(`导出失败: ${e}`);
+  } finally {
+    exportPending = false;
   }
 }
 

@@ -4,7 +4,7 @@
 /** @typedef {'auto'|'windows'|'macos'} WindowStylePreference */
 
 /** 与 theme-boot.js 的首屏镜像键保持一致；LazyStore 为最终真值。 */
-export const WINDOW_STYLE_STORAGE_KEY = 'witrn-window-style';
+export const WINDOW_STYLE_STORAGE_KEY = 'lapower-window-style';
 
 /** @param {unknown} value @returns {WindowStylePreference} */
 export function normalizeWindowStyle(value) {

@@ -1,4 +1,4 @@
-//! Rust-side hot-path benchmarks. `cargo bench -p witrn-rs`.
+//! Rust-side hot-path benchmarks. `cargo bench -p lapower`.
 //!
 //! Why these and not others:
 //! - `decode_general_sample` is the allocation-free floor. It should stay flat; if it ever
@@ -19,11 +19,11 @@
 //! fixtures stop decoding, the bench panics rather than reporting a flattering measurement.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use lapower_lib::stream::{self, sample_at, Outgoing, Sample};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use witrn_hid::{decode_pd_report, Parser};
-use witrn_rs_lib::stream::{self, sample_at, Outgoing, Sample};
 
 /// A 64-byte general-measurement report: kind byte 0xFF, then the little-endian fields the
 /// decoder reads. Values are arbitrary but finite; the decoder does no CRC on this path.

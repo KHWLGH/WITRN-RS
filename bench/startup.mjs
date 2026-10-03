@@ -31,7 +31,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { environment, options, provenance, quantiles, ROOT, saveJson, sha256 } from './common.mjs';
 
-const IDENTIFIER = 'com.witrn.witrnrs';
+const IDENTIFIER = 'io.github.khwlgh.lapower';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -58,8 +58,8 @@ function configDir() {
 
 function defaultExe() {
   return process.platform === 'win32'
-    ? resolve(ROOT, 'target/debug/witrn-rs.exe')
-    : resolve(ROOT, 'target/debug/witrn-rs');
+    ? resolve(ROOT, 'target/debug/lapower.exe')
+    : resolve(ROOT, 'target/debug/lapower');
 }
 
 async function collect(path, timeoutMs) {

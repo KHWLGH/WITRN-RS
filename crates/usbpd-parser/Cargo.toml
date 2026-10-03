@@ -4,7 +4,7 @@ description = "A Rust API for parsing USB Power Delivery messages."
 readme = "README.md"
 keywords = ["usb", "usb-pd", "power-delivery", "parser"]
 categories = ["parser-implementations", "embedded"]
-# Maintained inside the WITRN-RS workspace and versioned with the application.
+# Maintained inside the laPower workspace and versioned with the application.
 publish = false
 version.workspace = true
 edition.workspace = true

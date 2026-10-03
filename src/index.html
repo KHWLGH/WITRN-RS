@@ -15,8 +15,8 @@
     <link rel="stylesheet" href="styles/compact.css" />
     <link rel="stylesheet" href="assets/fluent-icons.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WITRN-RS</title>
-    <script src="vendor/uPlot.iife.min.js"></script>
+    <title>laPower</title>
+    <script src="vendor/uPlot.iife.min.js" defer></script>
     <script type="module" src="/app.js" defer></script>
   </head>
 
@@ -33,7 +33,7 @@
           <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="刷新设备列表">
             <i class="fi fi-refresh" aria-hidden="true"></i>
           </button>
-          <button type="button" class="cmd-btn" id="btn-connect" title="连接设备">
+          <button type="button" class="cmd-btn" id="btn-connect" title="设备事件监听尚未就绪" disabled>
             <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label">连接</span>
           </button>
         </div>
@@ -548,21 +548,21 @@
                     <div class="settings-row">
                       <div class="settings-row-text">
                         <div class="settings-row-title">主题</div>
-                        <div class="settings-row-desc">深色、浅色，或跟随操作系统外观。</div>
+                        <div class="settings-row-desc">跟随操作系统外观，或选择浅色、深色。</div>
                       </div>
                       <div class="settings-row-control" role="radiogroup" aria-label="主题">
                         <div class="seg">
                           <label class="seg-item">
-                            <input type="radio" name="theme-choice" id="theme-choice-dark" checked />
-                            <span>深色</span>
+                            <input type="radio" name="theme-choice" id="theme-choice-system" checked />
+                            <span>跟随系统</span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="theme-choice" id="theme-choice-light" />
                             <span>浅色</span>
                           </label>
                           <label class="seg-item">
-                            <input type="radio" name="theme-choice" id="theme-choice-system" />
-                            <span>跟随系统</span>
+                            <input type="radio" name="theme-choice" id="theme-choice-dark" />
+                            <span>深色</span>
                           </label>
                         </div>
                       </div>
@@ -735,10 +735,11 @@
                 <section class="settings-section">
                   <h2 class="settings-section-title">关于</h2>
                   <div class="settings-group settings-group-stack">
+                    <img class="about-icon" src="assets/app-icon.png" width="80" height="80" alt="laPower 图标" loading="lazy" />
                     <div class="settings-kv">
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">版本</span>
-                        <span>WITRN-RS <span id="about-version">--</span></span>
+                        <span>laPower <span id="about-version">--</span></span>
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">许可证</span>
@@ -746,7 +747,7 @@
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">仓库</span>
-                        <span class="settings-kv-value selectable">github.com/KHWLGH/WITRN-RS</span>
+                        <span class="settings-kv-value selectable">github.com/KHWLGH/laPower</span>
                       </div>
                     </div>
                     <p class="settings-row-desc">第三方组件：uPlot (MIT) · Fluent System Icons (MIT)</p>

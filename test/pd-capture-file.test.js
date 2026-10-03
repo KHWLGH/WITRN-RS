@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ModuleWorker } from '../bench/module-worker.mjs';
+import { encodePdEntries, PD_EXPORT_BYTES, pdCapturePrefix } from '../src/pd-export-core.js';
 import { buildPdCaptureFile, parsePdCaptureFile, summarize } from '../src/pd-model.js';
 
 /** 一棵最小但真实形状的解码树（Request 消息 + quick_rdo）。 */
@@ -32,6 +34,7 @@ const divider = { t: 1_000_001, divider: true };
 
 test('capture file round-trips entries and dividers', () => {
   const file = buildPdCaptureFile([entry, divider]);
+  assert.equal(file.app, 'laPower');
   assert.equal(file.kind, 'pd-capture');
   assert.equal(file.version, 2);
 
@@ -169,4 +172,111 @@ test('v2 does not truncate large captures', () => {
   const parsed = parsePdCaptureFile({ kind: 'pd-capture', version: 2, entries });
   assert.equal(parsed.ok, true);
   assert.equal(parsed.entries.length, 3000);
+});
+
+test('streamed PD JSON matches the v2 contract, including v1 metadata and split UTF-8', () => {
+  const entries = [
+    { t: 1, divider: true },
+    {
+      t: 2,
+      sop: 'SOP',
+      type: 'GoodCRC',
+      role: 'Source',
+      summary: '旧报文',
+      meta: { raw: '0', field: '字段', value: '中文'.repeat(600000) },
+    },
+  ];
+  const chunks = [...encodePdEntries(entries, true)];
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every((bytes) => bytes.byteLength <= PD_EXPORT_BYTES));
+  const text = Buffer.concat(chunks).toString('utf8');
+  assert.deepEqual(
+    JSON.parse(`${pdCapturePrefix('2026-10-03T00:00:00Z')}${text}]}`).entries,
+    buildPdCaptureFile(entries).entries,
+  );
+});
+
+test('real PD Worker exports a fixed snapshot with bounded backpressure and cleans up failed exports', async () => {
+  const { cancelPdExport, exportPdFile } = await import('../src/pd-export.js');
+  const previousWorker = globalThis.Worker;
+  const previousWindow = globalThis.window;
+  globalThis.Worker = ModuleWorker;
+  const entries = Array.from({ length: 100000 }, (_, t) => ({
+    t,
+    sop: 'SOP',
+    type: 'GoodCRC',
+    role: 'Source',
+    summary: '捕获报文',
+    bytes: [1, 2, 3],
+  }));
+  const original = entries.slice();
+  const chunks = [];
+  let closes = [];
+  let fail = false;
+  let picks = 0;
+  let holdWrite = false;
+  let releaseWrite = null;
+  globalThis.window = {
+    __TAURI__: {
+      core: {
+        async invoke(command, args) {
+          if (command === 'pd_export_pick') {
+            picks++;
+            return { handle: 1, name: 'capture.json', path: 'D:/capture.json', size: 0 };
+          }
+          if (command === 'csv_write_chunk') {
+            if (fail) throw new Error('disk full');
+            if (holdWrite)
+              await new Promise((resolve) => {
+                releaseWrite = resolve;
+              });
+            assert.ok(args.byteLength <= PD_EXPORT_BYTES);
+            chunks.push(Buffer.from(args));
+            // Clearing and appending after the snapshot cannot change this file.
+            entries.length = 0;
+            entries.push({ t: -1, divider: true });
+          }
+          if (command === 'csv_write_close') closes.push(args.options);
+          return null;
+        },
+      },
+    },
+  };
+  try {
+    const first = exportPdFile(() => entries);
+    assert.equal(
+      exportPdFile(() => entries),
+      first,
+      'reentrant export shares the active task',
+    );
+    assert.equal(await first, 100000);
+    assert.equal(picks, 1);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')).entries, buildPdCaptureFile(original).entries);
+    const worker = ModuleWorker.instances.at(-1);
+    assert.ok(worker.messages.filter((m) => m.type === 'entries').every((m) => m.entries <= 128));
+    assert.ok(worker.closed);
+    assert.deepEqual(closes, [{ sync: true }]);
+    fail = true;
+    closes = [];
+    await assert.rejects(
+      exportPdFile(() => entries),
+      /disk full/,
+    );
+    assert.deepEqual(closes, [{ abort: true }]);
+    assert.ok(ModuleWorker.instances.at(-1).closed);
+    fail = false;
+    holdWrite = true;
+    closes = [];
+    const cancelled = exportPdFile(() => entries);
+    while (!releaseWrite) await new Promise((resolve) => setTimeout(resolve, 1));
+    const cleanup = cancelPdExport();
+    releaseWrite();
+    await cleanup;
+    await assert.rejects(cancelled, /已取消/);
+    assert.deepEqual(closes, [{ abort: true }], 'exit cancellation awaits incomplete-file cleanup');
+    assert.ok(ModuleWorker.instances.at(-1).closed);
+  } finally {
+    globalThis.Worker = previousWorker;
+    globalThis.window = previousWindow;
+  }
 });

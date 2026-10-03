@@ -3,7 +3,7 @@
  * @file 数据入库、统计计算、UI 显示更新、录制控制、图表/统计重置。
  */
 
-import { scheduleChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
+import { scheduleChartUpdate as requestChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
 import { firstIndexAfter, firstIndexAtOrAfter } from './chart-buckets.js';
 import {
   classifyChartWindow,
@@ -15,16 +15,15 @@ import {
 import { deviceStream } from './device-stream.js';
 import { displayFrames } from './frame-scheduler.js';
 import { energyMaxStepS, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
-import {
-  captureRangeStatsSnapshot,
-  computeRangeStatsAsync,
-  computeRangeStatsSync,
-  rangeStatsRevision,
-} from './range-stats.js';
+import { performanceDiagnostics } from './performance-diagnostics.js';
+import { captureRangeStatsSnapshot, computeRangeStatsSync, rangeStatsRevision } from './range-stats.js';
+import { computeRangeStatsBackground } from './range-stats-background.js';
 
 deviceStream.configure({
   getColumns: () => state.chartSeries,
   onSample: (sample, segment) => addDataPoint(sample, segment),
+  onBatchStart: () => beginIngestBatch(),
+  onBatchEnd: () => endIngestBatch(),
   onBatch: () => spoolRowsAppended(),
 });
 
@@ -60,6 +59,7 @@ const RECORD_COLUMNS = /** @type {(keyof import('./state.js').ChartSeriesColumns
   'cc1',
   'cc2',
   'recordingSegments',
+  'sampleIntervals',
 ]);
 
 /** @param {string} cmd @param {Record<string, unknown>} [args] */
@@ -85,7 +85,7 @@ const meterPeak = {
 
 /** 监控视图隐藏期间只积累数据，恢复时从最新状态一次性补齐显示。 */
 function monitorDisplayVisible() {
-  return state.settings.activeView === 'monitor' && !document.hidden;
+  return state.settings.activeView === 'monitor' && state.windowVisible && !document.hidden;
 }
 
 /** @param {Element|null} el @param {string} value */
@@ -262,7 +262,6 @@ export function addDataPoint(data, segment) {
   const time = native ? streamSampleTime(data, segment?.baseSeconds ?? 0) : null;
   const nowMs = time?.wallMs ?? Date.now();
   const record = native ? !!segment : state.isRecording;
-  if (native && Number.isFinite(data.rate_ms) && data.rate_ms > 0) state.dataIntervalMs = data.rate_ms;
 
   // 有符号电流：开启后保留方向（正=正向 / 负=反向）；关闭时按旧行为记录绝对值。
   // 功率恒取绝对值（电压非负，功率符号与电流一致，不损失信息）。
@@ -311,6 +310,9 @@ export function addDataPoint(data, segment) {
     ? time.seconds
     : nextRecordingX(prevX, state.recordingBaseSeconds + Math.max(0, activeElapsed), state.settings.sampleRate);
   const beginsSegment = segment ? segment.first : state.energy.lastX === null;
+  const sampleInterval =
+    native && Number.isFinite(data.rate_ms) && data.rate_ms > 0 ? data.rate_ms : state.settings.sampleRate;
+  if (cols.x.length === 0) state.dataIntervalMs = sampleInterval;
   const previousSegment = cols.recordingSegments.at(-1);
   for (const key of RECORD_COLUMNS) cols[key].reserveNext();
   cols.recordingSegments.push(
@@ -319,6 +321,7 @@ export function addDataPoint(data, segment) {
   if (segment) segment.first = false;
 
   cols.timestamps.push(nowMs);
+  cols.sampleIntervals.push(sampleInterval);
   cols.voltage.push(data.voltage);
   cols.current.push(currentValue);
   cols.power.push(powerAbs);
@@ -345,7 +348,7 @@ export function addDataPoint(data, segment) {
     const dt = stepS / 3600;
     if (
       dt >= 0 &&
-      stepS <= energyMaxStepS(state.dataIntervalMs ?? state.settings.sampleRate) &&
+      stepS <= energyMaxStepS(sampleInterval) &&
       Number.isFinite(dt) &&
       Number.isFinite(currentAbs) &&
       Number.isFinite(powerAbs)
@@ -707,24 +710,44 @@ export function getVisibleDataRange() {
 
 /** @type {import('./range-stats.js').RangeStats|null} */
 let rangeStatsCache = null;
-let rangeStatsCacheWindow = '';
 /** @typedef {import('./range-stats.js').RangeStatsSnapshot} RangeSnapshot */
 /**
  * @typedef {{ snapshot: RangeSnapshot, windowKey: string, cancelled: boolean,
- *   promise: Promise<import('./range-stats.js').RangeStats|null> }} RangeStatsJob
+ *   controller: AbortController, promise: Promise<import('./range-stats.js').RangeStats|null> }} RangeStatsJob
  */
 /** @type {RangeStatsJob|null} */
 let rangeStatsJob = null;
 const SYNC_RANGE_POINTS = 4096;
+let rangeCalculationMs = 0;
+let rangeStartedAt = -Infinity;
+let rangeStartedWindow = '';
+/** @type {import('./state.js').ChartSeriesColumns|null} */
+let rangeStartedColumns = null;
+let rangeStartedRevision = -1;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let rangeRefreshTimer = null;
 
-function currentRangeSnapshot() {
-  if (state.chartSeries.x.length === 0) return null;
-  const { startIndex, endIndex } = getVisibleDataRange();
-  const maxStepS = energyMaxStepS(state.dataIntervalMs ?? state.settings.sampleRate);
-  return captureRangeStatsSnapshot(state.chartSeries, startIndex, endIndex, maxStepS);
+/** @typedef {Pick<RangeSnapshot,'columns'|'startIndex'|'endIndex'|'len'|'revision'|'maxStepS'>} RangeMetadata */
+
+/** Cheap cache lookup before copying any chunk references. @returns {RangeMetadata|null} */
+function currentRangeMetadata() {
+  const columns = state.chartSeries;
+  if (!columns.x.length) return null;
+  return {
+    columns,
+    ...getVisibleDataRange(),
+    len: columns.x.length,
+    revision: rangeStatsRevision(columns),
+    maxStepS: energyMaxStepS(state.dataIntervalMs),
+  };
 }
 
-/** @param {RangeSnapshot} snapshot */
+function currentRangeSnapshot() {
+  const meta = currentRangeMetadata();
+  return meta ? captureRangeStatsSnapshot(meta.columns, meta.startIndex, meta.endIndex, meta.maxStepS) : null;
+}
+
+/** @param {RangeMetadata} snapshot */
 function matchingRangeCache(snapshot) {
   const cache = rangeStatsCache;
   if (
@@ -740,7 +763,7 @@ function matchingRangeCache(snapshot) {
   return null;
 }
 
-/** @param {RangeSnapshot} snapshot */
+/** @param {RangeMetadata} snapshot */
 function incrementalRangeOptions(snapshot) {
   const cache = rangeStatsCache;
   if (
@@ -765,7 +788,6 @@ export function getRangeStats() {
   const cached = matchingRangeCache(snapshot);
   if (cached) return cached;
   rangeStatsCache = computeRangeStatsSync(snapshot, incrementalRangeOptions(snapshot));
-  rangeStatsCacheWindow = rangeWindowKey();
   return rangeStatsCache;
 }
 
@@ -778,8 +800,32 @@ function rangeWindowKey() {
 }
 
 function cancelRangeStatsJob() {
-  if (rangeStatsJob) rangeStatsJob.cancelled = true;
+  if (rangeStatsJob) {
+    rangeStatsJob.cancelled = true;
+    rangeStatsJob.controller.abort();
+  }
   rangeStatsJob = null;
+  if (rangeRefreshTimer !== null) clearTimeout(rangeRefreshTimer);
+  rangeRefreshTimer = null;
+}
+
+export function suspendMonitorDisplay() {
+  cancelRangeStatsJob();
+  if (__statsUpdateTimer !== null) clearTimeout(__statsUpdateTimer);
+  __statsUpdateTimer = null;
+}
+
+/** @param {number} delay */
+function scheduleRangeCalculation(delay) {
+  if (rangeRefreshTimer !== null) return;
+  rangeRefreshTimer = setTimeout(
+    () => {
+      rangeRefreshTimer = null;
+      updateStatsDisplay();
+      updateEnergyDisplay();
+    },
+    Math.max(0, delay),
+  );
 }
 
 /** @param {RangeStatsJob} job */
@@ -792,7 +838,7 @@ function rangeStatsJobInvalid(job) {
     state.chartSeries !== snapshot.columns ||
     state.chartSeries.x.length < snapshot.len ||
     rangeStatsRevision(state.chartSeries) !== snapshot.revision ||
-    energyMaxStepS(state.dataIntervalMs ?? state.settings.sampleRate) !== snapshot.maxStepS ||
+    energyMaxStepS(state.dataIntervalMs) !== snapshot.maxStepS ||
     rangeWindowKey() !== job.windowKey
   )
     return true;
@@ -809,56 +855,71 @@ function rangeStatsJobInvalid(job) {
 
 /**
  * Resolve a fixed current-window snapshot; cancellation resolves to null.
- * Large ranges run in 1.5ms macrotask slices, while short append tails remain synchronous.
+ * Large ranges run in a Worker (cooperative fallback); short append tails remain synchronous.
  * @returns {Promise<import('./range-stats.js').RangeStats|null>}
  */
 export function getRangeStatsAsync() {
-  const snapshot = currentRangeSnapshot();
-  if (!snapshot || !state.settings.statsRange || !monitorDisplayVisible()) {
+  const meta = currentRangeMetadata();
+  if (!meta || !state.settings.statsRange || !monitorDisplayVisible()) {
     cancelRangeStatsJob();
     return Promise.resolve(null);
   }
-  const cached = matchingRangeCache(snapshot);
+  const cached = matchingRangeCache(meta);
   if (cached) return Promise.resolve(cached);
   if (rangeStatsJob && rangeStatsJobInvalid(rangeStatsJob)) cancelRangeStatsJob();
   if (rangeStatsJob) return rangeStatsJob.promise;
-  const options = incrementalRangeOptions(snapshot);
+  const options = incrementalRangeOptions(meta);
+  const windowKey = rangeWindowKey();
+  const delay = rangeStartedAt + Math.max(250, rangeCalculationMs * 4) - performance.now();
+  if (
+    meta.endIndex - options.foldStart + 1 > SYNC_RANGE_POINTS &&
+    delay > 0 &&
+    rangeStartedWindow === windowKey &&
+    rangeStartedColumns === meta.columns &&
+    rangeStartedRevision === meta.revision
+  ) {
+    scheduleRangeCalculation(delay);
+    return Promise.resolve(completedRangeSnapshot(meta));
+  }
+  const snapshot = captureRangeStatsSnapshot(meta.columns, meta.startIndex, meta.endIndex, meta.maxStepS);
   if (snapshot.endIndex - options.foldStart + 1 <= SYNC_RANGE_POINTS) {
     rangeStatsCache = computeRangeStatsSync(snapshot, options);
-    rangeStatsCacheWindow = rangeWindowKey();
     return Promise.resolve(rangeStatsCache);
   }
   /** @type {RangeStatsJob} */
   const job = {
     snapshot,
-    windowKey: rangeWindowKey(),
+    windowKey,
     cancelled: false,
+    controller: new AbortController(),
     promise: Promise.resolve(null),
   };
   rangeStatsJob = job;
-  job.promise = computeRangeStatsAsync(snapshot, { ...options, isCancelled: () => rangeStatsJobInvalid(job) }).then(
-    (result) => {
-      if (rangeStatsJob !== job) return null;
-      rangeStatsJob = null;
-      if (!result || rangeStatsJobInvalid(job)) return null;
-      rangeStatsCache = result;
-      rangeStatsCacheWindow = job.windowKey;
-      // Only the current bounds may paint. A growing follow snapshot can finish
-      // without restarting on each sample; the next display query captures its new bounds.
-      const current = currentRangeSnapshot();
-      if (current && matchingRangeCache(current)) {
-        updateStatsDisplay();
-        updateEnergyDisplay();
-      } else scheduleStatsUpdate();
-      return result;
-    },
-  );
+  rangeStartedAt = performance.now();
+  rangeStartedWindow = windowKey;
+  rangeStartedColumns = meta.columns;
+  rangeStartedRevision = meta.revision;
+  job.promise = computeRangeStatsBackground(snapshot, {
+    ...options,
+    signal: job.controller.signal,
+    isCancelled: () => rangeStatsJobInvalid(job),
+  }).then((result) => {
+    if (rangeStatsJob !== job) return null;
+    rangeStatsJob = null;
+    if (!result || rangeStatsJobInvalid(job)) return null;
+    rangeCalculationMs = performance.now() - rangeStartedAt;
+    rangeStatsCache = result;
+    // Completed follow snapshots paint with their actual bounds while the latest waits.
+    updateStatsDisplay();
+    updateEnergyDisplay();
+    return result;
+  });
   return job.promise;
 }
 
 /** Returns null while a large current range is being calculated. */
 function getDisplayRangeStats() {
-  const snapshot = currentRangeSnapshot();
+  const snapshot = currentRangeMetadata();
   if (!snapshot) return null;
   const cached = matchingRangeCache(snapshot);
   if (cached) {
@@ -866,19 +927,20 @@ function getDisplayRangeStats() {
     return cached;
   }
   void getRangeStatsAsync();
-  const result = matchingRangeCache(snapshot) ?? completedFollowSnapshot(snapshot);
-  labelRangeSnapshot(result, !!result && result.endIndex !== snapshot.endIndex);
+  const result = matchingRangeCache(snapshot) ?? completedRangeSnapshot(snapshot);
+  labelRangeSnapshot(
+    result,
+    !!result && (result.startIndex !== snapshot.startIndex || result.endIndex !== snapshot.endIndex),
+  );
   return result;
 }
 
-/** A completed follow snapshot remains useful when its actual bounds are visible.
- * @param {RangeSnapshot} snapshot
+/** A completed snapshot remains useful when its actual bounds are explicitly labeled.
+ * @param {RangeMetadata} snapshot
  */
-function completedFollowSnapshot(snapshot) {
+function completedRangeSnapshot(snapshot) {
   const cache = rangeStatsCache;
-  return state.chartWindow.mode === 'follow' &&
-    rangeStatsCacheWindow === rangeWindowKey() &&
-    cache?.columns === snapshot.columns &&
+  return cache?.columns === snapshot.columns &&
     cache.revision === snapshot.revision &&
     cache.maxStepS === snapshot.maxStepS &&
     cache.len <= snapshot.len
@@ -939,8 +1001,8 @@ let rangeStatsDisplayPending = null;
 
 function markStaleRangeStatsPending() {
   if (rangeStatsJob && rangeStatsJobInvalid(rangeStatsJob)) cancelRangeStatsJob();
-  const snapshot = currentRangeSnapshot();
-  if (snapshot && !matchingRangeCache(snapshot) && !completedFollowSnapshot(snapshot)) setRangeStatsPending(true);
+  const snapshot = currentRangeMetadata();
+  if (snapshot && !matchingRangeCache(snapshot) && !completedRangeSnapshot(snapshot)) setRangeStatsPending(true);
 }
 
 /** 更新统计显示面板（支持范围模式）。 */
@@ -1075,6 +1137,49 @@ let __rangeUiGeneration = 0;
 let lastRealtime = null;
 
 /**
+ * Device batches are consumed point by point, but display work is submitted once per batch.
+ * The flags keep the hot path free of rAF/timer registration while preserving every state
+ * update and making a partial batch visible if ingestion reports an error.
+ */
+let ingestBatchDepth = 0;
+let ingestBatchRangeDirty = false;
+let ingestBatchStatsDirty = false;
+let ingestBatchChartDirty = false;
+let ingestBatchStartedAt = 0;
+
+function beginIngestBatch() {
+  if (ingestBatchDepth++ === 0) {
+    ingestBatchStartedAt = performance.now();
+    ingestBatchRangeDirty = false;
+    ingestBatchStatsDirty = false;
+    ingestBatchChartDirty = false;
+  }
+}
+
+function endIngestBatch() {
+  if (ingestBatchDepth <= 0) return;
+  if (--ingestBatchDepth > 0) return;
+  const rangeDirty = ingestBatchRangeDirty;
+  const statsDirty = ingestBatchStatsDirty;
+  const chartDirty = ingestBatchChartDirty;
+  ingestBatchRangeDirty = false;
+  ingestBatchStatsDirty = false;
+  ingestBatchChartDirty = false;
+  if (rangeDirty) scheduleRangeUi();
+  if (statsDirty) scheduleStatsUpdate();
+  if (chartDirty) scheduleChartUpdate();
+  performanceDiagnostics.domCommit('ingest-batch-submit', ingestBatchStartedAt);
+}
+
+function scheduleChartUpdate() {
+  if (ingestBatchDepth > 0) {
+    ingestBatchChartDirty = true;
+    return;
+  }
+  requestChartUpdate();
+}
+
+/**
  * 最近一个点的显示值（电流按「记录电流方向」处理、功率取幅值），没有数据时为 null。
  * 协议控制页的读数条用它，不另开订阅。
  */
@@ -1086,10 +1191,15 @@ export function getLastRealtime() {
  * 范围标签与点数：跟 rAF 走，不跟每个采样点走。
  */
 export function scheduleRangeUi() {
+  if (ingestBatchDepth > 0) {
+    ingestBatchRangeDirty = true;
+    return;
+  }
   if (__rangeUiPending) return;
   __rangeUiPending = true;
   const generation = __rangeUiGeneration;
   displayFrames.schedule('monitor-ui', () => {
+    const startedAt = performance.now();
     if (generation !== __rangeUiGeneration) return;
     __rangeUiPending = false;
     if (monitorDisplayVisible()) {
@@ -1101,6 +1211,7 @@ export function scheduleRangeUi() {
     const el = document.getElementById('data-count');
     setTextIfChanged(el, String(state.chartSeries.x.length));
     updateRemainingDisplay();
+    performanceDiagnostics.domCommit('monitor-ui', startedAt);
   });
 }
 
@@ -1132,6 +1243,10 @@ export function refreshMonitorDisplay() {
  * 250ms 的上限刷新间隔保持 UI 可读性，同时避免长录制时主线程被统计占满。
  */
 export function scheduleStatsUpdate() {
+  if (ingestBatchDepth > 0) {
+    ingestBatchStatsDirty = true;
+    return;
+  }
   if (!monitorDisplayVisible()) {
     cancelRangeStatsJob();
     return;
@@ -1139,11 +1254,16 @@ export function scheduleStatsUpdate() {
   if (!state.settings.statsRange) cancelRangeStatsJob();
   if (__statsUpdateTimer !== null) return;
   if (state.settings.statsRange) markStaleRangeStatsPending();
-  __statsUpdateTimer = setTimeout(() => {
-    __statsUpdateTimer = null;
-    updateStatsDisplay();
-    updateEnergyDisplay();
-  }, 250);
+  __statsUpdateTimer = setTimeout(
+    () => {
+      const startedAt = performance.now();
+      __statsUpdateTimer = null;
+      updateStatsDisplay();
+      updateEnergyDisplay();
+      performanceDiagnostics.domCommit('stats-ui', startedAt);
+    },
+    state.settings.statsRange ? Math.max(250, rangeCalculationMs * 4) : 250,
+  );
 }
 
 // ─── Reset functions ─────────────────────────────────────────────────────────
@@ -1202,6 +1322,11 @@ export function clearChart() {
   deviceStream.replace();
   setChartColumns(emptyChartColumns());
   rangeStatsCache = null;
+  rangeStartedColumns = null;
+  rangeStartedRevision = -1;
+  rangeStartedWindow = '';
+  rangeStartedAt = -Infinity;
+  rangeCalculationMs = 0;
   state.dataIntervalMs = null;
   state.lastRecordingStartTime = null;
   state.recordingBaseSeconds = 0;
@@ -1324,7 +1449,7 @@ export function stopRecording({ discard = false } = {}) {
   if (btnClear) btnClear.disabled = false;
 
   state.__setRangeControlsEnabled?.(true);
-  // 预算跳过的帧在暂停时补一张全质量图
+  // 暂停时补上最后一帧，密集回看继续遵循当前显示预算。
   updateCharts();
 
   // 跟随记录关闭时采集门保持开；开启时与本地 isRecording 一起关掉。

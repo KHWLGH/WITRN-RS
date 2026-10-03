@@ -7,6 +7,8 @@ mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
 pub mod stream;
 mod usb_port;
+#[cfg(target_os = "windows")]
+mod windows_icon;
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
@@ -1119,6 +1121,7 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             boot_timing::mark("setup_enter");
+            file_io::start_spool_checkpoints(app.handle().clone());
             let main_window = app
                 .get_webview_window("main")
                 .expect("main window must exist");
@@ -1132,6 +1135,7 @@ pub fn run() {
                     .create_overlay_titlebar()
                     .expect("failed to create overlay titlebar");
                 boot_timing::mark("titlebar_created");
+                windows_icon::configure(&main_window);
             }
             boot_timing::mark("setup_exit");
             Ok(())
@@ -1160,6 +1164,7 @@ pub fn run() {
             km003c_session::km003c_trigger,
             km003c_session::km003c_cancel_trigger,
             file_io::csv_export_pick,
+            file_io::pd_export_pick,
             file_io::csv_import_pick,
             file_io::csv_read_chunk,
             file_io::csv_read_close,

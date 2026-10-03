@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDeviceStream } from '../src/device-stream.js';
+import { registerListeners } from '../src/event-listeners.js';
 import { streamSampleTime } from '../src/measurement.js';
+
+test('listener registration releases late successes after a partial failure', async () => {
+  const released = [];
+  let completeLate;
+  const late = new Promise((resolve) => {
+    completeLate = resolve;
+  });
+  const failure = new Error('listener unavailable');
+  const registering = registerListeners([Promise.resolve(() => released.push('early')), Promise.reject(failure), late]);
+  await Promise.resolve();
+  assert.deepEqual(released, [], 'wait for all registrations before releasing the partial set');
+  completeLate(() => released.push('late'));
+  await assert.rejects(registering, (error) => error === failure);
+  assert.deepEqual(released, ['early', 'late']);
+});
+
+test('listeners stay registered until the successful group is explicitly released', async () => {
+  let released = 0;
+  const release = await registerListeners([Promise.resolve(() => released++), Promise.resolve(() => released++)]);
+  assert.equal(released, 0);
+  release();
+  assert.equal(released, 2);
+});
 
 function sample(seq, segment = 1, generation = 1) {
   return {
@@ -156,6 +180,30 @@ test('each selected sample is consumed once, in sequence, without animation fram
   assert.equal(h.errors.length, 0);
 });
 
+test('batch hooks bracket every consumed point and ACK waits for the whole batch', async () => {
+  const events = [];
+  const h = harness({
+    onBatchStart: (size) => events.push(['start', size]),
+    onBatch: (count) => events.push(['commit', count]),
+    onBatchEnd: (count, timing) => events.push(['end', count, timing]),
+  });
+  await h.stream.begin(0);
+  h.stream.handleBatch([sample(1), sample(2), sample(3)]);
+  await h.stream.settle();
+
+  assert.equal(events.length, 3);
+  assert.deepEqual(events[0], ['start', 3]);
+  assert.deepEqual(events[1], ['end', 3, events[1][2]]);
+  assert.equal(events[1][2].durationMs >= 0, true);
+  assert.equal(events[1][2].firstReceivedWallMs, 1704067200010);
+  assert.equal(events[1][2].lastReceivedWallMs, 1704067200030);
+  assert.equal(events[1][2].lastSeq, 3);
+  assert.deepEqual(events[2], ['commit', 3]);
+  const ack = h.calls.find((call) => call.command === 'ack_device_stream');
+  assert.deepEqual(ack?.args, { generation: 1, seq: 3 });
+  assert.equal(h.stream.diagnostics().batchPoints, 3);
+});
+
 test('sequence gaps terminate instead of acknowledging lost samples', async () => {
   const h = harness();
   await h.stream.begin(0);
@@ -169,6 +217,29 @@ test('sequence gaps terminate instead of acknowledging lost samples', async () =
   );
   assert.equal(
     h.calls.some((c) => c.command === 'ack_device_stream'),
+    false,
+  );
+});
+
+test('a partial batch still closes diagnostics but never commits or ACKs', async () => {
+  const events = [];
+  const h = harness({
+    onBatchStart: (size) => events.push(['start', size]),
+    onBatch: (count) => events.push(['commit', count]),
+    onBatchEnd: (count) => events.push(['end', count]),
+  });
+  await h.stream.begin(0);
+  h.stream.handleBatch([sample(1), sample(3), sample(4)]);
+  await h.stream.settle();
+
+  assert.deepEqual(events, [
+    ['start', 3],
+    ['end', 1],
+  ]);
+  assert.equal(h.stream.diagnostics().batchCount, 1);
+  assert.equal(h.stream.diagnostics().batchPoints, 1);
+  assert.equal(
+    h.calls.some((call) => call.command === 'ack_device_stream'),
     false,
   );
 });

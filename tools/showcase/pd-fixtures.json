@@ -1,0 +1,1576 @@
+[
+  {
+    "bytes": [
+      254, 27, 224, 161, 97, 44, 145, 1, 4, 44, 209, 2, 0, 44, 193, 3, 0, 44, 177, 4, 0, 69, 65, 6, 0, 60, 33, 164, 193,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 207],
+      "field": "PD",
+      "raw": "1010000101100001001011001001000100000001000001000010110011010001000000100000000000101100110000010000001100000000001011001011000100000100000000000100010101000001000001100000000000111100001000011010010011000001",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0110000110100001",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "110",
+              "value": 6
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "1",
+              "value": "Source"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "1",
+              "value": "DFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00001",
+              "value": "Source_Capabilities"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 207],
+          "field": "Data Objects",
+          "raw": "001011001001000100000001000001000010110011010001000000100000000000101100110000010000001100000000001011001011000100000100000000000100010101000001000001100000000000111100001000011010010011000001",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "PDO 1",
+              "quick_pdo": "F 5.0V@3.0A",
+              "raw": "00000100000000011001000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "00",
+                  "value": "FPDO"
+                },
+                {
+                  "bit_loc": [29, 29],
+                  "field": "Dual-Role Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [28, 28],
+                  "field": "USB Suspend Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Unconstrained Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "Dual-Role Data",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "Reserved",
+                  "raw": "0",
+                  "value": null
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Peak Current",
+                  "raw": "00",
+                  "value": "00"
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Voltage",
+                  "raw": "0001100100",
+                  "value": "5.0V"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            },
+            {
+              "bit_loc": [32, 63],
+              "field": "PDO 2",
+              "quick_pdo": "F 9.0V@3.0A",
+              "raw": "00000000000000101101000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "00",
+                  "value": "FPDO"
+                },
+                {
+                  "bit_loc": [29, 29],
+                  "field": "Dual-Role Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [28, 28],
+                  "field": "USB Suspend Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Unconstrained Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "USB Communications Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "Dual-Role Data",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "Reserved",
+                  "raw": "0",
+                  "value": null
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Peak Current",
+                  "raw": "00",
+                  "value": "00"
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Voltage",
+                  "raw": "0010110100",
+                  "value": "9.0V"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            },
+            {
+              "bit_loc": [64, 95],
+              "field": "PDO 3",
+              "quick_pdo": "F 12.0V@3.0A",
+              "raw": "00000000000000111100000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "00",
+                  "value": "FPDO"
+                },
+                {
+                  "bit_loc": [29, 29],
+                  "field": "Dual-Role Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [28, 28],
+                  "field": "USB Suspend Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Unconstrained Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "USB Communications Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "Dual-Role Data",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "Reserved",
+                  "raw": "0",
+                  "value": null
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Peak Current",
+                  "raw": "00",
+                  "value": "00"
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Voltage",
+                  "raw": "0011110000",
+                  "value": "12.0V"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            },
+            {
+              "bit_loc": [96, 127],
+              "field": "PDO 4",
+              "quick_pdo": "F 15.0V@3.0A",
+              "raw": "00000000000001001011000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "00",
+                  "value": "FPDO"
+                },
+                {
+                  "bit_loc": [29, 29],
+                  "field": "Dual-Role Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [28, 28],
+                  "field": "USB Suspend Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Unconstrained Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "USB Communications Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "Dual-Role Data",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "Reserved",
+                  "raw": "0",
+                  "value": null
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Peak Current",
+                  "raw": "00",
+                  "value": "00"
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Voltage",
+                  "raw": "0100101100",
+                  "value": "15.0V"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            },
+            {
+              "bit_loc": [128, 159],
+              "field": "PDO 5",
+              "quick_pdo": "F 20.0V@3.25A",
+              "raw": "00000000000001100100000101000101",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "00",
+                  "value": "FPDO"
+                },
+                {
+                  "bit_loc": [29, 29],
+                  "field": "Dual-Role Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [28, 28],
+                  "field": "USB Suspend Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Unconstrained Power",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "USB Communications Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "Dual-Role Data",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "Reserved",
+                  "raw": "0",
+                  "value": null
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Peak Current",
+                  "raw": "00",
+                  "value": "00"
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Voltage",
+                  "raw": "0110010000",
+                  "value": "20.0V"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Current",
+                  "raw": "0101000101",
+                  "value": "3.25A"
+                }
+              ]
+            },
+            {
+              "bit_loc": [160, 191],
+              "field": "PDO 6",
+              "quick_pdo": "P 3.3-21.0V@3.0A",
+              "raw": "11000001101001000010000100111100",
+              "value": [
+                {
+                  "bit_loc": [31, 30],
+                  "field": "Supply Type",
+                  "raw": "11",
+                  "value": "APDO"
+                },
+                {
+                  "bit_loc": [29, 28],
+                  "field": "APDO Type",
+                  "raw": "00",
+                  "value": "SPR PPS"
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "PPS Power Limited",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 17],
+                  "field": "Maximum Voltage",
+                  "raw": "0011010010",
+                  "value": "21.0V"
+                },
+                {
+                  "bit_loc": [16, 8],
+                  "field": "Minimum Voltage",
+                  "raw": "000100001",
+                  "value": "3.3V"
+                },
+                {
+                  "bit_loc": [7, 0],
+                  "field": "Maximum Current",
+                  "raw": "00111100",
+                  "value": "3.0A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 3, 224, 129, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 15],
+      "field": "PD",
+      "raw": "1000000100000000",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0000000010000001",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00001",
+              "value": "GoodCRC"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 7, 224, 130, 16, 44, 177, 4, 19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 47],
+      "field": "PD",
+      "raw": "100000100001000000101100101100010000010000010011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0001000010000010",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00010",
+              "value": "Request"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 47],
+          "field": "Data Objects",
+          "raw": "00101100101100010000010000010011",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "RDO",
+              "quick_rdo": "[1] F 5.0V@3.0A",
+              "raw": "00010011000001001011000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 28],
+                  "field": "Object Position",
+                  "raw": "0001",
+                  "value": 1
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Giveback",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "Capability Mismatch",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "No USB Suspend",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Reserved",
+                  "raw": "00",
+                  "value": null
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 7, 224, 130, 16, 44, 177, 4, 35, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 47],
+      "field": "PD",
+      "raw": "100000100001000000101100101100010000010000100011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0001000010000010",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00010",
+              "value": "Request"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 47],
+          "field": "Data Objects",
+          "raw": "00101100101100010000010000100011",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "RDO",
+              "quick_rdo": "[2] F 9.0V@3.0A",
+              "raw": "00100011000001001011000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 28],
+                  "field": "Object Position",
+                  "raw": "0010",
+                  "value": 2
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Giveback",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "Capability Mismatch",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "No USB Suspend",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Reserved",
+                  "raw": "00",
+                  "value": null
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 7, 224, 130, 16, 44, 177, 4, 51, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 47],
+      "field": "PD",
+      "raw": "100000100001000000101100101100010000010000110011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0001000010000010",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00010",
+              "value": "Request"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 47],
+          "field": "Data Objects",
+          "raw": "00101100101100010000010000110011",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "RDO",
+              "quick_rdo": "[3] F 12.0V@3.0A",
+              "raw": "00110011000001001011000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 28],
+                  "field": "Object Position",
+                  "raw": "0011",
+                  "value": 3
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Giveback",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "Capability Mismatch",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "No USB Suspend",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Reserved",
+                  "raw": "00",
+                  "value": null
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 7, 224, 130, 16, 44, 177, 4, 67, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 47],
+      "field": "PD",
+      "raw": "100000100001000000101100101100010000010001000011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0001000010000010",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00010",
+              "value": "Request"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 47],
+          "field": "Data Objects",
+          "raw": "00101100101100010000010001000011",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "RDO",
+              "quick_rdo": "[4] F 15.0V@3.0A",
+              "raw": "01000011000001001011000100101100",
+              "value": [
+                {
+                  "bit_loc": [31, 28],
+                  "field": "Object Position",
+                  "raw": "0100",
+                  "value": 4
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Giveback",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "Capability Mismatch",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "No USB Suspend",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Reserved",
+                  "raw": "00",
+                  "value": null
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Operating Current",
+                  "raw": "0100101100",
+                  "value": "3.0A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 7, 224, 130, 16, 69, 21, 5, 83, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 47],
+      "field": "PD",
+      "raw": "100000100001000001000101000101010000010101010011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0001000010000010",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00010",
+              "value": "Request"
+            }
+          ]
+        },
+        {
+          "bit_loc": [16, 47],
+          "field": "Data Objects",
+          "raw": "01000101000101010000010101010011",
+          "value": [
+            {
+              "bit_loc": [0, 31],
+              "field": "RDO",
+              "quick_rdo": "[5] F 20.0V@3.25A",
+              "raw": "01010011000001010001010101000101",
+              "value": [
+                {
+                  "bit_loc": [31, 28],
+                  "field": "Object Position",
+                  "raw": "0101",
+                  "value": 5
+                },
+                {
+                  "bit_loc": [27, 27],
+                  "field": "Giveback",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [26, 26],
+                  "field": "Capability Mismatch",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [25, 25],
+                  "field": "USB Communications Capable",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [24, 24],
+                  "field": "No USB Suspend",
+                  "raw": "1",
+                  "value": true
+                },
+                {
+                  "bit_loc": [23, 23],
+                  "field": "Unchunked Extended Messages Supported",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [22, 22],
+                  "field": "EPR Capable",
+                  "raw": "0",
+                  "value": false
+                },
+                {
+                  "bit_loc": [21, 20],
+                  "field": "Reserved",
+                  "raw": "00",
+                  "value": null
+                },
+                {
+                  "bit_loc": [19, 10],
+                  "field": "Operating Current",
+                  "raw": "0101000101",
+                  "value": "3.25A"
+                },
+                {
+                  "bit_loc": [9, 0],
+                  "field": "Maximum Operating Current",
+                  "raw": "0101000101",
+                  "value": "3.25A"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 3, 224, 161, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 15],
+      "field": "PD",
+      "raw": "1010000100000011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0000001110100001",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "1",
+              "value": "Source"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "1",
+              "value": "DFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00001",
+              "value": "GoodCRC"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 3, 224, 163, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 15],
+      "field": "PD",
+      "raw": "1010001100000011",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0000001110100011",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "1",
+              "value": "Source"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "1",
+              "value": "DFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00011",
+              "value": "Accept"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 3, 224, 129, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 15],
+      "field": "PD",
+      "raw": "1000000100000010",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0000001010000001",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "001",
+              "value": 1
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "0",
+              "value": "Sink"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "0",
+              "value": "UFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00001",
+              "value": "GoodCRC"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "bytes": [
+      254, 3, 224, 166, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ],
+    "meta": {
+      "bit_loc": [0, 15],
+      "field": "PD",
+      "raw": "1010011000000101",
+      "value": [
+        {
+          "bit_loc": null,
+          "field": "SOP*",
+          "raw": "SOP",
+          "value": "SOP"
+        },
+        {
+          "bit_loc": [0, 15],
+          "field": "Message Header",
+          "raw": "0000010110100110",
+          "value": [
+            {
+              "bit_loc": [15, 15],
+              "field": "Extended",
+              "raw": "0",
+              "value": false
+            },
+            {
+              "bit_loc": [14, 12],
+              "field": "Number of Data Objects",
+              "raw": "000",
+              "value": 0
+            },
+            {
+              "bit_loc": [11, 9],
+              "field": "MessageID",
+              "raw": "010",
+              "value": 2
+            },
+            {
+              "bit_loc": [8, 8],
+              "field": "Port Power Role",
+              "raw": "1",
+              "value": "Source"
+            },
+            {
+              "bit_loc": [7, 6],
+              "field": "Specification Revision",
+              "raw": "10",
+              "value": "Rev 3.x"
+            },
+            {
+              "bit_loc": [5, 5],
+              "field": "Port Data Role",
+              "raw": "1",
+              "value": "DFP"
+            },
+            {
+              "bit_loc": [4, 0],
+              "field": "Message Type",
+              "raw": "00110",
+              "value": "PS_RDY"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

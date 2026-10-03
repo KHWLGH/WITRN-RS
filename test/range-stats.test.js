@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ModuleWorker } from '../bench/module-worker.mjs';
 import { isRecordingBoundary } from '../src/measurement.js';
 import {
   captureRangeStatsSnapshot,
@@ -7,6 +8,7 @@ import {
   computeRangeStatsSync,
   rangeStatsRevision,
 } from '../src/range-stats.js';
+import { computeRangeStatsBackground } from '../src/range-stats-background.js';
 import { emptyChartColumns } from '../src/state.js';
 
 function columnsOf(count, capacity = count) {
@@ -55,9 +57,11 @@ function reference(snapshot) {
     const dt = (snapshot.x.valueAt(i) - snapshot.x.valueAt(i - 1)) / 3600;
     const currentAbs = Math.abs(c);
     const powerAbs = Math.abs(p);
+    const interval = snapshot.sampleIntervals.valueAt(i);
+    const maxStepS = Number.isFinite(interval) && interval > 0 ? Math.max(2, (interval * 8) / 1000) : snapshot.maxStepS;
     if (
       dt < 0 ||
-      dt > snapshot.maxStepS / 3600 ||
+      dt > maxStepS / 3600 ||
       !Number.isFinite(dt) ||
       !Number.isFinite(currentAbs) ||
       !Number.isFinite(powerAbs)
@@ -186,4 +190,68 @@ test('the default scheduler yields to a real timer before a large scan completes
   const result = await computeRangeStatsAsync(snapshot, { sliceMs: 0 });
   assert.ok(timerRan);
   assertExact(result, reference(snapshot));
+});
+
+test('the real Worker preserves exact folds across mixed cadence, segment and transfer boundaries', async () => {
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = ModuleWorker;
+  try {
+    const cols = columnsOf(10031);
+    cols.sampleIntervals.set(Float64Array.from({ length: 10031 }, (_, i) => (i < 5000 ? 5000 : 250)));
+    cols.x.set(Float64Array.from({ length: 10031 }, (_, i) => (i < 5000 ? i * 5 : 24995 + (i - 4999) * 0.25)));
+    const snapshot = captureRangeStatsSnapshot(cols, 17, 10002, 2);
+    const expected = computeRangeStatsSync(snapshot);
+    const controller = new AbortController();
+    const result = await computeRangeStatsBackground(snapshot, { isCancelled: () => false, signal: controller.signal });
+    const { columns: _source, ...values } = expected;
+    assertExact(result, values);
+    assert.equal(result.columns, cols);
+    assert.equal(cols.x._chunks[0].byteLength, 4096 * 8, 'source buffers remain attached');
+    const worker = ModuleWorker.instances.at(-1);
+    assert.ok(
+      worker.messages.filter((m) => m.type === 'chunk').every((m) => m.rows <= 4096 && m.bytes <= 4096 * 7 * 8),
+    );
+    assert.ok(worker.closed);
+    const seed = computeRangeStatsSync(captureRangeStatsSnapshot(cols, 0, 4095, 2));
+    const full = captureRangeStatsSnapshot(cols, 0, 10030, 2);
+    assertExact(
+      await computeRangeStatsBackground(full, {
+        seed,
+        foldStart: 4096,
+        isCancelled: () => false,
+        signal: controller.signal,
+      }),
+      Object.fromEntries(Object.entries(computeRangeStatsSync(full)).filter(([key]) => key !== 'columns')),
+    );
+  } finally {
+    globalThis.Worker = previousWorker;
+  }
+});
+
+test('Worker cancellation returns no partial result and initialization failure uses the exact fallback', async () => {
+  const previousWorker = globalThis.Worker;
+  const snapshot = captureRangeStatsSnapshot(columnsOf(10001), 0, 10000, 2);
+  const controller = new AbortController();
+  globalThis.Worker = ModuleWorker;
+  try {
+    const pending = computeRangeStatsBackground(snapshot, {
+      isCancelled: () => controller.signal.aborted,
+      signal: controller.signal,
+    });
+    controller.abort();
+    assert.equal(await pending, null);
+    assert.ok(ModuleWorker.instances.at(-1).closed);
+    globalThis.Worker = class {
+      constructor() {
+        throw new Error('unavailable');
+      }
+    };
+    const fallback = await computeRangeStatsBackground(snapshot, {
+      isCancelled: () => false,
+      signal: new AbortController().signal,
+    });
+    assertExact(fallback, reference(snapshot));
+  } finally {
+    globalThis.Worker = previousWorker;
+  }
 });

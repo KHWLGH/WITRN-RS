@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::AppState;
@@ -33,10 +33,19 @@ struct Writer {
     path: PathBuf,
     /// Leading bytes that may later be rewritten in place (the spool's fixed-width header).
     patchable: u64,
+    dirty: bool,
 }
 
 struct Reader {
     file: BufReader<File>,
+}
+
+fn persist_buffer<W: Write>(
+    buffer: &mut BufWriter<W>,
+    sync: impl FnOnce(&W) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    buffer.flush()?;
+    sync(buffer.get_ref())
 }
 
 #[derive(Default)]
@@ -182,8 +191,82 @@ pub(crate) async fn csv_export_pick(
         file: BufWriter::with_capacity(WRITE_BUFFER, file),
         path: path.clone(),
         patchable: 0,
+        dirty: false,
     })?;
     Ok(Some(opened(handle, &path, 0)))
+}
+
+#[tauri::command]
+pub(crate) async fn pd_export_pick(
+    default_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<Opened>, String> {
+    let Some(path) = dialog_path(app, move |builder| {
+        builder
+            .add_filter("PD Capture", &["json"])
+            .set_file_name(default_name)
+            .blocking_save_file()
+    })
+    .await?
+    else {
+        return Ok(None);
+    };
+    let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
+    let handle = registry(&state)?.add_writer(Writer {
+        file: BufWriter::with_capacity(WRITE_BUFFER, file),
+        path: path.clone(),
+        patchable: 0,
+        dirty: false,
+    })?;
+    Ok(Some(opened(handle, &path, 0)))
+}
+
+/// Native wakeups keep recovery checkpoints independent of WebView timer throttling.
+pub(crate) fn start_spool_checkpoints(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let state = app.state::<AppState>();
+        if state
+            .shutting_down
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            break;
+        }
+        let writers: Vec<_> = match state.files.lock() {
+            Ok(files) => files
+                .writers
+                .iter()
+                .map(|(&id, writer)| (id, writer.clone()))
+                .collect(),
+            Err(_) => continue,
+        };
+        for (handle, writer) in writers {
+            let error = {
+                let Ok(mut writer) = writer.lock() else {
+                    continue;
+                };
+                if writer.patchable == 0 {
+                    continue;
+                }
+                if writer.dirty {
+                    match persist_buffer(&mut writer.file, File::sync_data) {
+                        Ok(()) => {
+                            writer.dirty = false;
+                            None
+                        }
+                        Err(error) => Some(error.to_string()),
+                    }
+                } else {
+                    None
+                }
+            };
+            let _ = app.emit(
+                "spool-checkpoint",
+                serde_json::json!({ "handle": handle, "error": error }),
+            );
+        }
+    });
 }
 
 /// Ask which CSV to import and open it for reading.
@@ -249,6 +332,7 @@ pub(crate) fn csv_write_chunk(
     let bytes = raw_body(&request)?;
     let writer = writer(&state, handle)?;
     let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
+    writer.dirty = true;
     writer
         .file
         .write_all(bytes)
@@ -271,12 +355,15 @@ pub(crate) fn csv_write_patch(
         return Err("回写超出表头范围".into());
     }
     let file = &mut writer.file;
-    file.flush()
+    let result = file
+        .flush()
         .and_then(|()| file.get_mut().seek(SeekFrom::Start(offset)))
         .and_then(|_| file.get_mut().write_all(bytes))
         .and_then(|()| file.get_mut().seek(SeekFrom::End(0)))
         .map(|_| ())
-        .map_err(|error| format!("回写表头失败: {error}"))
+        .map_err(|error| format!("回写表头失败: {error}"));
+    writer.dirty = true;
+    result
 }
 
 /// Push buffered bytes to the OS and ask it to persist them.
@@ -284,20 +371,21 @@ pub(crate) fn csv_write_patch(
 pub(crate) fn csv_write_sync(handle: u32, state: State<'_, AppState>) -> Result<(), String> {
     let writer = writer(&state, handle)?;
     let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
-    writer
-        .file
-        .flush()
-        .and_then(|()| writer.file.get_ref().sync_data())
-        .map_err(|error| format!("同步文件失败: {error}"))
+    persist_buffer(&mut writer.file, File::sync_data)
+        .map_err(|error| format!("同步文件失败: {error}"))?;
+    writer.dirty = false;
+    Ok(())
 }
 
 #[derive(Deserialize, Default)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub(crate) struct CloseOptions {
     /// Persist before closing.
     sync: bool,
-    /// Delete the file after closing. Used for failed exports and clean spool shutdown.
+    /// Discard an incomplete export, even when flushing fails.
     abort: bool,
+    /// Remove a recovery file only after successful persistence.
+    remove_on_success: bool,
 }
 
 #[tauri::command(async)]
@@ -307,21 +395,39 @@ pub(crate) fn csv_write_close(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let options = options.unwrap_or_default();
-    let Some(writer) = registry(&state)?.writers.remove(&handle) else {
+    if options.abort && options.remove_on_success {
+        return Err("abort 与 removeOnSuccess 不能同时使用".into());
+    }
+    let Some(writer_arc) = registry(&state)?.writers.get(&handle).cloned() else {
         return Ok(());
     };
-    let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
+    let mut writer = writer_arc.lock().map_err(|_| "写入句柄已损坏")?;
     let path = writer.path.clone();
-    if options.abort {
-        let flush_result = writer.file.flush().and_then(|()| {
-            if options.sync {
-                writer.file.get_ref().sync_all()
-            } else {
-                Ok(())
-            }
-        });
-        drop(writer);
-        let remove_result = std::fs::remove_file(&path)
+    let persisted = persist_buffer(&mut writer.file, |file| {
+        if options.sync || options.remove_on_success {
+            file.sync_all()
+        } else {
+            Ok(())
+        }
+    })
+    .map_err(|error| format!("写入文件失败: {error}"));
+    drop(writer);
+    // Keep a failed normal export handle available for its caller's abort cleanup.
+    if persisted.is_ok() || options.abort || options.remove_on_success || !options.sync {
+        registry(&state)?.writers.remove(&handle);
+    }
+    drop(writer_arc);
+    finish_close(&path, persisted, options.abort, options.remove_on_success)
+}
+
+fn finish_close(
+    path: &Path,
+    persisted: Result<(), String>,
+    abort: bool,
+    remove_on_success: bool,
+) -> Result<(), String> {
+    if abort || (remove_on_success && persisted.is_ok()) {
+        std::fs::remove_file(path)
             .or_else(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
                     Ok(())
@@ -329,23 +435,13 @@ pub(crate) fn csv_write_close(
                     Err(error)
                 }
             })
-            .map_err(|error| format!("删除临时文件失败: {error}"));
-        if let Err(error) = flush_result {
-            return Err(format!("写入文件失败: {error}"));
-        }
-        return remove_result;
+            .map_err(|error| format!("删除临时文件失败: {error}"))?;
     }
-    writer
-        .file
-        .flush()
-        .and_then(|()| {
-            if options.sync {
-                writer.file.get_ref().sync_all()
-            } else {
-                Ok(())
-            }
-        })
-        .map_err(|error| format!("写入文件失败: {error}"))
+    if abort {
+        Ok(())
+    } else {
+        persisted
+    }
 }
 
 fn spool_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -375,14 +471,14 @@ fn sanitize_stem(stem: &str) -> String {
     }
 }
 
-/// `dir/stem.csv`, or `dir/stem-2.csv` and onward when taken. Created exclusively, so
+/// `dir/stem.partial.csv`, or `dir/stem-2.partial.csv` when taken. Created exclusively, so
 /// an existing recording is never overwritten.
 fn create_unique(dir: &Path, stem: &str) -> Result<(File, PathBuf), String> {
     for attempt in 1..1000 {
         let name = if attempt == 1 {
-            format!("{stem}.csv")
+            format!("{stem}{SPOOL_SUFFIX}")
         } else {
-            format!("{stem}-{attempt}.csv")
+            format!("{stem}-{attempt}{SPOOL_SUFFIX}")
         };
         let path = dir.join(name);
         match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -405,18 +501,12 @@ pub(crate) fn spool_open(
 ) -> Result<Opened, String> {
     let dir = spool_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|error| format!("无法创建临时目录: {error}"))?;
-    let (file, path) = create_unique(
-        &dir,
-        &format!(
-            "{}{}",
-            sanitize_stem(&stem),
-            SPOOL_SUFFIX.trim_end_matches(".csv")
-        ),
-    )?;
+    let (file, path) = create_unique(&dir, &sanitize_stem(&stem))?;
     let handle = registry(&state)?.add_writer(Writer {
         file: BufWriter::with_capacity(WRITE_BUFFER, file),
         path: path.clone(),
         patchable: header_len,
+        dirty: false,
     })?;
     Ok(opened(handle, &path, 0))
 }
@@ -429,11 +519,19 @@ pub(crate) struct RecoveryEntry {
     modified_ms: u128,
 }
 
+fn recovery_name(name: &str) -> bool {
+    name.ends_with(SPOOL_SUFFIX)
+        || name
+            .strip_suffix(".csv")
+            .and_then(|stem| stem.rsplit_once(".partial-"))
+            .is_some_and(|(stem, n)| !stem.is_empty() && n.parse::<u32>().is_ok_and(|n| n >= 2))
+}
+
 fn recovery_path<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<PathBuf, String> {
     let name = Path::new(id)
         .file_name()
         .and_then(|value| value.to_str())
-        .filter(|value| *value == id && value.ends_with(SPOOL_SUFFIX))
+        .filter(|value| *value == id && recovery_name(value))
         .ok_or_else(|| "无效的临时文件标识".to_string())?;
     Ok(spool_dir(app)?.join(name))
 }
@@ -451,7 +549,7 @@ pub(crate) fn spool_recovery_list(app: AppHandle) -> Result<Vec<RecoveryEntry>, 
             || !path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(SPOOL_SUFFIX))
+                .is_some_and(recovery_name)
         {
             continue;
         }
@@ -533,10 +631,89 @@ mod tests {
         let (_, first) = create_unique(&dir, "rec").unwrap();
         let (_, second) = create_unique(&dir, "rec").unwrap();
         let (_, third) = create_unique(&dir, "rec").unwrap();
-        assert_eq!(first.file_name().unwrap(), "rec.csv");
-        assert_eq!(second.file_name().unwrap(), "rec-2.csv");
-        assert_eq!(third.file_name().unwrap(), "rec-3.csv");
+        assert_eq!(first.file_name().unwrap(), "rec.partial.csv");
+        assert_eq!(second.file_name().unwrap(), "rec-2.partial.csv");
+        assert_eq!(third.file_name().unwrap(), "rec-3.partial.csv");
+        for path in [first, second, third] {
+            assert!(recovery_name(path.file_name().unwrap().to_str().unwrap()));
+        }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn checkpoint_makes_a_small_recording_visible_to_an_independent_reader() {
+        let dir = temp_dir("checkpoint");
+        let (file, path) = create_unique(&dir, "rec").unwrap();
+        let mut writer = BufWriter::with_capacity(WRITE_BUFFER, file);
+        writer
+            .write_all(b"SUM,3\nheader\nrow1\nrow2\nrow3\n")
+            .unwrap();
+        assert!(std::fs::read(&path).unwrap().is_empty());
+        persist_buffer(&mut writer, File::sync_data).unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"SUM,3\nheader\nrow1\nrow2\nrow3\n"
+        );
+        drop(writer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn flush_or_sync_failure_preserves_recovery_but_abort_discards_export() {
+        struct FailingWriter;
+        impl Write for FailingWriter {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected flush failure"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let dir = temp_dir("failure");
+        for sync_failure in [false, true] {
+            let (file, path) = create_unique(&dir, "rec").unwrap();
+            let persisted = if sync_failure {
+                let mut writer = BufWriter::new(file);
+                writer.write_all(b"row\n").unwrap();
+                persist_buffer(&mut writer, |_| {
+                    Err(std::io::Error::other("injected sync failure"))
+                })
+            } else {
+                drop(file);
+                let mut writer = BufWriter::new(FailingWriter);
+                writer.write_all(b"row\n").unwrap();
+                persist_buffer(&mut writer, |_| Ok(()))
+            }
+            .map_err(|error| error.to_string());
+            assert!(finish_close(&path, persisted.clone(), false, true).is_err());
+            assert!(path.exists());
+            finish_close(&path, persisted, true, false).unwrap();
+            assert!(!path.exists());
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recovery_names_include_legacy_collisions_and_reject_unrelated_csvs() {
+        for name in [
+            "rec.partial.csv",
+            "rec-2.partial.csv",
+            "rec.partial-2.csv",
+            "rec.partial-999.csv",
+        ] {
+            assert!(recovery_name(name));
+        }
+        for name in [
+            "rec.csv",
+            "rec.partial-1.csv",
+            "rec.partial-.csv",
+            "rec.partial-x.csv",
+        ] {
+            assert!(!recovery_name(name));
+        }
+        let options: CloseOptions =
+            serde_json::from_str(r#"{"sync":true,"removeOnSuccess":true}"#).unwrap();
+        assert!(options.sync && options.remove_on_success && !options.abort);
     }
 
     #[test]
@@ -547,6 +724,7 @@ mod tests {
             file: BufWriter::new(file),
             path: path.clone(),
             patchable: 8,
+            dirty: false,
         };
         writer.file.write_all(b"SUM,0000\nrow1\n").unwrap();
         // Same sequence as csv_write_patch.

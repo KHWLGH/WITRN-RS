@@ -907,26 +907,29 @@ function normalizeBytes(raw) {
 
 /**
  * 构造导出文件。默认 v2：有原始帧就只带 bytes，否则带解码树以便 v1 数据往返。
- * @param {(PdEntry|PdDivider)[]} entries
- * @returns {PdCaptureFile}
+ * @param {PdEntry|PdDivider} e
+ * @returns {Record<string, unknown>}
  */
+export function packPdCaptureEntry(e) {
+  if (isDivider(e)) return { t: e.t, divider: true };
+  const msg = /** @type {PdEntry} */ (e);
+  /** @type {Record<string, unknown>} */
+  const out = { t: msg.t, sop: msg.sop, type: msg.type, role: msg.role, summary: msg.summary };
+  for (const key of ['id', 'obj', 'rev', 'direction']) {
+    const value = msg[/** @type {'id'|'obj'|'rev'|'direction'} */ (key)];
+    if (value) out[key] = value;
+  }
+  if (Number.isFinite(msg.vbus)) out.vbus = msg.vbus;
+  if (Number.isFinite(msg.ibus)) out.ibus = msg.ibus;
+  if (msg.bytes && msg.bytes.length > 0) out.bytes = msg.bytes;
+  else if (msg.meta) out.meta = msg.meta;
+  return out;
+}
+
+/** @param {(PdEntry|PdDivider)[]} entries @returns {PdCaptureFile} */
 export function buildPdCaptureFile(entries) {
-  const packed = entries.map((e) => {
-    if (isDivider(e)) return { t: e.t, divider: true };
-    const msg = /** @type {PdEntry} */ (e);
-    /** @type {Record<string, unknown>} */
-    const out = { t: msg.t, sop: msg.sop, type: msg.type, role: msg.role, summary: msg.summary };
-    for (const key of ['id', 'obj', 'rev', 'direction']) {
-      const value = msg[/** @type {'id'|'obj'|'rev'|'direction'} */ (key)];
-      if (value) out[key] = value;
-    }
-    if (Number.isFinite(msg.vbus)) out.vbus = msg.vbus;
-    if (Number.isFinite(msg.ibus)) out.ibus = msg.ibus;
-    if (msg.bytes && msg.bytes.length > 0) out.bytes = msg.bytes;
-    else if (msg.meta) out.meta = msg.meta;
-    return out;
-  });
-  return { app: 'WITRN-RS', kind: 'pd-capture', version: 2, exportedAt: new Date().toISOString(), entries: packed };
+  const packed = entries.map(packPdCaptureEntry);
+  return { app: 'laPower', kind: 'pd-capture', version: 2, exportedAt: new Date().toISOString(), entries: packed };
 }
 
 /**

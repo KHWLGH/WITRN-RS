@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WITRN-RS",
-  "version": "0.2.1",
-  "identifier": "com.witrn.witrnrs",
+  "productName": "laPower",
+  "version": "0.2.2",
+  "identifier": "io.github.khwlgh.lapower",
   "build": {
     "frontendDist": "../out",
     "beforeDevCommand": "node scripts/build-dist.mjs",
@@ -12,7 +12,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "WITRN-RS",
+        "title": "laPower",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

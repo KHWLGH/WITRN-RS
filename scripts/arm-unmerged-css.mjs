@@ -9,8 +9,8 @@
  * first paired run done by hand made exactly that mistake and "measured" the merge adding 8
  * requests instead of removing 8.
  *
- *   npm run build && node scripts/arm-unmerged-css.mjs && cargo build -p witrn-rs
- *   cp target/debug/witrn-rs.exe target/debug/witrn-A.exe
+ *   npm run build && node scripts/arm-unmerged-css.mjs && cargo build -p lapower
+ *   cp target/debug/lapower.exe target/debug/lapower-A.exe
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

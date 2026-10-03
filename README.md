@@ -1,17 +1,17 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128@2x.png" width="120" alt="WITRN-RS" />
+<img src="src-tauri/icons/128x128@2x.png" width="120" alt="laPower" />
 
-# WITRN-RS
+# laPower
 
-**维简 (WITRN) USB 电压电流表的桌面上位机 —— 实时监控 · USB-PD 协议分析 · 数据记录**
+**维简 (WITRN) / POWER-Z USB 电压电流表的桌面上位机 —— 实时监控 · USB-PD 协议分析 · 数据记录**
 
-[![Release](https://img.shields.io/github/v/release/KHWLGH/WITRN-RS?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/WITRN-RS/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/WITRN-RS/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/WITRN-RS/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/KHWLGH/laPower?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/laPower/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/laPower/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/laPower/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/KHWLGH/WITRN-RS?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/stargazers)
-[![Downloads](https://img.shields.io/github/downloads/KHWLGH/WITRN-RS/total?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/releases)
-[![Last commit](https://img.shields.io/github/last-commit/KHWLGH/WITRN-RS?style=flat-square)](https://github.com/KHWLGH/WITRN-RS/commits/main)
+[![Stars](https://img.shields.io/github/stars/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/KHWLGH/laPower/total?style=flat-square)](https://github.com/KHWLGH/laPower/releases)
+[![Last commit](https://img.shields.io/github/last-commit/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/commits/main)
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-CE422B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -23,23 +23,26 @@
 
 ## 📖 项目简介
 
-WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM002C 的桌面上位机。它通过 USB HID 或厂商 Bulk 接口读取测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，全程不需要网络。
+laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM002C 的桌面上位机。它通过 USB HID 或厂商 Bulk 接口读取测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，全程不需要网络。
 
-技术上基于 **Tauri v2**：后端是 **Rust**（HID 通信、USB-PD 解析、后台线程生命周期），前端是**不经打包器的原生 JavaScript ES Modules**，图表用 uPlot。所有前端依赖都已 vendor 进仓库，运行时不从 CDN 加载任何资源。
+技术上基于 **Tauri v2**：后端是 **Rust**（设备通信、USB-PD 解析、后台线程生命周期），前端源码是**原生 JavaScript ES Modules**，发布构建通过 esbuild 合并脚本和样式，图表用 uPlot。所有运行时前端依赖都已 vendor 进仓库，运行时不从 CDN 加载任何资源。
 
-除了常规的电压 / 电流 / 功率 / 温度，WITRN-RS 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**——这是它和一般图表软件的主要区别：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
+除了常规的电压 / 电流 / 功率 / 温度，laPower 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
 
-> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；macOS 与 Linux 可自行编译，分别见 [macOS 自行编译](docs/DEVELOPMENT.md#-macos-自行编译)、[Linux 自行编译](docs/DEVELOPMENT.md#-linux-自行编译)，以及 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；macOS 与 Linux 可自行编译，分别见 [macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)、[Linux 自行编译](docs/DEVELOPMENT.md#linux-自行编译)，以及 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
 
-> **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/WITRN-RS/issues) 反馈。
+> **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/laPower/issues) 反馈。
 
 ## 📸 界面预览
 
-| 深色主题 | 浅色主题 |
+以下展示图使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
+
+| 浅色主题 | 深色主题 |
 | :---: | :---: |
-| <img src="docs/screenshots/dark-record.png" alt="监控工作区（深色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/light-record.png" alt="监控工作区（浅色）" /><br><sub>**监控** · 浅色主题</sub> |
-| <img src="docs/screenshots/dark-pd.png" alt="PD 分析工作区（深色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/light-pd.png" alt="PD 分析工作区（浅色）" /><br><sub>**PD 分析** · 浅色主题</sub> |
-| <img src="docs/screenshots/dark-settings.png" alt="设置页（深色）：外观、图表与记录、设备、关于" /><br><sub>**设置** · 外观 / 图表与记录 / 设备 / 关于</sub> | <img src="docs/screenshots/light-settings.png" alt="设置页（浅色）" /><br><sub>**设置** · 浅色主题</sub> |
+| <img src="docs/screenshots/light-record.png" alt="监控工作区（浅色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/dark-record.png" alt="监控工作区（深色）" /><br><sub>**监控** · 深色主题</sub> |
+| <img src="docs/screenshots/light-pd.png" alt="PD 分析工作区（浅色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/dark-pd.png" alt="PD 分析工作区（深色）" /><br><sub>**PD 分析** · 深色主题</sub> |
+| <img src="docs/screenshots/light-trigger.png" alt="协议控制工作区（浅色）：PDM、PDO 列表与检测日志" /><br><sub>**协议控制** · PDM / PDO / 协议检测与电压触发</sub> | <img src="docs/screenshots/dark-trigger.png" alt="协议控制工作区（深色）" /><br><sub>**协议控制** · 深色主题</sub> |
+| <img src="docs/screenshots/light-settings.png" alt="设置页（浅色）：外观、图表与记录、设备、关于" /><br><sub>**设置** · 外观 / 图表与记录 / 设备 / 关于</sub> | <img src="docs/screenshots/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
 
 ## ✨ 功能特性
 
@@ -47,7 +50,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM0
 
 - 电压 / 电流 / 功率 / 温度读数卡，每项附最小值、最大值与平均值。
 - **累计能量 (Wh) 与累计容量 (mAh)** 由软件对采样点积分得出。睡眠、时钟回拨或 NTP 前跳造成的时间跳变（超过采样间隔的 8 倍，且至少 2 秒）只按一个采样周期推进，不会污染积分结果。
-- **信号线电压** D+ / D− / CC1 / CC2（设备分辨率 0.01 V），可叠加到图表上，也随 CSV 一起导出。
+- **信号线电压** D+ / D− / CC1 / CC2，可叠加到图表上，也随 CSV 一起导出；实际分辨率取决于设备，WITRN 的 CC1 / CC2 为 0.1 V。
 - 可选**记录电流方向**：开启后保留电流符号（正向为正、反向为负，K2 原生支持 ±10 A），侧栏用箭头指示方向。
 - **自动暂停**：当电压 / 电流 / 功率低于阈值并持续指定秒数后自动停止记录，适合无人值守的充放电测试。
 - **POWER-Z 高速采样**：KM003C/KM002C 支持认证后的 AdcQueue 1000 次/秒采样；认证失败会自动回退到 100 次/秒。
@@ -78,8 +81,8 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM0
 
 ### 界面
 
-- 多 Tab 工作区（监控 / PD 分析 / 设置），设备连接常驻标题栏，任何页面都能快速连断。
-- **深色 / 浅色 / 跟随系统**三种主题，设计令牌对齐 Fluent UI webDark / webLight。
+- 多 Tab 工作区（监控 / PD 分析 / 协议控制 / 设置），设备连接常驻标题栏，任何页面都能快速连断；协议控制仅连接 POWER-Z 时显示。
+- **跟随系统 / 浅色 / 深色**三种主题，默认跟随系统，设计令牌对齐 Fluent UI webDark / webLight。
 - **界面缩放 50 – 200%**，系统缩放偏大导致窗口拥挤时可整体调低。
 - 自定义无边框标题栏；Windows 上保留 Win11 贴靠布局浮窗。
 
@@ -99,11 +102,13 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM0
 
 ## 📦 下载与安装
 
-**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/WITRN-RS/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
+项目原名 WITRN-RS。laPower 的应用标识为 `io.github.khwlgh.lapower`，使用独立的设置与缓存目录，不自动迁移旧应用设置；已有 CSV 和 PD 捕获文件仍可导入。
 
-**macOS** —— 不提供预构建包（无 Developer ID / 公证）。Apple Silicon 可自行编译，见 [开发与构建 · macOS 自行编译](docs/DEVELOPMENT.md#-macos-自行编译)。一次已验证的 ARM64 打包步骤、ad-hoc 签名与 Gatekeeper 边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
 
-**Linux** —— 不提供预构建包，但可以自行编译。请参考 [开发与构建 · Linux 自行编译](docs/DEVELOPMENT.md#-linux-自行编译)，其中包含必需的系统依赖和访问 `hidraw` 所需的 udev 规则（缺少规则会导致扫不到任何设备）。
+**macOS** —— 不提供预构建包（无 Developer ID / 公证）。Apple Silicon 可自行编译，见 [开发与构建 · macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)。一次已验证的 ARM64 打包步骤、ad-hoc 签名与 Gatekeeper 边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+
+**Linux** —— 不提供预构建包，但可以自行编译。请参考 [开发与构建 · Linux 自行编译](docs/DEVELOPMENT.md#linux-自行编译)，其中包含必需的系统依赖和访问 `hidraw` 所需的 udev 规则（缺少规则会导致扫不到任何设备）。
 
 ## 🚀 快速上手
 
@@ -122,12 +127,14 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM0
 | [技术架构](docs/ARCHITECTURE.md) | 线程模型、Tauri 命令、数据流、HID 报文布局、测试与安全边界 |
 | [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux / macOS 自行编译、参与贡献 |
 | [macOS ARM64 构建记录](docs/MACOS_BUILD.md) | Apple Silicon 打包步骤、ad-hoc 签名、DMG 与验收边界 |
+| [性能基准与边界](docs/PERFORMANCE.md) | 图表调度、数据完整性、性能测量与真机验收记录 |
 | [外部温度服务](docs/TEMPERATURE.md) | TCP 温度源协议、应用内配置、Python 示例服务器 |
 | [更新日志](CHANGELOG.md) | 完整版本历史 |
 
 ## 🙏 致谢与相关项目
 
-- 感谢 WITRN 提供的 USB-PD 采集硬件支持。
+- 感谢 WITRN、POWER-Z 提供的 USB-PD 采集硬件支持。
+- 感谢[JohnScotttt](https://github.com/JohnScotttt)的WITRN HID实现。
 - 感谢 [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) 对 POWER-Z Bulk、认证与 AdcQueue 协议的公开研究。
 - 感谢所有开源项目贡献者。
 
@@ -154,7 +161,7 @@ WITRN-RS 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM0
 
 ## 🔗 相关链接
 
-- [提交 Issue 或建议](https://github.com/KHWLGH/WITRN-RS/issues)
+- [提交 Issue 或建议](https://github.com/KHWLGH/laPower/issues)
 - [维简 (WITRN) 官方网站](https://www.witrn.com/)
 - [Tauri 官方文档](https://tauri.app/)
 - [Rust 官方网站](https://www.rust-lang.org/)

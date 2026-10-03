@@ -1,0 +1,6 @@
+/* Layout normally injected by decorum. Buttons and icons use the application's own CSS. */
+[data-tauri-decorum-tb] {
+  position: fixed;
+  top: 0;
+  z-index: 100;
+}

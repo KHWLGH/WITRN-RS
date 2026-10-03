@@ -1,6 +1,6 @@
 # km003c
 
-POWER-Z KM003C / KM002C protocol support for WITRN-RS.
+POWER-Z KM003C / KM002C protocol support for laPower.
 
 This workspace-only crate provides:
 

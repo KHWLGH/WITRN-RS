@@ -55,7 +55,7 @@
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  * @property {{ pdType: number, em: number, sink: number }} km003cPdm - POWER-Z PDM 参数（PD 类型 / 线缆模拟 / Sink）
- * @property {number}  recordLimitMb - 单次记录上限（MB，64–8192；按 100 字节/点换算点数）
+ * @property {number}  recordLimitMb - 单次记录上限（MB，64–8192；按 112 字节/点换算点数）
  * @property {boolean} recordingTempSpool - 记录时保留应用缓存中的临时恢复文件
  * @property {boolean} autoSaveRecording - 旧设置兼容别名；新代码使用 recordingTempSpool
  */
@@ -228,6 +228,7 @@ export class F64Col extends F64Snapshot {
  * @property {F64Col} cc1
  * @property {F64Col} cc2
  * @property {F64Col} recordingSegments
+ * @property {F64Col} sampleIntervals 每个样本的标称采样间隔（ms），未知为 NaN
  */
 
 /** @param {number} [capacity=4096] @returns {ChartSeriesColumns} */
@@ -244,6 +245,7 @@ export function emptyChartColumns(capacity = 4096) {
     cc1: new F64Col(capacity),
     cc2: new F64Col(capacity),
     recordingSegments: new F64Col(capacity),
+    sampleIntervals: new F64Col(capacity),
   };
 }
 
@@ -296,7 +298,7 @@ export const defaultSettings = {
   showCc: false,
   signedCurrent: false,
   uiScalePercent: 100,
-  theme: 'dark',
+  theme: 'system',
   windowStyle: 'auto',
   realtimePanelWidth: 250,
   pdSplitSide: false,
@@ -323,6 +325,8 @@ const chartColumns = emptyChartColumns();
  * 全局共享可变状态。所有模块通过 `state.xxx` 读写。
  */
 export const state = {
+  // WebView2 can keep document.hidden false while its native window is minimized.
+  windowVisible: true,
   // ── Chart instances ──
   /** @type {any} uPlot 主图表实例 */
   mainChart: null,
@@ -375,7 +379,7 @@ export const state = {
    * 当前数据实际的标称采样间隔（毫秒），不持久化。
    *
    * 能量积分的空档阈值由它推导，所以原生流取设备回报的 rate_ms、导入取 CSV 的
-   * SampTime；两者都不知道时为 null，退回 `settings.sampleRate`。刻意不放进
+   * SampTime；两者都不知道时为 null，保持绝对 2 秒空档保护。刻意不放进
    * `settings`，导入历史文件才不会改写用户的采样率设置。
    * @type {number|null}
    */

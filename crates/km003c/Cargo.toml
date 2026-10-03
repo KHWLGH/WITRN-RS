@@ -4,7 +4,7 @@ description = "ChargerLAB POWER-Z KM003C / KM002C: vendor-bulk protocol, CDC tri
 readme = "README.md"
 keywords = ["km003c", "power-z", "usb-pd", "usb-meter"]
 categories = ["hardware-support"]
-# Maintained inside the WITRN-RS workspace and versioned with the application.
+# Maintained inside the laPower workspace and versioned with the application.
 publish = false
 version.workspace = true
 edition.workspace = true

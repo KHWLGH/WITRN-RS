@@ -68,6 +68,24 @@ test('a nonsense declared SampTime is ignored instead of poisoning the threshold
   assert.equal(decode(`${summary(500)}${rows}`).intervalMs, 500);
 });
 
+test('mixed sample intervals survive export despite a different settings cadence, including slow samples', async () => {
+  const { computeCsvImport } = await import('../src/csv-import-core.js');
+  const cols = makeColumns(
+    [0, 5, 10, 10.25, 10.5, 15.5].map((x) => ({ x, timestamps: START + x * 1000, voltage: 5, current: 2, power: 10 })),
+  );
+  cols.sampleIntervals.set([5000, 5000, 5000, 250, 250, 250]);
+  cols.recordingSegments.set([1, 1, 1, 1, 1, 2]);
+  const text = encode(cols, { sampleRate: 250 });
+  assert.match(text, /SampTime\(ms\),5000\n/);
+  const result = computeCsvImport(text, { fallbackStartTime: START });
+  assert.deepEqual(result.columns.sampleIntervals.view(), cols.sampleIntervals.view());
+  assert.deepEqual(
+    result.energy,
+    calculateEnergyInRange(cols.x, cols.current, cols.power, 0, 5, cols.recordingSegments, 5000, cols.sampleIntervals),
+  );
+  assert.ok(result.energy.wh > 0);
+});
+
 test('all finite Number digits round-trip in every measurement channel, including signed zero', () => {
   const values = [
     5.123456789012345,
@@ -124,7 +142,7 @@ test('export keeps legacy prefix columns and appends exact time columns only at 
   for (const withTemp of [false, true]) {
     const header = encode(cols, { withTemp }).split('\n')[5];
     const prefix = `${OLD_HEADER}${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),`;
-    assert.equal(header, `${prefix}RelativeTime(s),Timestamp(ms),`);
+    assert.equal(header, `${prefix}RelativeTime(s),Timestamp(ms),SampleInterval(ms),`);
     assert.deepEqual(mapCsvColumns(header), mapCsvColumns(prefix));
     assert.equal(header.includes('RecordingSegment'), false);
   }
@@ -420,7 +438,7 @@ test('range formatting concatenates to exactly the chunked body', () => {
   for (let i = 0; i < 10; i++) for (const key of KEYS) cols[key].push(key === 'x' ? i / 4 : i + 0.5);
   const snapshot = snapshotCsvColumns(cols, { sampleRate: 250, startTime: START });
   const [header, ...body] = [...formatCsvChunks(snapshot, 4)];
-  assert.ok(header.endsWith('RelativeTime(s),Timestamp(ms),\n'));
+  assert.ok(header.endsWith('RelativeTime(s),Timestamp(ms),SampleInterval(ms),\n'));
   assert.equal(
     [formatCsvRange(snapshot, 0, 3), formatCsvRange(snapshot, 3, 7), formatCsvRange(snapshot, 7, 99)].join(''),
     body.join(''),

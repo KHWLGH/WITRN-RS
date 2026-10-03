@@ -58,7 +58,9 @@ export function referenceEnergy(times, current, power, divisor, start = 0, end =
   return { wh, mah };
 }
 export function referenceBuckets(f, start, end, capacity) {
-  const step = Math.max(1, Math.ceil((end - start) / Math.max(64, capacity | 0)));
+  // Independent reference for the power-of-two density used by live projections.
+  let step = 1;
+  while (step * Math.max(64, capacity | 0) < end - start) step *= 2;
   const list = [];
   for (let from = start; from < end; from += step) {
     const to = Math.min(from + step, end);
@@ -145,6 +147,8 @@ export function golden(f, segments) {
   };
 }
 function timed(name, fn, config, samples, repeat = 1) {
+  // Structural verification uses the same metric names/repeats without running workloads.
+  if (config.verifyBaseline) return { name, repeat };
   for (let i = 0; i < config.warmup; i++) fn();
   const rssBefore = process.memoryUsage().rss,
     cpuBefore = process.cpuUsage();
@@ -258,6 +262,30 @@ export async function main(argv = process.argv.slice(2)) {
     output: 'bench/results/core.json',
     baselinePath: BASELINE_PATH,
   });
+  assert.ok(Number.isSafeInteger(config.passes) && config.passes > 0, 'Invalid passes');
+  assert.ok(
+    [config.baseline, config.compare, config.verifyBaseline].filter(Boolean).length <= 1,
+    '--baseline, --compare and --verify-baseline are mutually exclusive',
+  );
+  if (config.verifyBaseline) {
+    const baseline = await readJson(config.baselinePath);
+    // One deterministic correctness pass; no warmups, timing loops or timing thresholds.
+    const pass = runPass(config);
+    const current = projectBaseline({ bench: 'core', pass, gated: GATED, timings: false });
+    const verification = verifyBaseline(baseline, current);
+    const result = {
+      schema: 'witrn-core-verification-v1',
+      config,
+      current,
+      correctness: pass.cases.map(({ size, correctness }) => ({ size, ...correctness })),
+      verification,
+    };
+    const output = await saveJson(config.output, result);
+    console.log(JSON.stringify({ output, correctness: 'passed', timings: false }));
+    console.log(verification.text);
+    if (verification.problems.length) process.exitCode = 1;
+    return result;
+  }
   const before = await provenance();
   const result = {
     schema: 'witrn-core-v1',
@@ -302,7 +330,7 @@ export async function main(argv = process.argv.slice(2)) {
   result.resourceUsage = process.resourceUsage();
   const path = await saveJson(config.output, result);
   console.log(JSON.stringify({ output: path, sourceStable: result.sourceStable }));
-  if (!(config.baseline || config.compare || config.verifyBaseline)) return result;
+  if (!(config.baseline || config.compare)) return result;
   const projections = result.passes.map((pass) =>
     projectBaseline({ bench: 'core', pass, gated: GATED, provenanceCommit: before.commit }),
   );
@@ -314,12 +342,6 @@ export async function main(argv = process.argv.slice(2)) {
     return result;
   }
   const baseline = await readJson(config.baselinePath);
-  if (config.verifyBaseline) {
-    const { text, problems } = verifyBaseline(baseline, projections[0]);
-    console.log(text);
-    if (problems.length) process.exitCode = 1;
-    return result;
-  }
   const comparison = corroboration(baseline, projections, config.threshold);
   console.log(renderComparison(comparison).text);
   const driftLabel = 'x' + comparison.drift.toFixed(2);

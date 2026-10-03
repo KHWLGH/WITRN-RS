@@ -8,7 +8,10 @@
  */
 
 /** @typedef {'info'|'success'|'warning'|'error'} ToastSeverity */
-/** @typedef {{ severity?: ToastSeverity, duration?: number, action?: { label: string, onClick: () => void } }} ToastOptions */
+/** @typedef {{ label: string, onClick: () => void | boolean | Promise<void | boolean>, disabled?: () => boolean }} ToastAction */
+/** @typedef {{ severity?: ToastSeverity, duration?: number, action?: ToastAction, actions?: ToastAction[] }} ToastOptions */
+/** @typedef {{ dismiss: () => void, refreshActions: () => void, setText: (text: string) => void }} ToastHandle */
+/** @typedef {{ text: string, options: ToastOptions, handle: ToastHandle }} QueuedToast */
 
 const MAX_VISIBLE = 3;
 const DEFAULT_DURATION = 4000;
@@ -23,7 +26,7 @@ const SEVERITY_ICON = {
 
 /** @type {HTMLElement|null} */
 let regionEl = null;
-/** @type {{ text: string, options: ToastOptions }[]} */
+/** @type {QueuedToast[]} */
 const pending = [];
 let visibleCount = 0;
 
@@ -41,10 +44,9 @@ function ensureRegion() {
 }
 
 /**
- * @param {string} text
- * @param {ToastOptions} options
+ * @param {QueuedToast} notification
  */
-function render(text, options) {
+function render({ text, options, handle }) {
   const region = ensureRegion();
   const severity = options.severity ?? 'info';
   const duration = options.duration ?? (severity === 'error' ? 0 : DEFAULT_DURATION);
@@ -63,18 +65,37 @@ function render(text, options) {
   textEl.textContent = text;
   el.appendChild(textEl);
 
-  if (options.action) {
+  const actions = options.actions ?? (options.action ? [options.action] : []);
+  const actionGroup = document.createElement('div');
+  actionGroup.className = 'toast-actions';
+  /** @type {{ button: HTMLButtonElement, action: ToastAction }[]} */
+  const actionButtons = [];
+  let busy = false;
+  for (const action of actions) {
     const actionBtn = document.createElement('button');
     actionBtn.type = 'button';
     actionBtn.className = 'btn toast-action';
-    actionBtn.textContent = options.action.label;
-    const onClick = options.action.onClick;
-    actionBtn.addEventListener('click', () => {
-      onClick();
-      dismiss();
+    actionBtn.textContent = action.label;
+    actionButtons.push({ button: actionBtn, action });
+    actionBtn.addEventListener('click', async () => {
+      if (dismissed || busy || action.disabled?.()) return;
+      busy = true;
+      stopTimer();
+      refreshActions();
+      try {
+        if ((await action.onClick()) !== false) dismiss();
+      } catch (error) {
+        console.error('通知操作失败:', error);
+        toast.error(`操作失败: ${error}`);
+      } finally {
+        busy = false;
+        refreshActions();
+        startTimer();
+      }
     });
-    el.appendChild(actionBtn);
+    actionGroup.appendChild(actionBtn);
   }
+  if (actions.length) el.appendChild(actionGroup);
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
@@ -88,11 +109,24 @@ function render(text, options) {
   /** @type {number|null} */
   let timer = null;
   let dismissed = false;
+  let hovered = false;
+
+  const stopTimer = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+
+  const refreshActions = () => {
+    for (const { button, action } of actionButtons) button.disabled = dismissed || busy || !!action.disabled?.();
+    closeBtn.disabled = dismissed || busy;
+    el.setAttribute('aria-busy', String(busy));
+  };
 
   const dismiss = () => {
     if (dismissed) return;
     dismissed = true;
-    if (timer !== null) clearTimeout(timer);
+    stopTimer();
+    refreshActions();
     el.classList.add('toast-leaving');
     // 与 components.css 的 toast 出场动画时长一致
     setTimeout(() => {
@@ -103,16 +137,24 @@ function render(text, options) {
   };
 
   const startTimer = () => {
-    if (duration > 0) timer = window.setTimeout(dismiss, duration);
+    stopTimer();
+    if (!dismissed && !busy && !hovered && duration > 0) timer = window.setTimeout(dismiss, duration);
   };
   el.addEventListener('mouseenter', () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
+    hovered = true;
+    stopTimer();
   });
-  el.addEventListener('mouseleave', startTimer);
+  el.addEventListener('mouseleave', () => {
+    hovered = false;
+    startTimer();
+  });
 
+  handle.dismiss = dismiss;
+  handle.refreshActions = refreshActions;
+  handle.setText = (message) => {
+    textEl.textContent = message;
+  };
+  refreshActions();
   region.appendChild(el);
   visibleCount++;
   startTimer();
@@ -121,7 +163,7 @@ function render(text, options) {
 function drainQueue() {
   while (visibleCount < MAX_VISIBLE && pending.length > 0) {
     const next = pending.shift();
-    if (next) render(next.text, next.options);
+    if (next) render(next);
   }
 }
 
@@ -131,11 +173,24 @@ function drainQueue() {
  * @param {ToastOptions} [options]
  */
 export function toast(text, options = {}) {
+  /** @type {ToastHandle} */
+  const handle = {
+    dismiss: () => {
+      const index = pending.findIndex((item) => item.handle === handle);
+      if (index >= 0) pending.splice(index, 1);
+    },
+    refreshActions: () => {},
+    setText: (message) => {
+      notification.text = message;
+    },
+  };
+  const notification = { text, options, handle };
   if (visibleCount >= MAX_VISIBLE) {
-    pending.push({ text, options });
-    return;
+    pending.push(notification);
+  } else {
+    render(notification);
   }
-  render(text, options);
+  return handle;
 }
 
 /** @param {string} text @param {ToastOptions} [options] */

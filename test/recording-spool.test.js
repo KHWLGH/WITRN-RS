@@ -10,16 +10,24 @@ const backend = {
   calls: [],
   nextHandle: 0,
   failWrites: false,
+  onWrite: null,
   reset() {
     this.files.clear();
     this.calls = [];
     this.failWrites = false;
+    this.onWrite = null;
   },
 };
 const decoder = new TextDecoder();
 
 globalThis.window = {
   __TAURI__: {
+    event: {
+      async listen(_name, callback) {
+        backend.tick = callback;
+        return () => {};
+      },
+    },
     core: {
       async invoke(command, args, options) {
         backend.calls.push(command);
@@ -33,6 +41,7 @@ globalThis.window = {
           case 'csv_write_chunk': {
             if (backend.failWrites) throw new Error('磁盘已满');
             backend.files.get(handle).text += decoder.decode(args);
+            backend.onWrite?.();
             return null;
           }
           case 'csv_write_patch': {
@@ -83,6 +92,7 @@ function addRows(cols, from, to) {
     cols.cc1.push(1.65);
     cols.cc2.push(0);
     cols.recordingSegments.push(1);
+    cols.sampleIntervals.push(1);
   }
 }
 
@@ -95,6 +105,7 @@ function prepare(rows) {
   state.chartSeries = cols;
   state.settings.autoSaveRecording = true;
   state.settings.sampleRate = 1;
+  state.dataIntervalMs = null;
   state.lastRecordingStartTime = START;
   state.connectedDevice = /** @type {any} */ ({ model_name: 'POWER-Z KM003C' });
   return cols;
@@ -114,7 +125,7 @@ test('a spool file starts with the fixed-width header and back-fills existing ro
   assert.match(file.stem, /^KM003C_\d{8}-\d{6}$/);
   assert.equal(file.headerLen, SPOOL_PATCH_BYTES);
   assert.ok(file.text.startsWith('SUM,000000000003\n'), 'the pause patched the row count in place');
-  assert.equal(file.synced, 1);
+  assert.equal(file.synced, 3, 'header, completed backfill and pause are durable');
   assert.equal(file.closed, false, 'a pause keeps the file open for the next segment');
   const parsed = parseCsv(file.text, { fallbackStartTime: 0 });
   assert.equal(parsed.columns.x.length, 3);
@@ -180,4 +191,56 @@ test('a failed write pauses recording once and tells the user the data is still 
   assert.equal(toasts.length, 1);
   assert.match(toasts[0], /磁盘已满.*数据仍在内存中/);
   assert.equal(spool.spoolPath(), null);
+});
+
+test('native checkpoints drain a low-rate tail and sync without waiting for another sample', async () => {
+  const cols = prepare(1);
+  spool.spoolRecordingStarted();
+  await spool.spoolRecordingPaused();
+  const file = onlyFile();
+  const before = file.synced;
+  addRows(cols, 1, 2);
+  backend.tick({ payload: { handle: backend.nextHandle, error: null } });
+  for (let i = 0; i < 50 && file.synced === before; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.ok(file.synced > before);
+  assert.ok(file.text.startsWith('SUM,000000000002\n'));
+  assert.equal(parseCsv(file.text, { fallbackStartTime: 0 }).columns.x.length, 2);
+  const calls = backend.calls.length;
+  backend.tick({ payload: { handle: backend.nextHandle, error: null } });
+  assert.equal(backend.calls.length, calls, 'unchanged or paused data does not rewrite and sync every second');
+  await spool.finalizeSpool();
+});
+
+test('a large backfill snapshots once, checkpoints within the backlog and never chases appended rows', async () => {
+  const cols = prepare(40000);
+  const { F64Col } = await import('../src/state.js');
+  const original = F64Col.prototype.snapshot;
+  let snapshots = 0;
+  F64Col.prototype.snapshot = function () {
+    snapshots++;
+    return original.call(this);
+  };
+  let bodyWrites = 0;
+  backend.onWrite = () => {
+    if (++bodyWrites === 2) {
+      addRows(cols, 40000, 40001);
+      backend.tick({ payload: { handle: backend.nextHandle, error: null } });
+    }
+  };
+  try {
+    spool.spoolRecordingStarted();
+    await spool.spoolRecordingPaused();
+    assert.equal(snapshots, 24, 'one 12-column snapshot for the backlog and one for the frozen tail');
+    const file = onlyFile();
+    assert.equal(parseCsv(file.text, { fallbackStartTime: 0 }).columns.x.length, 40001);
+    const calls = backend.calls;
+    assert.ok(
+      calls.indexOf('csv_write_patch') < calls.lastIndexOf('csv_write_chunk'),
+      'checkpoint runs during the backfill',
+    );
+    assert.equal(pauses, 0);
+  } finally {
+    F64Col.prototype.snapshot = original;
+    await spool.finalizeSpool();
+  }
 });

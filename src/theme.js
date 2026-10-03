@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * @file 主题桥 — 把 CSS 设计令牌暴露给 canvas 侧（uPlot 无法读 CSS 变量），
- * 并负责外观偏好（深色 / 浅色 / 跟随系统）的解析与生效。
+ * 并负责外观偏好（跟随系统 / 浅色 / 深色）的解析与生效。
  *
  * 通道色 / 图表基建色的唯一定义处是 styles/tokens.css；本模块启动时读入
  * `chartTheme`，chart.js 全部从这里取色，保证图例点 = 复选框色块 = 曲线同源。
@@ -51,7 +51,7 @@ const FALLBACK = {
 };
 
 /** 与 src/theme-boot.js 共用的 localStorage 键。 */
-export const THEME_STORAGE_KEY = 'witrn-theme';
+export const THEME_STORAGE_KEY = 'lapower-theme';
 
 /** @typedef {'dark'|'light'|'system'} ThemePreference */
 /** @typedef {'dark'|'light'} ResolvedTheme */
@@ -88,7 +88,7 @@ export function onThemeChange(callback) {
  * @returns {ThemePreference}
  */
 export function normalizeThemePreference(value) {
-  return value === 'light' || value === 'system' || value === 'dark' ? value : 'dark';
+  return value === 'light' || value === 'system' || value === 'dark' ? value : 'system';
 }
 
 /**

@@ -2,7 +2,7 @@
 
 # 技术架构
 
-本文描述 WITRN-RS 的内部结构。使用说明见 [使用指南](USAGE.md)，构建方式见 [开发与构建](DEVELOPMENT.md)。
+本文描述 laPower 的内部结构。使用说明见 [使用指南](USAGE.md)，构建方式见 [开发与构建](DEVELOPMENT.md)。
 
 - [仓库布局](#仓库布局)
 - [后端](#后端)
@@ -15,10 +15,10 @@
 
 ## 仓库布局
 
-Cargo workspace，四个成员 + 一个不经打包器的前端目录。
+Cargo workspace，四个成员 + 一个原生 JavaScript 前端源码目录；发布构建由 esbuild 生成前端产物。
 
 ```
-WITRN-RS/
+laPower/
 ├── src-tauri/            Tauri v2 应用（后端）
 │   ├── src/lib.rs        应用状态、Tauri 命令、HID 读线程与 IPC 发射线程
 │   ├── src/pd_capture.rs USB-PD 捕获会话（seq / generation / 按需解码）
@@ -29,7 +29,9 @@ WITRN-RS/
 │   ├── usbpd-parser/     USB-PD 报文解码库
 │   ├── km003c/            POWER-Z Bulk 协议、AdcQueue 与 CDC 控制
 │   └── witrn-hid/        WITRN HID 设备封装
-├── src/                  前端（原生 ES Modules，即 frontendDist）
+├── src/                  前端源文件（原生 ES Modules）
+├── out/                  构建后的 frontendDist（不入库）
+├── tools/showcase/       虚拟设备与截图开发工具（不随应用发货）
 ├── test/                 前端单元测试（node --test）
 ├── temperature-example/  外部温度服务 Python 示例
 └── docs/                 本文档目录
@@ -56,8 +58,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
                          ↘ POWER-Z CDC 控制线程
 ```
 
-- **HID 读线程** —— 阻塞读 HID 报告，解码校验后写入通道。PD 事件在通道满时进入最多 256 条的 pending，循环下次先排空再读。它不接触 Tauri 的 `emit`，因此 IPC 的抖动不会反压到读取节奏。
-- **IPC 发射线程** —— 把 PD 报文按约 8 ms 一帧合并为 `pd-data-batch` 事件；`device-data` 已在读侧按采样率节流，发射侧原样转发不再合并。发送端 drop 时先排空残留再发 `device-disconnected`。
+- **采集读线程** —— WITRN 阻塞读 HID 报告，POWER-Z 读取 Vendor Bulk / AdcQueue；解码、节拍选点后写入容量 4096 的有界通道。PD 事件在通道满时进入最多 256 条的 pending，完整报文仍保留在后端日志。测量样本的未确认量达到 8192 时明确停止采集并报错。
+- **IPC 发射线程** —— 测量与 PD 分别发为 `device-data-batch` / `pd-data-batch`。测量按最多 64 点或 `clamp(4 × 采样间隔, 8 ms, 50 ms)` 合批，保留每点的序号、录制段与时间戳；前端消费后通过 ACK 确认。采集停止时先排空残留，再发末包回执与断开事件。
 
 `BackgroundTask::stop()` 先置停止标志再 `join`，且**顺序固定为先生产者后消费者** —— 反过来会让读线程写入一个没人消费的通道。
 
@@ -69,7 +71,7 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 
 | 命令 | 作用 |
 | --- | --- |
-| `enumerate_devices` | 枚举厂商 VID 下的全部 HID 接口 |
+| `enumerate_devices` | 合并 WITRN HID 与 POWER-Z Vendor Bulk 设备枚举 |
 | `connect_device_by_path` | 按 HID 路径连接（前端实际使用的入口） |
 | `disconnect_device` | 断开并停止该连接的后台线程 |
 | `get_current_device_info` | 返回当前连接的设备信息 |
@@ -80,6 +82,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `pd_log_replace` | 用导入的报文替换日志，并盖上新 generation |
 | `decode_pd_at` | 按 `seq` 单帧解码，O(1)，用于点击某行时才展开详情 |
 | `drain_device_stream` | 停止该连接的后台线程并取回末包回执（幂等，可重复调用） |
+| `ack_device_stream` | 确认同 generation 中已消费的样本序号 |
+| `set_recording_segment` | 在采集源建立录制段边界，同步 PD 跟随状态 |
 | `abandon_device_stream` | 退休一个终态会话，让断开 / 重连 / 退出重新可达；不改写 `consumed` |
 | `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源 |
 | `shutdown` | 停止全部后台线程后销毁主窗口 |
@@ -111,7 +115,7 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 
 ### `crates/usbpd-parser`
 
-USB-PD 报文解码，约 6,300 行 / 102 个测试。按报文结构分模块：`header`、`data_msg`、`ext_msg`、`pdo`、`rdo`、`vdo`、`crc`、`context`、`render`。
+USB-PD 报文解码。按报文结构分模块：`header`、`data_msg`、`ext_msg`、`pdo`、`rdo`、`vdo`、`crc`、`context`、`render`。
 
 - 覆盖控制报文、数据报文、扩展报文，以及 Hard Reset / Cable Reset（SOP 字节 32 步编码）。
 - 识别 Structured VDM 2.1。
@@ -149,7 +153,9 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 
 ## 前端
 
-`src/` 就是 `tauri.conf.json` 里的 `frontendDist`，**没有打包器、没有构建步骤、没有 dev server**。文件按原样交给 WebView，改完刷新即可。`withGlobalTauri: true`，所以前端通过 `window.__TAURI__` 调用后端，不需要 `@tauri-apps/api` npm 包；类型在 `src/global.d.ts` 里手写声明，全部模块开启 `// @ts-check`。
+`src/` 是前端源码，`tauri.conf.json` 的 `frontendDist` 指向构建生成的 `out/`。`npm run build` 合并样式并保留原生 JS 模块；`npm run build:dist` 进一步分别合并应用入口和 Worker。未配置 `devUrl`，改动源码后需重建前端并重新链接 Rust 二进制；按需浏览器预览由独立的 `tools/showcase/` 提供。`withGlobalTauri: true`，前端通过 `window.__TAURI__` 调用后端，类型在 `src/global.d.ts` 中声明，模块开启 `// @ts-check`。
+
+关于页图标在构建时从 `src-tauri/icons/128x128@2x.png` 复制到 `out/assets/app-icon.png`，与桌面图标使用同一份资源；开发展示服务器也直接读取该文件。
 
 按职责分组：
 
@@ -160,7 +166,7 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 | 数据 | `data.js`、`measurement.js`、`csv.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
 | 设备 | `device.js`、`temperature.js` | 连接管理、设置页 VID/PID/SN、TCP 温度源 |
-| 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、设置页、50–200% 缩放、避免首帧闪白的主题引导 |
+| 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、设置页、50–200% 缩放、默认跟随系统并同步首帧主题 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `windowcontrols` |
 | 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
 | 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
@@ -209,48 +215,41 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 
 ### 前端 —— `test/`
 
-用 Node 内置测试运行器（`node --test`），只覆盖不依赖 DOM 与 Tauri 的纯逻辑，以及跨文件的契约断言：
+Node 内置测试运行器（`node --test`）覆盖核心逻辑和跨文件契约，需要浏览器 API 的部分使用 mock。主要文件按领域组织如下，实际数量以 `npm test` 输出为准：
 
 ```
-chart-buckets  chart-columns  chart-window  ids       ingest      measurement
-pd-batch       pd-capture-file          pd-capture-state
-pd-clear-linkage         pd-model       pd-recording
-recording      security-csp   theme     ui-scale    utils
-version-sync   temp-disconnect          settings-persistence
+bench-gate  chart-binding  chart-buckets  chart-columns  chart-cooperative
+chart-cursor  chart-extrema  chart-feedback  chart-pacing  chart-window  csv-codec  csv-import
+device-stream  frame-scheduler  ingest  km003c-model  measurement
+pd-capture-file  pd-model  range-stats  recording  recording-spool
+security-csp  settings-persistence  tauri-config  temp-disconnect  version-sync
 ```
 
-其中有四个是**契约测试** —— 它们不测某个函数的行为，而是断言分散在多个文件里的事实必须彼此一致：
+这些测试保护数据处理、CSV、采集、录制、协议解析、性能门禁、安全 CSP、发布版本同步和已确认的高影响缺陷。普通 UI 布局、样式、文案、控件数量和功能表面变化不单独建立回归测试；规则详见 [开发与构建：测试与回归边界](DEVELOPMENT.md#测试与回归边界)。
 
-- **`ids.test.js`** —— DOM 契约。从 JS 里提取每一个 `getElementById` 的字面量，断言该 id 在 `index.html` 中**恰好出现一次**。布局重构时丢掉某个控件会立刻被它抓住。
-- **`version-sync.test.js`** —— 版本契约。断言 `package.json`、`Cargo.toml` 的 `[workspace.package]`、`src-tauri/tauri.conf.json` 三处版本号一致，格式为 `X.Y.Z`，且四个成员 crate 仍是 `version.workspace = true`（否则会冒出第五、第六个真相来源）。
-- **`security-csp.test.js`** —— 安全契约。断言 dialog 能力只有 `allow-open` / `allow-save`，CSP 的 `script-src` / `style-src` 不含 `'unsafe-inline'`。
-- **`pd-capture-file.test.js`** —— PD 捕获文件的版本信封与 v1 兼容路径。
+### Rust workspace
 
-其余是纯逻辑测试，例如：
+四个 crate 的单元、集成和文档测试由 `cargo test --workspace` 运行；`cargo fmt --check --all`、workspace Clippy 以及协议 crate 的非默认 feature 组合由 CI 固定检查。真实 HID 设备和外部温度服务仍按需手动检查，不属于自动化回归链路。
 
-- **`chart-window.test.js`** —— 滚轮缩放钳位、follow 保 duration、frozen 窗口不随 `lastX` 漂移。
-- **`measurement.test.js`** —— 相对时间解析（含 `D.hh:mm:ss.ms` 天数前缀）、相邻区间能量积分（跳过随标称采样间隔定标的空档）。
-- **`pd-model.test.js`** —— 报文摘要提取（SOP / 角色 / 速览）、GoodCRC 过滤、缓冲回绕。
-
-### Rust —— 275 个 `#[test]`
-
-| 位置 | 数量 |
+| 位置 | 覆盖 |
 | --- | --- |
-| `crates/usbpd-parser`（12 个模块 + `tests/conversation.rs` 完整会话回放） | 104 |
-| `crates/witrn-hid`（`device.rs`、`general.rs`） | 23 |
-| `crates/km003c`（协议、Bulk、CDC 与触发状态机） | 87 |
-| `src-tauri`（`lib.rs`、`acquire.rs`、`km003c_session.rs`、`file_io.rs` 等） | 61 |
+| `crates/usbpd-parser` | 协议字段、渲染及完整会话回放 |
+| `crates/witrn-hid` | 设备接口筛选与测量帧解析 |
+| `crates/km003c` | 协议、Bulk、CDC 与触发状态机 |
+| `src-tauri` | 采集、合批、队列时基、文件句柄与恢复文件 |
 
-另有 17 个文档测试（`crates/usbpd-parser` 13 个、`crates/witrn-hid` 4 个），随 `cargo test --workspace` 一并运行。
+协议库的文档测试随 `cargo test --workspace` 一并运行；测试数量以该命令的实际输出为准。
 
 硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
 
-CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），四个包全部受 fmt / clippy / test 检查；另有一个 `crate-features` job 专门跑协议 crate 的非默认特性组合。详见 [开发与构建 · CI](DEVELOPMENT.md#-ci-门禁)。
+CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），四个包全部受 fmt / clippy / test 检查；另有一个 `crate-features` job 专门跑协议 crate 的非默认特性组合。详见 [开发与构建 · CI](DEVELOPMENT.md#ci-门禁)。
+
+开发预览由 `tools/showcase/server.mjs` 在本地 HTTP 响应中注入虚拟 Tauri 桥接，设备数据仍通过前端现有事件流摄入。模拟代码、场景与 PD 样例均位于 `src/` 外；正常构建只从 `src/` 生成 `out/`，因此安装包不包含开发工具。详见 [开发展示工具](DEVELOPMENT.md#开发展示工具)。
 
 ## 安全边界
 
 - **CSP** —— WebView 启用内容安全策略，`img-src` 只允许 `self`、`asset:` 与 `blob:`，`connect-src` 只允许 `self` 与 IPC。`script-src` / `style-src` 均为 `'self'`，不含 `'unsafe-inline'`（Tauri 编译期会给本地脚本补 hash、给样式补 nonce）。
 - **对话框能力最小化** —— `capabilities/default.json` 只授予 `dialog:allow-open` 与 `dialog:allow-save`。应用内确认框走 `<dialog>`，不授权原生 message/ask。
-- **文件系统能力最小化** —— 只授予 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。文件选择器保留 Tauri 原生实现，因为 v2 通过对话框选择才会在运行时授予所选路径的 fs scope；换成应用内实现会直接让 `writeTextFile` / `readTextFile` 失去权限。
+- **文件系统能力最小化** —— 插件权限保留 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。CSV / PD 文件通过 Rust 文件句柄接口分块读写；路径由原生对话框或受控缓存目录决定，前端不能提交任意路径打开文件，单块最多 4 MiB。
 - **窗口能力** —— 因为使用无边框自定义标题栏，需要一组 `core:window:allow-*` 权限（拖动、缩放、最大化等）。
 - **无网络依赖** —— 前端运行依赖全部 vendor 到 `src/vendor/`，运行时不从 CDN 加载脚本或样式。唯一的网络行为是用户主动配置的外部温度服务（出站 TCP）。

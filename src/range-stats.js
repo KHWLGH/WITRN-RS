@@ -1,5 +1,6 @@
 // @ts-check
 import { yieldToMainThread } from './cooperative.js';
+import { pointEnergyMaxStepS } from './measurement.js';
 
 /**
  * @typedef {{
@@ -21,7 +22,8 @@ export function rangeStatsRevision(columns) {
     columns.current.revision +
     columns.power.revision +
     columns.temp.revision +
-    columns.recordingSegments.revision
+    columns.recordingSegments.revision +
+    columns.sampleIntervals.revision
   );
 }
 
@@ -48,13 +50,14 @@ export function captureRangeStatsSnapshot(columns, startIndex, endIndex, maxStep
     power: columns.power.snapshot(),
     temp: columns.temp.snapshot(),
     recordingSegments: columns.recordingSegments.snapshot(),
+    sampleIntervals: columns.sampleIntervals.snapshot(),
   };
 }
 
 /** @typedef {ReturnType<typeof captureRangeStatsSnapshot>} RangeStatsSnapshot */
 
 /** @param {RangeStatsSnapshot} snapshot @param {RangeStats|null} seed @returns {RangeStats} */
-function initialStats(snapshot, seed) {
+export function initialStats(snapshot, seed) {
   return {
     minV: Infinity,
     maxV: -Infinity,
@@ -85,12 +88,26 @@ function initialStats(snapshot, seed) {
 }
 
 /**
- * @param {RangeStats} stats @param {RangeStatsSnapshot} snapshot @param {number} i
+ * @param {RangeStats} stats @param {number} i
  * @param {number} offset @param {Float64Array} xValues @param {Float64Array} voltages
  * @param {Float64Array} currents @param {Float64Array} powers @param {Float64Array} temps
  * @param {Float64Array} segments
+ * @param {number} previousX @param {number} previousSegment @param {number} interval
  */
-function foldPoint(stats, snapshot, i, offset, xValues, voltages, currents, powers, temps, segments) {
+function foldPoint(
+  stats,
+  i,
+  offset,
+  xValues,
+  voltages,
+  currents,
+  powers,
+  temps,
+  segments,
+  previousX,
+  previousSegment,
+  interval,
+) {
   const v = voltages[offset];
   const c = currents[offset];
   const p = powers[offset];
@@ -120,15 +137,13 @@ function foldPoint(stats, snapshot, i, offset, xValues, voltages, currents, powe
     stats.countT += 1;
   }
   if (i <= stats.startIndex) return;
-  const previousSegment = offset ? segments[offset - 1] : snapshot.recordingSegments.valueAt(i - 1);
   if (Number.isFinite(segments[offset]) && segments[offset] !== previousSegment) return;
-  const previousX = offset ? xValues[offset - 1] : snapshot.x.valueAt(i - 1);
   const dt = (xValues[offset] - previousX) / 3600;
   const currentAbs = Math.abs(c);
   const powerAbs = Math.abs(p);
   if (
     dt < 0 ||
-    dt > snapshot.maxStepS / 3600 ||
+    dt > pointEnergyMaxStepS(interval, stats.maxStepS) / 3600 ||
     !Number.isFinite(dt) ||
     !Number.isFinite(currentAbs) ||
     !Number.isFinite(powerAbs)
@@ -155,8 +170,51 @@ function foldBlock(stats, snapshot, from, end) {
     const powers = read(snapshot.power);
     const temps = read(snapshot.temp);
     const segments = read(snapshot.recordingSegments);
-    for (; i < chunkEnd; i++)
-      foldPoint(stats, snapshot, i, i - chunkStart, xs, voltages, currents, powers, temps, segments);
+    const intervals = snapshot.sampleIntervals.chunks(chunkStart, chunkEnd).next().value?.values;
+    for (; i < chunkEnd; i++) {
+      const offset = i - chunkStart;
+      foldPoint(
+        stats,
+        i,
+        offset,
+        xs,
+        voltages,
+        currents,
+        powers,
+        temps,
+        segments,
+        offset ? xs[offset - 1] : snapshot.x.valueAt(i - 1),
+        offset ? segments[offset - 1] : snapshot.recordingSegments.valueAt(i - 1),
+        intervals?.[offset] ?? NaN,
+      );
+    }
+  }
+}
+
+/**
+ * The Worker and synchronous paths use the same ordered arithmetic kernel.
+ * @param {RangeStats} stats @param {number} from
+ * @param {Record<'x'|'voltage'|'current'|'power'|'temp'|'recordingSegments'|'sampleIntervals', Float64Array>} columns
+ * @param {number} previousX @param {number} previousSegment
+ */
+export function foldRangeStatsChunk(stats, from, columns, previousX, previousSegment) {
+  for (let offset = 0; offset < columns.x.length; offset++) {
+    foldPoint(
+      stats,
+      from + offset,
+      offset,
+      columns.x,
+      columns.voltage,
+      columns.current,
+      columns.power,
+      columns.temp,
+      columns.recordingSegments,
+      previousX,
+      previousSegment,
+      columns.sampleIntervals[offset],
+    );
+    previousX = columns.x[offset];
+    previousSegment = columns.recordingSegments[offset];
   }
 }
 

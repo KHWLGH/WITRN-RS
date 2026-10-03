@@ -439,6 +439,183 @@ test('a new import cancels the prior worker; late replies and parse failure pres
   }
 });
 
+test('crash recovery preserves its file on cancel, parse/open failure and cleanup failure', async () => {
+  const { importSpoolRecovery } = await import('../src/csv.js');
+  const { toast } = await import('../src/ui/toast.js');
+  const previousInvoke = window.__TAURI__.core.invoke;
+  const previousAsk = window.__TAURI__.dialog.ask;
+  const previousSuccess = toast.success;
+  const previousError = toast.error;
+  const previousLogError = console.error;
+  const errors = [];
+  let deleteCalls = 0;
+  const id = 'test-recovery.recording.csv';
+  function backend(text = CSV_FIXTURE, { failOpen = false, failDelete = false } = {}) {
+    const file = csvFileBackend(previousInvoke, text);
+    window.__TAURI__.core.invoke = async (command, args) => {
+      if (command === 'spool_recovery_open') {
+        assert.equal(args.id, id);
+        if (failOpen) throw new Error('open denied');
+        return { handle: 7, name: id, path: `C:/${id}`, size: text.length };
+      }
+      if (command === 'spool_recovery_delete') {
+        assert.equal(args.id, id);
+        deleteCalls++;
+        if (failDelete) throw new Error('cleanup denied');
+        return;
+      }
+      return file(command, args);
+    };
+  }
+  toast.success = () => {};
+  toast.error = (message) => errors.push(message);
+  console.error = () => {};
+  try {
+    openNativeStream();
+    resetRecordingState();
+    state.chartSeries.x.set([42]);
+    state.chartSeries.timestamps.set([42]);
+    const original = state.chartSeries;
+    window.__TAURI__.dialog.ask = async () => false;
+    backend();
+    assert.equal(await importSpoolRecovery(id), false);
+    assert.equal(state.chartSeries, original);
+    assert.equal(deleteCalls, 0);
+
+    window.__TAURI__.dialog.ask = async () => true;
+    backend('invalid CSV');
+    assert.equal(await importSpoolRecovery(id), false);
+    assert.equal(state.chartSeries, original);
+    assert.equal(deleteCalls, 0);
+
+    backend(CSV_FIXTURE, { failOpen: true });
+    assert.equal(await importSpoolRecovery(id), false);
+    assert.equal(state.chartSeries, original);
+    assert.equal(deleteCalls, 0);
+
+    backend(CSV_FIXTURE, { failDelete: true });
+    assert.equal(await importSpoolRecovery(id), false);
+    assert.deepEqual(
+      [...state.chartSeries.voltage.view()],
+      [5, 6],
+      'restored data remains available despite cleanup failure',
+    );
+    assert.equal(deleteCalls, 1);
+    assert.match(errors.at(-1), /已恢复.*清理失败/);
+
+    backend();
+    assert.equal(await importSpoolRecovery(id), true);
+    assert.equal(deleteCalls, 2, 'delete only after the import succeeds');
+    assert.deepEqual([...state.chartSeries.voltage.view()], [5, 6]);
+  } finally {
+    window.__TAURI__.core.invoke = previousInvoke;
+    window.__TAURI__.dialog.ask = previousAsk;
+    toast.success = previousSuccess;
+    toast.error = previousError;
+    console.error = previousLogError;
+  }
+});
+
+test('shared recovery actions deduplicate scans and serialize restore/delete of the same file', async () => {
+  const { toast } = await import('../src/ui/toast.js');
+  const recovery = await import('../src/recording-recovery.js');
+  const previousInvoke = window.__TAURI__.core.invoke;
+  const previousWarning = toast.warning;
+  const previousError = toast.error;
+  const previousSuccess = toast.success;
+  const previousLogError = console.error;
+  const notices = new Map();
+  const files = [
+    { id: 'first.partial.csv', name: 'first.partial.csv', size: 100, modified_ms: 2 },
+    { id: 'second.partial.csv', name: 'second.partial.csv', size: 100, modified_ms: 1 },
+  ];
+  let scanCalls = 0;
+  let openCalls = 0;
+  const deletions = [];
+  let rejectOpen;
+  const opening = new Promise((_, reject) => {
+    rejectOpen = reject;
+  });
+  let snapshot = [];
+  const unsubscribe = recovery.subscribeRecoveries((entries) => {
+    snapshot = entries;
+  });
+  toast.warning = (text) => {
+    const notice = {
+      text,
+      dismissed: false,
+      dismiss() {
+        this.dismissed = true;
+      },
+      refreshActions() {},
+      setText(value) {
+        this.text = value;
+      },
+    };
+    notices.set(text.includes('first.partial') ? files[0].id : files[1].id, notice);
+    return notice;
+  };
+  toast.error = () => {};
+  toast.success = () => {};
+  console.error = () => {};
+  window.__TAURI__.core.invoke = async (command, args) => {
+    if (command === 'spool_recovery_list') {
+      scanCalls++;
+      return files;
+    }
+    if (command === 'spool_recovery_open') {
+      openCalls++;
+      return opening;
+    }
+    if (command === 'spool_recovery_delete') {
+      deletions.push(args.id);
+      return;
+    }
+    return previousInvoke(command, args);
+  };
+  try {
+    await Promise.all([recovery.scanRecoveries(), recovery.scanRecoveries()]);
+    assert.equal(scanCalls, 1);
+    assert.equal(snapshot.length, 2);
+    assert.equal(notices.size, 2);
+    const restoring = recovery.processRecovery(files[0].id, 'recover');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(openCalls, 1);
+    assert.equal(await recovery.processRecovery(files[1].id, 'recover'), false);
+    assert.equal(await recovery.processRecovery(files[0].id, 'delete'), false);
+    assert.equal(await recovery.processRecovery(files[1].id, 'delete'), true);
+    assert.deepEqual(deletions, [files[1].id]);
+    assert.deepEqual(
+      snapshot.map((entry) => entry.id),
+      [files[0].id],
+    );
+    assert.equal(
+      notices.get(files[1].id).dismissed,
+      true,
+      'processing elsewhere removes its notification, including queued ones',
+    );
+    rejectOpen(new Error('recovery open denied'));
+    assert.equal(await restoring, false);
+    assert.equal(snapshot.length, 1);
+    assert.equal(notices.get(files[0].id).dismissed, false);
+    assert.match(notices.get(files[0].id).text, /recovery open denied/);
+    assert.equal(
+      recovery.recoveryActionDisabled(files[0].id, 'recover'),
+      false,
+      'a failed restore releases the global lock',
+    );
+    assert.equal(await recovery.processRecovery(files[0].id, 'delete'), true);
+    assert.equal(snapshot.length, 0);
+  } finally {
+    unsubscribe();
+    window.__TAURI__.core.invoke = previousInvoke;
+    toast.warning = previousWarning;
+    toast.error = previousError;
+    toast.success = previousSuccess;
+    console.error = previousLogError;
+  }
+});
+
 // ─── 范围统计的非有限值口径 ─────────────────────────────────────────────────
 // 导入精确 CSV 时按设计保留 NaN / ±Infinity（见 csv-codec.test.js），所以这些值
 // 会真的进到列缓冲里；范围统计必须像全量统计一样只折入有限值。
@@ -601,5 +778,107 @@ test('a skipped cell is disclosed on the mean instead of silently dropped', asyn
   } finally {
     state.settings.statsRange = false;
     await stopRecording();
+  }
+});
+
+test('changing settings and preview cadence cannot alter slow and mixed-rate recording history', async () => {
+  const { applySampleRate } = await import('../src/settings.js');
+  const { addDataPoint } = await import('../src/data.js');
+  const { computeCsvImport } = await import('../src/csv-import-core.js');
+  openNativeStream();
+  await startRecording();
+  const first = nativeSample(1);
+  first.rate_ms = 5000;
+  first.received_us = 10000;
+  const second = { ...nativeSample(2), rate_ms: 5000, received_us: 5010000 };
+  deviceStream.handleBatch([first, second]);
+  await deviceStream.settle();
+  await applySampleRate(250);
+  addDataPoint({ ...nativeSample(3, 0), rate_ms: 1 }, null);
+  assert.equal(state.dataIntervalMs, 5000, 'preview and settings preserve the dataset cadence');
+  const third = { ...nativeSample(3), rate_ms: 250, received_us: 5260000 };
+  const fourth = { ...nativeSample(4), rate_ms: 250, received_us: 5510000 };
+  deviceStream.handleBatch([third, fourth]);
+  await deviceStream.settle();
+  const cols = state.chartSeries;
+  assert.deepEqual(cols.sampleIntervals.view(), new Float64Array([5000, 5000, 250, 250]));
+  const expected = calculateEnergyInRange(
+    cols.x,
+    cols.current,
+    cols.power,
+    0,
+    3,
+    cols.recordingSegments,
+    5000,
+    cols.sampleIntervals,
+  );
+  assert.deepEqual({ wh: state.energy.wh, mah: state.energy.mah }, expected);
+  const range = getRangeStats();
+  assert.deepEqual({ wh: range.wh, mah: range.mah }, expected);
+  const text = [
+    ...formatCsvChunks(snapshotCsvColumns(cols, { sampleRate: state.settings.sampleRate, startTime: 1704067200000 })),
+  ].join('');
+  const imported = computeCsvImport(text, { fallbackStartTime: 0 });
+  assert.deepEqual(imported.energy, expected);
+  boundary = 4;
+  await stopRecording();
+});
+
+test('large follow statistics coalesce appends, label completed bounds and avoid copying cached snapshots', async () => {
+  const { ModuleWorker } = await import('../bench/module-worker.mjs');
+  const { F64Col } = await import('../src/state.js');
+  const { getRangeStatsAsync, suspendMonitorDisplay } = await import('../src/data.js');
+  resetRecordingState();
+  const cols = emptyChartColumns();
+  const append = (from, to) => {
+    for (let i = from; i < to; i++)
+      for (const [key, col] of Object.entries(cols))
+        col.push(key === 'x' ? i : key === 'sampleIntervals' ? 1000 : key === 'recordingSegments' ? 1 : i % 17);
+  };
+  append(0, 12000);
+  setChartColumns(cols);
+  state.dataIntervalMs = 1000;
+  state.settings.statsRange = true;
+  state.settings.activeView = 'monitor';
+  state.chartWindow = { mode: 'follow', duration: 9000, min: 2999, max: 11999 };
+  const previousWorker = globalThis.Worker;
+  const originalSnapshot = F64Col.prototype.snapshot;
+  let snapshots = 0;
+  F64Col.prototype.snapshot = function () {
+    snapshots++;
+    return originalSnapshot.call(this);
+  };
+  globalThis.Worker = ModuleWorker;
+  try {
+    const pending = getRangeStatsAsync();
+    append(12000, 12100);
+    state.chartWindow = { mode: 'follow', duration: 9000, min: 3099, max: 12099 };
+    assert.equal(getRangeStatsAsync(), pending, 'natural appends share the active fixed snapshot');
+    const completed = await pending;
+    assert.equal(completed.startIndex, 2999);
+    assert.equal(completed.endIndex, 11999);
+    const workers = ModuleWorker.instances.length;
+    updateStatsDisplay();
+    assert.match(document.getElementById('stats-snapshot-label').textContent, /更新中/);
+    assert.equal(ModuleWorker.instances.length, workers, 'latest bounds wait for adaptive refresh');
+    assert.equal(snapshots, 7, 'cache and active-task checks capture no additional references');
+    suspendMonitorDisplay();
+    state.chartWindow = { mode: 'frozen', duration: 6000, min: 1000, max: 7000 };
+    const replacement = await getRangeStatsAsync();
+    assert.equal(replacement.startIndex, 1000, 'explicit range requests bypass the follow throttle');
+    assert.equal(replacement.endIndex, 7000);
+    snapshots = 0;
+    await getRangeStatsAsync();
+    updateStatsDisplay();
+    assert.equal(snapshots, 0, 'unchanged ranges use metadata-only cache checks');
+    state.chartWindow = { mode: 'frozen', duration: 5000, min: 500, max: 5500 };
+    const cancelled = getRangeStatsAsync();
+    suspendMonitorDisplay();
+    assert.equal(await cancelled, null, 'hidden jobs cannot publish stale results');
+  } finally {
+    suspendMonitorDisplay();
+    state.settings.statsRange = false;
+    globalThis.Worker = previousWorker;
+    F64Col.prototype.snapshot = originalSnapshot;
   }
 });

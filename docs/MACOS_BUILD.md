@@ -1,12 +1,14 @@
 ← 返回 [README](../README.md)
 
-# WITRN-RS macOS ARM64 构建记录
+# laPower macOS ARM64 构建记录
 
-自行编译步骤的摘要见 [开发与构建 · macOS 自行编译](DEVELOPMENT.md#-macos-自行编译)。下文是一次 Apple Silicon 上的完整打包记录。
+> 本文保留更名前以 WITRN-RS 为名的历史构建结果与产物路径。当前产品名为 laPower，应用二进制为 lapower；新构建应使用对应的新名称。
+
+自行编译步骤的摘要见 [开发与构建 · macOS 自行编译](DEVELOPMENT.md#macos-自行编译)。下文是一次 Apple Silicon 上的完整打包记录。
 
 ## 基本信息
 
-- 上游仓库：[KHWLGH/WITRN-RS](https://github.com/KHWLGH/WITRN-RS)
+- 上游仓库：[KHWLGH/laPower](https://github.com/KHWLGH/laPower)
 - 版本：`v0.2.1`
 - 固定提交：`72ebad4fe3743a0fbd475d8e3d45055504ce60fd`
 - 本地分支：`macos-arm64`

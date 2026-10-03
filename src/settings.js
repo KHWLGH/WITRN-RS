@@ -104,10 +104,9 @@ function normalizeSettings(saved) {
  * @param {number} rate
  */
 export async function applySampleRate(rate) {
-  const clamped = Math.round(Math.min(60_000, Math.max(1, Number(rate) || defaultSettings.sampleRate)));
+  let clamped = Math.round(Math.min(60_000, Math.max(1, Number(rate) || defaultSettings.sampleRate)));
+  if (clamped === 1 && (!state.isConnected || state.connectedDevice?.family !== 'km003c')) clamped = 10;
   state.settings.sampleRate = clamped;
-  // 能量空档阈值跟着新间隔走；设备回来的 rate_ms 会立刻覆盖成实际值。
-  state.dataIntervalMs = clamped;
   const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (rateSelect) setSampleRateOption(rateSelect, clamped);
   if (state.isConnected) {

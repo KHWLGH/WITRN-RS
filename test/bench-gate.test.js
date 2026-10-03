@@ -138,6 +138,17 @@ test('projectBaseline rejects a measurement too fast to gate on', () => {
     () => projectBaseline({ bench: 'core', pass, gated: GATED, provenanceCommit: 'x' }),
     /低于 .* 门禁下限/,
   );
+  // Structure-only verification must also work with no timing measurements at all.
+  const structure = projectBaseline({
+    bench: 'core',
+    pass: {
+      ...pass,
+      cases: pass.cases.map((c) => ({ ...c, metrics: c.metrics.map(({ name, repeat }) => ({ name, repeat })) })),
+    },
+    gated: GATED,
+    timings: false,
+  });
+  assert.deepEqual(structure.ops, Object.fromEntries(GATED.map((key) => [key, { repeat: 1 }])));
 });
 
 test('projectBaseline refuses to silently drop a gated metric', () => {
@@ -179,6 +190,14 @@ test('verifyBaseline checks structure and ignores normal timing jitter', () => {
   const verify = verifyBaseline(projection(base), projection(now));
   assert.deepEqual(verify.problems, [], '数值抖动不是错误');
   assert.match(verify.text, /结构一致/);
+  const structure = projection(now);
+  structure.ops = Object.fromEntries(Object.entries(structure.ops).map(([key, { repeat }]) => [key, { repeat }]));
+  assert.deepEqual(verifyBaseline(projection(base), structure).problems, [], '结构检查不要求计时数据');
+  structure.passes = 1;
+  assert.ok(verifyBaseline(projection(base), structure).problems.some((p) => p.startsWith('passes:')));
+  structure.passes = 3;
+  structure.ops[`a.op@${SIZE}`].repeat = 2;
+  assert.ok(verifyBaseline(projection(base), structure).problems.some((p) => p.includes('repeat:')));
 });
 
 test('an rAF suspension is reported, not folded into the tail', () => {

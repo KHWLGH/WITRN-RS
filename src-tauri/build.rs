@@ -42,6 +42,8 @@ fn scan(dir: &Path) -> Option<(SystemTime, Vec<PathBuf>)> {
 }
 
 fn main() {
+    // Windows resource compilation must run again when an icon is replaced.
+    println!("cargo:rerun-if-changed=icons");
     let src = PathBuf::from("../src");
     let dist = PathBuf::from("../out");
 

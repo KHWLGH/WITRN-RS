@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>laPower 开发展示工具</title>
+  <link rel="stylesheet" href="/__showcase__/preview.css">
+  <script src="/__showcase__/preview.js" defer></script>
+</head>
+<body>
+  <header>
+    <strong>laPower · 开发展示工具</strong><span>模拟数据</span>
+    <button type="button" id="populate">填充 120 秒展示数据</button>
+    <button type="button" id="freeze">冻结</button><button type="button" id="resume">继续模拟</button>
+    <button type="button" id="advance">推进 10 秒</button><button type="button" id="reset">重置预览</button>
+    <a href="/app/" target="_blank">打开独立软件视图</a>
+    <output id="status" aria-live="polite">通过软件标题栏选择虚拟设备并连接、记录。</output>
+  </header>
+  <iframe id="app" src="/app/" title="laPower 虚拟设备预览"></iframe>
+</body>
+</html>

@@ -150,7 +150,7 @@ const median = (values) => {
  * multiples here, which is why --compare gates a ratio and WP8's CI gate pairs against a
  * git revision in one interleaved process instead.
  */
-export function projectBaseline({ bench, pass, gated, provenanceCommit }) {
+export function projectBaseline({ bench, pass, gated, provenanceCommit, timings = true }) {
   const inputs = {};
   const ops = {};
   for (const c of pass.cases) {
@@ -158,6 +158,10 @@ export function projectBaseline({ bench, pass, gated, provenanceCommit }) {
     if (c.correctness.segmentsSha256) inputs[c.size].segments = c.correctness.segmentsSha256;
     for (const m of c.metrics) {
       if (!gated.includes(`${m.name}@${c.size}`)) continue;
+      if (!timings) {
+        ops[`${m.name}@${c.size}`] = { repeat: m.repeat };
+        continue;
+      }
       if (m.blockMs.p50 < MIN_BLOCK_MS)
         throw new Error(
           `${m.name}@${c.size}: 单次测量块只有 ${m.blockMs.p50}ms，低于 ${MIN_BLOCK_MS}ms 门禁下限 —— 给它加 repeat 或别再门禁它`,
@@ -330,7 +334,7 @@ export function corroboration(baseline, projections, threshold) {
  */
 export function verifyBaseline(baseline, current) {
   const problems = [];
-  for (const field of ['schema', 'bench', 'runs', 'warmup'])
+  for (const field of ['schema', 'bench', 'runs', 'warmup', 'passes'])
     if (baseline[field] !== current[field]) problems.push(`${field}: 基线 ${baseline[field]} / 本次 ${current[field]}`);
   for (const field of ['version', 'seed', 'segments'])
     if (baseline.fixture?.[field] !== current.fixture?.[field])
@@ -354,11 +358,10 @@ export function verifyBaseline(baseline, current) {
     else if (now.repeat !== baseline.ops[key].repeat)
       problems.push(`${key} repeat: ${baseline.ops[key].repeat} / ${now.repeat}`);
   }
-  const moved = baseOps.filter((key) => JSON.stringify(baseline.ops[key]) !== JSON.stringify(current.ops[key])).length;
   return {
     text:
       problems.map((p) => `  ! ${p}`).join('\n') ||
-      `  结构一致：${baseOps.length} 项门禁指标、${Object.keys(baseline.inputs ?? {}).length} 个规模、输入指纹全部对得上（${moved}/${baseOps.length} 项数值有正常抖动，要判回退用 --compare）`,
+      `  结构一致：${baseOps.length} 项门禁指标、${Object.keys(baseline.inputs ?? {}).length} 个规模、输入指纹全部对得上（不比较耗时，要判回退用 --compare）`,
     problems,
   };
 }

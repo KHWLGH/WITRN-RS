@@ -1,0 +1,153 @@
+// @ts-check
+
+/** Reserve time for input, including raster work that finishes after the JS draw hook. */
+export function liveChartIntervalMs(workMs, dense = false, nextFrameDelayMs = 0, idleFrameMs = 1000 / 60) {
+  const cpu = Number.isFinite(workMs) ? Math.max(0, workMs) : 0;
+  const raster = Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - idleFrameMs) : 0;
+  const work = cpu + raster;
+  if (!dense && work <= 8) return 0;
+  return Math.min(100, Math.max(dense ? 33 : 20, work * 3));
+}
+
+/** Display-only feedback; acquisition and the stored samples never use this policy. */
+export class ChartRenderPolicy {
+  pixelsPerBucket = 2;
+  idleFrameMs = 1000 / 60;
+  nextFrameDelayMs = 0;
+  slowFrames = 0;
+  /** @type {number|null} */
+  stableSince = null;
+  lastChangeAt = 0;
+  /** @type {number|null} */
+  lastFeedbackAt = null;
+
+  reset() {
+    this.pixelsPerBucket = 2;
+    this.nextFrameDelayMs = 0;
+    this.lastChangeAt = 0;
+    this.breakFeedback();
+  }
+
+  /** Background time and unrelated windows cannot count towards stable recovery. */
+  breakFeedback() {
+    this.slowFrames = 0;
+    this.stableSince = null;
+    this.lastFeedbackAt = null;
+  }
+
+  /**
+   * @param {{delayMs: number, at: number, idleFrameMs?: number, visible: boolean, dense: boolean}} sample
+   * @returns {boolean} Whether the display density changed.
+   */
+  observe({ delayMs, at, idleFrameMs = this.idleFrameMs, visible, dense }) {
+    if (!visible || !dense || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(at)) {
+      this.breakFeedback();
+      return false;
+    }
+    if (Number.isFinite(idleFrameMs) && idleFrameMs > 0) this.idleFrameMs = idleFrameMs;
+    this.nextFrameDelayMs = delayMs;
+    // Sparse/hidden intervals are not evidence of two seconds of healthy chart paints.
+    if (this.lastFeedbackAt !== null && (at < this.lastFeedbackAt || at - this.lastFeedbackAt > 250)) {
+      this.slowFrames = 0;
+      this.stableSince = null;
+    }
+    this.lastFeedbackAt = at;
+    const slow = delayMs > Math.max(33, this.idleFrameMs * 2);
+    this.slowFrames = slow ? this.slowFrames + 1 : 0;
+    if (slow) this.stableSince = null;
+    const old = this.pixelsPerBucket;
+    if (delayMs > 100 || this.slowFrames >= 2) {
+      this.pixelsPerBucket = Math.min(16, old * (delayMs > 100 ? 4 : 2));
+      this.slowFrames = 0;
+    } else if (delayMs <= this.idleFrameMs * 1.5) {
+      this.stableSince ??= at;
+      if (at - this.stableSince >= 2000 && at - this.lastChangeAt >= 5000) {
+        this.pixelsPerBucket = Math.max(1, old / 2);
+        this.stableSince = at;
+      }
+    } else {
+      this.stableSince = null;
+    }
+    if (old === this.pixelsPerBucket) return false;
+    this.lastChangeAt = at;
+    this.stableSince = null;
+    return true;
+  }
+}
+
+/** Fill is a last resort after density reduction, never a consequence of history length. */
+export class ChartFillPolicy {
+  suppressed = false;
+  /** @type {'severe-frame'|'persistent-slow-frame'|'large-batch-slow-frame'|null} */
+  reason = null;
+  slowFrames = 0;
+  reducedDensity = 0;
+  /** @type {number|null} */
+  stableSince = null;
+  /** @type {number|null} */
+  lastFeedbackAt = null;
+  lastSuppressedAt = 0;
+
+  /** Retire evidence from another window, source, visibility or fill setting. */
+  reset() {
+    const changed = this.suppressed;
+    this.suppressed = false;
+    this.reason = null;
+    this.slowFrames = 0;
+    this.reducedDensity = 0;
+    this.stableSince = null;
+    this.lastFeedbackAt = null;
+    this.lastSuppressedAt = 0;
+    return changed;
+  }
+
+  get needsConfirmation() {
+    return !this.suppressed && this.slowFrames === 1;
+  }
+
+  /**
+   * @param {{delayMs:number, at:number, idleFrameMs:number, visible:boolean, eligible:boolean, paintedDensity:number, nextDensity:number, largeBatch?:boolean}} sample
+   * @returns {boolean} Whether a repaint must pick up a changed fill state.
+   */
+  observe({ delayMs, at, idleFrameMs, visible, eligible, paintedDensity, nextDensity, largeBatch = false }) {
+    if (!visible || !eligible || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(at)) return this.reset();
+    if (this.lastFeedbackAt !== null && (at < this.lastFeedbackAt || at - this.lastFeedbackAt > 250)) {
+      this.slowFrames = 0;
+      this.stableSince = null;
+    }
+    this.lastFeedbackAt = at;
+    const idle = Number.isFinite(idleFrameMs) && idleFrameMs > 0 ? idleFrameMs : 1000 / 60;
+    const slow = delayMs > Math.max(33, idle * 2);
+    const old = this.suppressed;
+    this.slowFrames = slow ? this.slowFrames + 1 : 0;
+    if (slow) {
+      this.stableSince = null;
+      const severe = delayMs > 100;
+      if (severe || this.slowFrames >= 2) {
+        // The first confirmed slow draw only lowers density. A later confirmed
+        // pair must have actually painted at that cheaper density before fill goes.
+        if (severe || paintedDensity >= 16 || (this.reducedDensity > 0 && paintedDensity >= this.reducedDensity)) {
+          if (!this.suppressed) this.lastSuppressedAt = at;
+          this.suppressed = true;
+          this.reason = severe ? 'severe-frame' : largeBatch ? 'large-batch-slow-frame' : 'persistent-slow-frame';
+        } else if (nextDensity > paintedDensity) {
+          this.reducedDensity = nextDensity;
+        }
+        this.slowFrames = 0;
+      }
+    } else if (delayMs <= idle * 1.5) {
+      this.stableSince ??= at;
+      if (at - this.stableSince >= 2000) {
+        this.reducedDensity = 0;
+        // A stable unfilled chart gets a filled trial, bounded to once per five seconds.
+        if (at - this.lastSuppressedAt >= 5000) {
+          this.suppressed = false;
+          this.reason = null;
+        }
+      }
+    } else {
+      this.stableSince = null;
+    }
+    return old !== this.suppressed;
+  }
+}

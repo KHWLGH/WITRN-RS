@@ -1,7 +1,7 @@
 /**
  * 打包形状测量。
  *
- * bench/core 量的是算法，bench/ui-runner 量的是渲染；这里量的是"发货了什么、要取回几次"。
+ * bench/core 量的是算法；这里量的是"发货了什么、要取回几次"。
  * 它是本目录里唯一一个确定性、零噪声、因此可以直接给 CI 当硬门禁的测量台：没有计时，
  * 所以不需要基线，也不需要互证轮次。
  *
@@ -142,7 +142,7 @@ async function main() {
   // before/after table in the CHANGELOG, not to a gate that must pass on a clean checkout.
   let releaseImage = null;
   try {
-    const info = await stat(resolve(ROOT, 'target/release/witrn-rs.exe'));
+    const info = await stat(resolve(ROOT, 'target/release/lapower.exe'));
     releaseImage = { bytes: info.size, mtime: info.mtime.toISOString() };
   } catch {}
 
@@ -188,9 +188,9 @@ async function main() {
     );
     if (releaseImage)
       console.log(
-        `target/release/witrn-rs.exe: ${(releaseImage.bytes / 1048576).toFixed(2)} MiB (${releaseImage.mtime})`,
+        `target/release/lapower.exe: ${(releaseImage.bytes / 1048576).toFixed(2)} MiB (${releaseImage.mtime})`,
       );
-    else console.log('target/release/witrn-rs.exe: 未构建（跑一次 cargo build --release 再来看镜像大小）');
+    else console.log('target/release/lapower.exe: 未构建（跑一次 cargo build --release 再来看镜像大小）');
     for (const f of externalBytes) console.log(`  ${(f.bytes / 1024).toFixed(1).padStart(8)} KiB  ${f.path}`);
   }
 

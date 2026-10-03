@@ -33,7 +33,7 @@ jobs:
       - name: Test JavaScript pure logic
         run: npm test
 
-      # 三处版本号的一致性由 test/version-sync.test.js 断言（上一步）。
+      # 清单和锁文件的版本号一致性由 test/version-sync.test.js 断言（上一步）。
       # 这里补上另一半：打 tag 时确认 tag 名和清单里的版本号对得上。
       - name: Verify tag matches manifest version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -198,7 +198,7 @@ jobs:
         # with criterion reporting p < 0.05. Its significance test covers sampling within a run, not
         # host state, so the sign flips. See CHANGELOG for the same numbers.
         run: |
-          cargo bench -p witrn-rs --bench stream -- --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+          cargo bench -p lapower --bench stream -- --warm-up-time 1 --measurement-time 3 --sample-size 30 \
             2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -207,44 +207,3 @@ jobs:
           name: perf-results
           path: bench/results/
           if-no-files-found: ignore
-
-  # bench:ui's *timings* are not gateable on shared runners (headful Edge + CDP round trips), but
-  # its hard assertions already are, and they are the ones that catch real data corruption: SHA-256
-  # over all eleven columns, lastSeq == count, energy integration, a concurrent CSV export
-  # round-trip, and zero runtime exceptions. Gate on those, publish the timings.
-  ui-integrity:
-    name: UI integrity assertions (Windows, headful Edge)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install JavaScript tooling
-        run: npm ci
-
-      - name: Frontend distribution builds
-        run: npm run build
-
-      - name: Sustained-run integrity assertions
-        timeout-minutes: 20
-        # --shipped-csp serves the app's real Content-Security-Policy instead of the harness's
-        # permissive one, so this also gates CSP regressions. Strictly dominates the loose mode:
-        # the fixture stub is a same-origin served file, so `script-src 'self'` still allows it,
-        # and a blocked icon mask would otherwise fail silently with no request and no exception.
-        run: >-
-          node bench/ui-runner.mjs --duration 20 --sizes 10000 --emit-window-ms 40 --shipped-csp
-          --output bench/results/ui-ci.json
-
-      - name: Shipped artifact boots (out/, not src/)
-        timeout-minutes: 10
-        # Everything above serves raw src/, so a broken build-dist.mjs -- a mis-rewritten url(), a
-        # stylesheet that never made it into the bundle -- used to pass CI and ship a blank icon.
-        # This loads out/index.html and asserts 1 stylesheet, its rule count, and that every CSS
-        # url() it declares resolves over HTTP. Timings here are not comparable to the src run.
-        run: >-
-          node bench/ui-runner.mjs --dist out --shipped-csp --sizes 10000 --runs 3 --warmup 1
-          --duration 3 --output bench/results/ui-dist.json

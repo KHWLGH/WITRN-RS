@@ -3,6 +3,6 @@
 
 fn main() {
     // Must be the first statement: every boot-timing segment is measured from here.
-    witrn_rs_lib::boot_timing::record_process_start();
-    witrn_rs_lib::run()
+    lapower_lib::boot_timing::record_process_start();
+    lapower_lib::run()
 }

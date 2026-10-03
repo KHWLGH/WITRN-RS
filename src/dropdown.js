@@ -95,7 +95,7 @@ class Dropdown {
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ['disabled', 'selected', 'value'],
+      attributeFilter: ['disabled', 'hidden', 'selected', 'value'],
     });
 
     // .value / .selectedIndex 是属性赋值，不反映到 attribute，MutationObserver 看不到，
@@ -141,6 +141,7 @@ class Dropdown {
     const selected = readIndex(this.select);
     this.menu.textContent = '';
     for (const [i, opt] of Array.from(this.select.options).entries()) {
+      if (opt.hidden) continue;
       const item = document.createElement('div');
       item.className = 'cs-option';
       item.id = `${this.id}-opt-${i}`;
@@ -232,7 +233,7 @@ class Dropdown {
   nextEnabled(from, step) {
     const opts = this.select.options;
     for (let i = from + step; i >= 0 && i < opts.length; i += step) {
-      if (!opts[i].disabled) return i;
+      if (!opts[i].disabled && !opts[i].hidden) return i;
     }
     return -1;
   }
@@ -249,7 +250,7 @@ class Dropdown {
    */
   commit(i) {
     const opts = this.select.options;
-    if (i < 0 || i >= opts.length || opts[i].disabled) return;
+    if (i < 0 || i >= opts.length || opts[i].disabled || opts[i].hidden) return;
     const changed = readIndex(this.select) !== i;
     writeIndex(this.select, i);
     this.close();
@@ -275,7 +276,8 @@ class Dropdown {
   /** @param {PointerEvent} e */
   onMenuHover(e) {
     const i = this.indexFromEvent(e);
-    if (i >= 0 && i !== this.activeIndex && !this.select.options[i].disabled) this.setActive(i);
+    if (i >= 0 && i !== this.activeIndex && !this.select.options[i].disabled && !this.select.options[i].hidden)
+      this.setActive(i);
   }
 
   /** @param {KeyboardEvent} e */
@@ -336,7 +338,7 @@ class Dropdown {
     for (let n = 0; n < opts.length; n += 1) {
       const i = (start + n) % opts.length;
       const text = (opts[i].textContent || '').trim().toLowerCase();
-      if (!opts[i].disabled && text.startsWith(this.typeBuffer)) {
+      if (!opts[i].disabled && !opts[i].hidden && text.startsWith(this.typeBuffer)) {
         this.setActive(i);
         return;
       }

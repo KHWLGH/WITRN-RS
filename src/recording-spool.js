@@ -4,8 +4,7 @@
  *
  * - 开始记录时，当前这份数据还没有落盘文件就新建一个，写入定宽表头；已有的行
  *   （例如导入后接着记录）在后台分块补写。
- * - 追加在数据入库路径上按量触发（满 1 秒或满一批行），不靠定时器：窗口最小化时
- *   WebView 会节流定时器，而数据事件照常到达。
+ * - 追加由数据事件和原生每秒检查点唤醒；回填中也定期回写并同步。
  * - 暂停时写完剩余行、原地回写表头并同步到磁盘；清空、导入或正常退出时关闭并删除。
  * - 写入失败会自动暂停记录：数据仍在内存里，可以手动导出。
  *
@@ -14,12 +13,13 @@
 
 import { yieldToMainThread } from './cooperative.js';
 import {
-  formatCsvRange,
   formatSpoolHeader,
   formatSpoolHeaderPatch,
+  nominalIntervalMs,
   SPOOL_PATCH_BYTES,
   snapshotCsvColumns,
 } from './csv-codec.js';
+import { formatCsvRangeAsync } from './csv-export.js';
 import { closeWriter, openSpool, patchText, syncFile, writeText } from './file-io.js';
 import { state } from './state.js';
 import { toast } from './ui/toast.js';
@@ -38,6 +38,7 @@ const ROWS_PER_WRITE = 8192;
  * @property {import('./state.js').ChartSeriesColumns} columns 本文件对应的那份数据
  * @property {number} written 已写入的行数
  * @property {number} startTime 表头 DateTime
+ * @property {number} sampleRate 本文件初始标称间隔，不跟随另一份数据或设置变化
  */
 
 /** @type {Spool|null} */
@@ -45,6 +46,9 @@ let spool = null;
 let queue = Promise.resolve();
 let lastFlushAt = 0;
 let drainQueued = false;
+let checkpointDue = false;
+let listenerStarted = false;
+let failureReported = false;
 /** @type {(() => void)|null} */
 let onFailure = null;
 
@@ -57,6 +61,20 @@ function tempSpoolEnabled() {
  */
 export function configureSpool(hooks) {
   onFailure = hooks.onFailure;
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listenerStarted && listen) {
+    listenerStarted = true;
+    void listen('spool-checkpoint', (/** @type {{payload:{handle:number,error?:string|null}}} */ event) => {
+      if (event.payload.handle !== spool?.handle) return;
+      if (event.payload.error) {
+        fail(event.payload.error);
+        return;
+      }
+      if (!spool || spool.written >= spool.columns.x.length) return;
+      checkpointDue = true;
+      requestDrain();
+    }).catch(fail);
+  }
 }
 
 /** 当前临时文件路径；没有临时文件时为 null。 */
@@ -73,6 +91,8 @@ function enqueue(task) {
 
 /** @param {unknown} error */
 function fail(error) {
+  if (failureReported) return;
+  failureReported = true;
   const failed = spool;
   spool = null;
   drainQueued = false;
@@ -96,29 +116,58 @@ function snapshotOf(target) {
     withTemp: true,
     // 表头固定带段号列：即使这份数据还没有任何点，也要按同样的列写。
     recordingSegments: target.columns.recordingSegments,
-    sampleRate: state.settings.sampleRate,
+    sampleRate: target.sampleRate,
     startTime: target.startTime,
   });
 }
 
 /** 把 [written, 当前长度) 的行写进文件，按块让出主线程。 @param {Spool} target */
 async function drain(target) {
-  drainQueued = false;
-  for (;;) {
+  if (spool !== target || target.written >= target.columns.x.length) return;
+  const snapshot = snapshotOf(target);
+  while (target.written < snapshot.length) {
     if (spool !== target) return;
-    const snapshot = snapshotOf(target);
-    if (target.written >= snapshot.length) return;
     const to = Math.min(snapshot.length, target.written + ROWS_PER_WRITE);
-    await writeText(target.handle, formatCsvRange(snapshot, target.written, to));
+    await writeText(target.handle, await formatCsvRangeAsync(snapshot, target.written, to));
     target.written = to;
+    if (checkpointDue || performance.now() - lastFlushAt >= FLUSH_INTERVAL_MS) await checkpoint(target);
     if (to < snapshot.length) await yieldToMainThread();
   }
+}
+
+/** @param {Spool} target */
+async function checkpoint(target) {
+  checkpointDue = false;
+  await patchHeader(target);
+  await syncFile(target.handle);
+  lastFlushAt = performance.now();
+}
+
+function requestDrain() {
+  if (!spool || drainQueued) return;
+  const target = spool;
+  drainQueued = true;
+  void enqueue(async () => {
+    try {
+      if (spool !== target) return;
+      await drain(target);
+      if (spool === target) await checkpoint(target);
+    } finally {
+      drainQueued = false;
+    }
+  })
+    .then(() => {
+      // One subsequent fixed snapshot; never chase a growing tail inside this drain.
+      if (spool === target && (checkpointDue || target.columns.x.length - target.written >= FLUSH_ROWS)) requestDrain();
+    })
+    .catch(fail);
 }
 
 /** 把行数、总时长、采样间隔原地写回表头。 @param {Spool} target */
 async function patchHeader(target) {
   const lastX = target.written > 0 ? target.columns.x.valueAt(target.written - 1) : Number.NaN;
-  const patch = formatSpoolHeaderPatch({ length: target.written, lastX, sampleRate: state.settings.sampleRate });
+  const sampleRate = nominalIntervalMs(target.columns, target.sampleRate);
+  const patch = formatSpoolHeaderPatch({ length: target.written, lastX, sampleRate });
   await patchText(target.handle, 0, patch);
 }
 
@@ -130,19 +179,23 @@ export function spoolRecordingStarted() {
   void enqueue(async () => {
     if (spool && spool.columns !== columns) await finish(spool);
     if (spool?.columns === columns || columns !== state.chartSeries || !tempSpoolEnabled()) return;
+    failureReported = false;
     const startTime = state.lastRecordingStartTime ?? columns.timestamps.at(0) ?? Date.now();
+    const sampleRate = nominalIntervalMs(columns, state.dataIntervalMs ?? state.settings.sampleRate);
     const header = formatSpoolHeader({
       length: 0,
       lastX: Number.NaN,
-      sampleRate: state.settings.sampleRate,
+      sampleRate,
       startTime,
     });
     const file = await openSpool(stem(), SPOOL_PATCH_BYTES);
-    const target = { handle: file.handle, path: file.path, columns, written: 0, startTime };
+    const target = { handle: file.handle, path: file.path, columns, written: 0, startTime, sampleRate };
     spool = target;
     await writeText(target.handle, header);
+    await syncFile(target.handle);
     lastFlushAt = performance.now();
     await drain(target);
+    await checkpoint(target);
   }).catch(fail);
 }
 
@@ -152,9 +205,7 @@ export function spoolRowsAppended() {
   if (!target || drainQueued) return;
   const now = performance.now();
   if (now - lastFlushAt < FLUSH_INTERVAL_MS && target.columns.x.length - target.written < FLUSH_ROWS) return;
-  lastFlushAt = now;
-  drainQueued = true;
-  void enqueue(() => drain(target)).catch(fail);
+  requestDrain();
 }
 
 /**
@@ -166,8 +217,7 @@ export function spoolRecordingPaused() {
     const target = spool;
     if (!target) return;
     await drain(target);
-    await patchHeader(target);
-    await syncFile(target.handle);
+    await checkpoint(target);
   }).catch(fail);
 }
 
@@ -178,7 +228,10 @@ async function finish(target) {
     await patchHeader(target);
     // A clean end removes the cache file. If this fails, the backend leaves it in place
     // so the next startup can offer recovery instead of silently losing the data.
-    await closeWriter(target.handle, { sync: true, abort: true });
+    await closeWriter(target.handle, { sync: true, removeOnSuccess: true });
+  } catch (error) {
+    await closeWriter(target.handle).catch(() => {});
+    throw error;
   } finally {
     if (spool === target) spool = null;
   }

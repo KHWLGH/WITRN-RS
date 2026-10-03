@@ -1,0 +1,46 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font:
+    14px "Segoe UI",
+    sans-serif;
+  background: #20242c;
+  color: #e8ecf4;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+header > span {
+  color: #f6bd60;
+}
+button {
+  padding: 6px 10px;
+  color: inherit;
+  background: #313a48;
+  border: 1px solid #536177;
+  border-radius: 4px;
+  cursor: pointer;
+}
+a {
+  color: #8cc5ff;
+}
+output {
+  flex-basis: 100%;
+  color: #bec8d8;
+}
+iframe {
+  border: 0;
+  flex: 1;
+  width: 100%;
+  min-height: 600px;
+  background: #1f1f1f;
+}

@@ -6,6 +6,15 @@
  * close() 继续进入现有 onCloseRequested 确认流程。
  */
 
+import { state } from '../state.js';
+
+/** @param {boolean} visible */
+function publishWindowVisibility(visible) {
+  if (state.windowVisible === visible) return;
+  state.windowVisible = visible;
+  document.dispatchEvent(new Event('witrn:window-visibility'));
+}
+
 /** 边缘热区方向 → CSS 光标。 */
 const RESIZE_DIRECTIONS = /** @type {const} */ ({
   North: 'n-resize',
@@ -130,7 +139,14 @@ export function initWindowControls() {
     try {
       do {
         syncAgain = false;
-        const [maximized, fullscreen] = await Promise.all([appWindow.isMaximized(), appWindow.isFullscreen()]);
+        const [maximized, fullscreen, visible, minimized] = await Promise.all([
+          appWindow.isMaximized(),
+          appWindow.isFullscreen(),
+          appWindow.isVisible(),
+          appWindow.isMinimized(),
+        ]);
+        if (syncAgain) continue;
+        publishWindowVisibility(visible && !minimized);
         root.classList.toggle('is-maximized', maximized);
         root.classList.toggle('is-fullscreen', fullscreen);
         if (maxBtn) {
@@ -177,6 +193,7 @@ export function initWindowControls() {
 
   // 全屏切换也会触发 resize；合并并发状态读取，避免较旧结果覆盖最新状态。
   void appWindow.onResized(() => void syncWindowState());
+  void appWindow.onFocusChanged(() => void syncWindowState());
   void syncWindowState();
 
   // Windows 沿用原生边缘缩放；Mac 不添加会阻挡原生边缘命中的无效热区。

@@ -4,13 +4,11 @@
  * Scope, and why: `bench/startup.mjs` measured 87 sub-resource fetches occupying ~246ms of the
  * ~305ms between webview context and appReady — about 2.8ms per request, because each one is a
  * round trip through the custom protocol. The cost is request COUNT, not bytes, so this step
- * collapses the render-blocking stylesheets (9 → 1) and leaves the rest of the shape intact.
+ * collapses the render-blocking stylesheets (9 → 1) and release JS module requests.
  *
- * JS is copied verbatim. Not bundling it keeps three things that already exist: `tsc --noEmit`
- * typechecking the exact bytes that ship, `test/*.test.js` importing `src/` directly, and
- * `bench/ui-server.mjs --revision <sha>` serving historical code for A/B — the last only possible
- * on unbundled sources. `--bundle-js` is deliberately unimplemented: the fetch-count finding makes
- * it a decision to take with data, not a flag to flip.
+ * Development JS is copied verbatim. Release bundles the app and each CSV Worker independently,
+ * preserving the Worker URLs and module scope. --bundle-js enables the same shape without minifying
+ * for native startup comparisons. Source modules remain the inputs to typecheck and core tests.
  *
  *   node scripts/build-dist.mjs            dev: readable, unminified
  *   node scripts/build-dist.mjs --minify   release
@@ -61,9 +59,9 @@ async function totalBytes(dir) {
 async function main() {
   const argv = process.argv.slice(2);
   const minify = argv.includes('--minify');
+  const bundleJs = minify || argv.includes('--bundle-js');
   for (const flag of argv) {
-    if (flag === '--minify') continue;
-    if (flag === '--bundle-js') throw new Error('--bundle-js 尚未实现：它现在是一个要用数据决定的选择，不是开关');
+    if (flag === '--minify' || flag === '--bundle-js') continue;
     throw new Error(`Unknown flag: ${flag}`);
   }
 
@@ -100,8 +98,43 @@ async function main() {
     }
   }
   await mirror();
+  await writeFile(join(OUT, 'assets/app-icon.png'), await readFile(join(ROOT, 'src-tauri/icons/128x128@2x.png')));
   if (skipped.length) console.log(`不复制进 out/ 的非发货条目: ${skipped.join(', ')}`);
   for (const rel of sheetPaths) await stat(join(OUT, rel)); // a missing linked sheet fails here
+
+  let jsReport = null;
+  if (bundleJs) {
+    // Keep these names at the output root: Worker URLs are relative to app.js's import.meta.url.
+    const jsEntries = [
+      'app.js',
+      'csv-import-worker.js',
+      'csv-export-worker.js',
+      'pd-export-worker.js',
+      'range-stats-worker.js',
+    ];
+    const js = await build({
+      entryPoints: jsEntries,
+      absWorkingDir: OUT,
+      outdir: OUT,
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      target: 'es2021',
+      minify,
+      allowOverwrite: true,
+      metafile: true,
+      logLevel: 'warning',
+    });
+    const scriptPaths = new Set(
+      [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/g)].map((m) => m[1].replace(/^\//, '')),
+    );
+    const outputs = new Set(Object.keys(js.metafile.outputs));
+    for (const input of Object.keys(js.metafile.inputs)) {
+      if (!outputs.has(input) && !scriptPaths.has(input)) await rm(join(OUT, input), { force: true });
+    }
+    for (const entry of jsEntries) await stat(join(OUT, entry));
+    jsReport = { inputs: Object.keys(js.metafile.inputs).length, outputs: [...outputs] };
+  }
 
   // 2. one entry @importing in document order: the cascade stays exactly as the nine <link>s had it
   const entryRel = '__all-styles-entry.css';
@@ -195,6 +228,8 @@ async function main() {
   const report = {
     schema: 'witrn-dist-build-v1',
     minify,
+    bundleJs,
+    js: jsReport,
     stylesheetsBefore: hrefs.length,
     stylesheetsAfter: links.length,
     dataUrlsBefore: sourceDataUrls,
@@ -206,7 +241,7 @@ async function main() {
   console.log(
     `out/: ${after.count} 个文件 ${(after.bytes / 1024).toFixed(1)} KiB（源 ${before.count} / ${(before.bytes / 1024).toFixed(1)} KiB）；` +
       `样式表 ${hrefs.length} → ${links.length}，bundle ${(report.bundleBytes / 1024).toFixed(1)} KiB；` +
-      `data: URL ${sourceDataUrls} → ${emittedDataUrls}${minify ? '；已 minify' : ''}`,
+      `data: URL ${sourceDataUrls} → ${emittedDataUrls}${jsReport ? `；JS ${jsReport.inputs} → ${jsReport.outputs.length}` : ''}${minify ? '；已 minify' : ''}`,
   );
   if (problems.length) {
     for (const p of problems) console.error(`  ! ${p}`);

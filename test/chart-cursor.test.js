@@ -26,6 +26,7 @@ globalThis.uPlot = class {
     this.data = data;
   }
   setScale() {}
+  redraw() {}
   posToVal(value) {
     return value;
   }
@@ -61,4 +62,30 @@ test('envelope hover resolves pointer time to the raw sample; marker uses that s
   assert.equal(u.options.series[1].paths(u, 1, 1200, 1210), 'spline');
   u.cursor.left = -1;
   assert.equal(u.options.cursor.dataIdx(u, 1, 42), null);
+});
+
+test('dense recording and review retain unpressured fills at every sample rate and respect user zero', async () => {
+  const { state } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const u = state.mainChart;
+  chart.setChartXWindow(0, 4999);
+  state.isRecording = true;
+  for (const sampleRate of [1, 10, 250, 1000]) {
+    state.settings.sampleRate = sampleRate;
+    chart.updateCharts();
+    assert.equal(typeof u.options.series[1].fill(), 'string');
+  }
+  state.isRecording = false;
+  chart.updateCharts();
+  assert.equal(typeof u.options.series[1].fill(), 'string', 'density alone does not suppress paused fill');
+  chart.setSeriesFill(1, 0);
+  chart.setChartXWindow(1200, 1210);
+  chart.updateCharts();
+  assert.equal(typeof u.options.series[1].fill(), 'string');
+  assert.equal(u.options.series[2].fill(), null, 'a disabled user fill stays disabled after zoom');
+  state.isRecording = true;
+  chart.updateCharts();
+  assert.equal(typeof u.options.series[1].fill(), 'string', 'sparse recording also restores the configured fill');
+  assert.equal(u.data[0].length, 13, 'sparse windows keep raw points and clipping neighbours');
+  state.isRecording = false;
 });
