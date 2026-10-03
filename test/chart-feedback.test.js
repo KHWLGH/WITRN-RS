@@ -324,6 +324,40 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
   }
 });
 
+test('navigator keeps its stroke and density across imported histories and main-window zoom', async () => {
+  const savedPaths = uPlot.paths;
+  const savedCanvas = globalThis.OffscreenCanvas;
+  const savedPath = globalThis.Path2D;
+  uPlot.paths = {
+    spline: () => () => ({ stroke: 'spline', fill: null }),
+    linear: () => () => ({ stroke: 'linear', fill: null }),
+  };
+  globalThis.OffscreenCanvas = class {};
+  globalThis.Path2D = class {};
+  try {
+    for (const count of [128, 5000, 100000]) {
+      seed(false, count);
+      await submit();
+      while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 1));
+      const main = state.mainChart;
+      const nav = {
+        series: [{}, { show: true, alpha: 1, stroke: () => '#ff8033', fill: () => null }],
+      };
+      const expected = count <= 300 ? 'spline' : 'linear';
+      const navStroke = () => main.options.series[1].paths(nav, 1, 0, Math.min(count, 300) - 1).stroke;
+      assert.equal(navStroke(), expected, 'an imported overview must have a visible uPlot stroke');
+      chart.setChartXWindow(0, 0.01);
+      await submit();
+      assert.equal(navStroke(), expected, 'zooming the main graph cannot switch the overview projection');
+    }
+  } finally {
+    uPlot.paths = savedPaths;
+    globalThis.OffscreenCanvas = savedCanvas;
+    globalThis.Path2D = savedPath;
+    chart.handleMonitorHidden();
+  }
+});
+
 test('review splits fill into independent stripes with the same area and missing-value breaks', async () => {
   const savedLinear = uPlot.paths.linear;
   const savedPath = globalThis.Path2D;
@@ -355,8 +389,10 @@ test('review splits fill into independent stripes with the same area and missing
     const paths = u.options.series[1].paths(u, 1, 0, 5);
     assert.ok(paths.fill instanceof Path2D);
     assert.equal(paths.stroke, 'stroke');
+    const nav = { series: [{}, { fill: () => null }] };
+    u.options.series[1].paths(nav, 1, 0, 5);
     u.hooks.drawSeries[0](u, 1);
-    assert.equal(polygons.length, 2);
+    assert.equal(polygons.length, 2, 'building the navigator must preserve cached main-chart fill');
     const area = (polygon) =>
       Math.abs(
         polygon.reduce((sum, [x, y], i) => {

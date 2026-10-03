@@ -408,11 +408,14 @@ const bucketFills = new Map();
  * @param {any} u @param {number} seriesIdx @param {number} idx0 @param {number} idx1
  */
 function adaptivePaths(u, seriesIdx, idx0, idx1) {
+  const main = u === state.mainChart;
+  const raw = main ? boundKind === 'raw' : state.chartSeries.x.length <= navMaxBuckets();
   const builder =
-    boundKind === 'raw' && splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS
-      ? splineBuilder
-      : (linearBuilder ?? splineBuilder);
+    raw && splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS ? splineBuilder : (linearBuilder ?? splineBuilder);
   const paths = builder ? builder(u, seriesIdx, idx0, idx1) : null;
+  // The overview uses uPlot strokes and has no main-chart raster/fill hooks.
+  // Its path construction must also leave cached main fill geometry untouched.
+  if (!main) return paths;
   if (paths?.fill && boundKind === 'window' && displayContext === 'review' && u.series[seriesIdx].fill(u, seriesIdx)) {
     bucketFills.set(seriesIdx, bucketFillGeometry(u, seriesIdx, idx0, idx1, paths.clip));
     paths.fill = new Path2D();
@@ -475,6 +478,7 @@ function drawBucketFill(u, seriesIdx) {
 
 function useBucketRaster(u) {
   return (
+    u === state.mainChart &&
     boundKind === 'window' &&
     displayContext === 'review' &&
     typeof OffscreenCanvas !== 'undefined' &&
