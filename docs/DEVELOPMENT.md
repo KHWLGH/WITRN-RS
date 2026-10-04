@@ -76,6 +76,8 @@ Rust 成员 crate 继续通过 `version.workspace = true` 继承版本；关于�
 
 首次启用 Tag 自动发布前，先手动构建，检查 Windows 安装、两种 Mac 启动、Linux 安装及配置 udev 后的设备连接。macOS 12 兼容性需要单独实机验证。CI 验证 Mac 的架构、ad-hoc 签名、最低系统版本元数据和 DMG 完整性，不运行 GUI 或连接仪表。
 
+macOS 构建显式使用 `--bundles app,dmg`：Tauri 在仅构建 DMG 时会清理临时 `.app`，同时指定 APP 才能保留应用供后续校验。附件收集仍只包含 DMG，不额外发布 APP。
+
 ### 推送版本 Tag 自动发布
 
 完成上述首次验收后，更新版本、整理更新日志、运行质量检查并提交，再推送与清单一致的 Tag，例如：
