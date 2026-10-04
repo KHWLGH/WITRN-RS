@@ -1122,15 +1122,15 @@ pub fn run() {
         .setup(|app| {
             boot_timing::mark("setup_enter");
             file_io::start_spool_checkpoints(app.handle().clone());
-            let main_window = app
-                .get_webview_window("main")
-                .expect("main window must exist");
             // 自定义标题栏：Windows 由 decorum 注入带贴靠布局浮窗的窗口控制按钮
             // （前端按设计令牌重绘，并用内置 Fluent SVG 替换 Segoe 字形以免 Win10 缺字）；
             // Linux 无此支持，改由前端 windowcontrols.js 自绘按钮与边缘调整大小热区。
             #[cfg(target_os = "windows")]
             {
                 use tauri_plugin_decorum::WebviewWindowExt;
+                let main_window = app
+                    .get_webview_window("main")
+                    .expect("main window must exist");
                 main_window
                     .create_overlay_titlebar()
                     .expect("failed to create overlay titlebar");

@@ -136,9 +136,8 @@ test('unified version command validates all manifests and lockfiles before writi
 });
 
 /**
- * tauri-build 在 `cargo test` / `clippy` 时只读 `tauri.conf.json`，不合并
- * `tauri.macos.conf.json`。Cargo feature 与主配置必须同时开或同时关，
- * 否则 Linux / Windows CI 会在 allowlist 校验处失败。
+ * tauri-build 优先检查 [dependencies] 的 tauri 声明，不合并 target 依赖的
+ * features。主配置及 macOS overlay 都必须与该声明一致，才能通过各平台校验。
  */
 test('macos-private-api Cargo feature matches tauri.conf.json', () => {
   const defaultDependencies = read('src-tauri/Cargo.toml')
@@ -149,11 +148,13 @@ test('macos-private-api Cargo feature matches tauri.conf.json', () => {
   const hasMacosPrivateApiFeature = /tauri\s*=\s*\{[^}]*features\s*=\s*\[[^\]]*"macos-private-api"/s.test(
     defaultDependencies,
   );
-  const macosPrivateApiEnabledInConfig = JSON.parse(read('src-tauri/tauri.conf.json')).app?.macOSPrivateApi === true;
-
-  assert.equal(
-    hasMacosPrivateApiFeature,
-    macosPrivateApiEnabledInConfig,
-    '若 tauri 依赖启用 macos-private-api，需在 tauri.conf.json 的 app.macOSPrivateApi 同步开启（反之亦然）',
-  );
+  const baseApp = JSON.parse(read('src-tauri/tauri.conf.json')).app;
+  for (const config of ['tauri.conf.json', 'tauri.macos.conf.json']) {
+    const app = { ...baseApp, ...JSON.parse(read(`src-tauri/${config}`)).app };
+    assert.equal(
+      hasMacosPrivateApiFeature,
+      app.macOSPrivateApi === true,
+      `${config} 的 app.macOSPrivateApi 必须与 [dependencies] tauri 的 macos-private-api feature 一致`,
+    );
+  }
 });

@@ -34,7 +34,9 @@ harness = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tauri-build checks this declaration even when a platform config is merged.
+# Keep it in sync with app.macOSPrivateApi; the API only affects macOS.
+tauri = { version = "2", features = ["macos-private-api"] }
 serde.workspace = true
 serde_json.workspace = true
 hidapi.workspace = true
@@ -46,7 +48,6 @@ tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
 # Set the process-wide policy once during hidapi initialization, before any opens.
 hidapi = { workspace = true, features = ["macos-shared-device"] }
 
