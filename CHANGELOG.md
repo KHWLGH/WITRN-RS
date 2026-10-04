@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitHub Actions 支持 Windows x64、Linux x64、macOS Intel / Apple Silicon 四目标打包；手动触发提供安装包附件，版本 Tag 在全部检查、打包与远端 SHA-256 验证通过后自动公开 Release。macOS 使用 ad-hoc 签名并保留 12.0 最低部署目标。
 - 新增统一版本更新命令 `npm run version:set -- X.Y.Z`，同步 npm、Cargo、Tauri 配置与两个锁文件的工作区版本，开发版本更新为 0.2.2。
 - 支持 POWER-Z KM003C / KM002C 的 Vendor Bulk 采集、ADC 温度和 PD 报文，新增独立的 LGPL 协议库 `crates/km003c`。
 - POWER-Z 支持认证后的 AdcQueue 1000 次/秒采样；认证失败时回退到 100 次/秒并提示原因。设备列表和采样率选项按设备能力显示。

@@ -2,5 +2,11 @@
   "$schema": "https://schema.tauri.app/config/2",
   "app": {
     "macOSPrivateApi": true
+  },
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "12.0"
+    }
   }
 }

@@ -19,10 +19,10 @@
 | 组件 | 要求 | 说明 |
 | --- | --- | --- |
 | Rust | 1.85+ | 工作区 `rust-version` |
-| Tauri CLI | v2 | `cargo install tauri-cli --version "^2"` |
+| Tauri CLI | 2.12.1 | npm 锁定的 `@tauri-apps/cli`，通过 `npx --no-install tauri` 调用 |
 | Windows | 10 / 11 | 当前开发与验证平台 |
-| macOS | 12+ | 可自行编译 |
-| Node.js | 20+ | lint / typecheck / test / 前端产物 |
+| macOS | 12+ | 最低部署目标；CI 使用 macOS 26，旧系统兼容性需实机验证 |
+| Node.js | 24 | CI、lint / typecheck / test / 前端产物 |
 
 项目使用 npm，提交 `package-lock.json`，CI 使用 `npm ci`。前端是原生 ES Modules，`frontendDist` 指向构建生成的 `out/`；Node 不参与 Rust 编译，但 `npm run build` 必须先于 `cargo build`、`cargo test`、`cargo check` 和 `cargo clippy`。改动 `src/` 后先重建 `out/`，再重新链接 Rust 二进制。
 
@@ -31,14 +31,13 @@
 ```bash
 git clone https://github.com/KHWLGH/laPower.git
 cd laPower
-cargo install tauri-cli --version "^2"
 npm ci
 npm run build
-cargo tauri dev
-cargo tauri build
+npx --no-install tauri dev
+npx --no-install tauri build
 ```
 
-发布产物位于 `target/release/bundle/`。CI 不打包安装程序，发布包由维护者在目标平台手动构建上传。
+本机未指定 target 时，发布产物位于 `target/release/bundle/`；CI 显式指定 target，产物位于 `target/<target>/release/bundle/`。Tauri CLI 会自动运行 `beforeBuildCommand` 生成压缩前端，打包前无需再手动执行 `npm run build:dist`。直接运行 Cargo 检查时仍须先生成 `out/`。
 
 ## 发布流程
 
@@ -60,7 +59,39 @@ npm run version:set -- 0.2.2
 
 Rust 成员 crate 继续通过 `version.workspace = true` 继承版本；关于页从 Tauri 读取版本，开发展示工具从 `package.json` 读取版本。更新后重新构建，才能让可执行文件和安装包使用新版本。
 
-`test/version-sync.test.js` 会检查清单与锁文件一致、语义版本格式、workspace 继承关系、统一更新命令和 macOS private API 配置。正式发布时整理 `CHANGELOG.md`，将对应的 `Unreleased` 内容归入新版本。发布前运行 `npm test`，提交后再打 tag，并在 Windows 上执行 `cargo tauri build` 生成安装包。
+`test/version-sync.test.js` 会检查清单与锁文件一致、语义版本格式、workspace 继承关系、统一更新命令和 macOS private API 配置。正式发布时整理 `CHANGELOG.md`，将对应的 `Unreleased` 内容归入新版本。
+
+### 手动构建与首次验收
+
+将 workflow 提交到默认分支后，在 GitHub 的 **Actions → CI → Run workflow** 选择要验证的分支或 Tag。手动触发会先运行现有质量检查，再打包四个目标；不会创建或公开 Release，即使选择的是版本 Tag。
+
+| 目标 | Runner | Rust target | 安装包 |
+| --- | --- | --- | --- |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE |
+| Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB、RPM、AppImage |
+| macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
+| macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
+
+每个成功目标提供独立的 `packages-*` 附件，保留 14 天。四目标全部成功后提供 `release-packages`，包含七个安装包与 `SHA256SUMS`；在解压目录中可用 `sha256sum -c SHA256SUMS` 校验。安装包名包含版本与平台架构，NSIS EXE 另带 `_setup`。
+
+首次启用 Tag 自动发布前，先手动构建，检查 Windows 安装、两种 Mac 启动、Linux 安装及配置 udev 后的设备连接。macOS 12 兼容性需要单独实机验证。CI 验证 Mac 的架构、ad-hoc 签名、最低系统版本元数据和 DMG 完整性，不运行 GUI 或连接仪表。
+
+### 推送版本 Tag 自动发布
+
+完成上述首次验收后，更新版本、整理更新日志、运行质量检查并提交，再推送与清单一致的 Tag，例如：
+
+```bash
+git tag v0.2.2
+git push origin v0.2.2
+```
+
+Tag 必须为 `vX.Y.Z`，且与清单版本一致；不一致会在打包前失败。CI 使用 Node.js 24、Rust stable、固定的 Tauri CLI 2.12.1 和 `tauri-apps/tauri-action@v1`。npm 通过 `npm ci` 安装，Cargo 使用 `--locked`；Rust 缓存按目标区分并指向工作区根目录 `target/`。Linux 固定 Ubuntu 22.04，以减少对较新 glibc 的依赖。
+
+只有全部质量检查与四目标打包成功，才会汇总七个安装包并生成校验和。发布任务使用运行仓库的 `GITHUB_TOKEN` 创建临时草稿，上传七个包与校验文件，再核对远端附件数量、大小和 SHA-256，最后自动公开正式 Release。无需人工点击 Publish，也不需要另设 PAT；只有发布任务获得 `contents: write`，仓库的组织策略需允许这项权限。
+
+同一 ref 的运行串行处理，不取消正在上传的发布。上传或验证失败时 Release 保持草稿；在 Actions 重跑失败任务即可复用该草稿并替换本次发布的同名附件。草稿若包含其他附件，须人工检查后再重跑；同名 Release 已公开时，任务拒绝自动覆盖。若需修改已发布的二进制，应更新版本并推送新 Tag。
+
+Windows 当前不做证书签名；macOS 使用 ad-hoc 签名，没有 Developer ID 签名和公证；Linux 安装包不会自动设置 udev 权限。本流程不启用自动更新，不构建 Windows/Linux ARM64 或 Mac Universal 包。
 
 ## 质量检查
 
@@ -170,8 +201,11 @@ npm run showcase:capture -- --help
 | `backend-other-platforms` | Windows workspace test；macOS workspace check |
 | `crate-features` | 协议 crate 的非默认 feature 组合 Clippy 与 test |
 | `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`，以及报告型 benchmark |
+| `package` | 仅版本 Tag push / 手动触发；依赖以上四项检查，四目标并行打包，单个平台失败不会取消其他目标 |
+| `package-summary` | 四目标全部成功后验证七个安装包并生成 `SHA256SUMS` |
+| `release` | 仅版本 Tag push；上传并核对附件后自动公开 Release |
 
-CI 不运行浏览器验收、硬件长跑或功能表面回归，也不构建安装包或发布 Release。开发展示工具仅用于按需预览和生成文档图片，不承担浏览器验收或 CI 门禁；新增功能不应顺手增加专用 workflow、job 或回归 harness。
+普通分支 push 和 PR 只运行原有检查，不打包或发布。CI 不运行浏览器验收、硬件长跑或功能表面回归。开发展示工具仅用于按需预览和生成文档图片，不承担浏览器验收或 CI 门禁；新增功能不应顺手增加专用 workflow、job 或回归 harness。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。
 
 ## Linux 自行编译
 
@@ -184,7 +218,7 @@ sudo apt-get install -y build-essential curl file pkg-config libssl-dev libudev-
   librsvg2-dev libxdo-dev patchelf
 npm ci
 npm run build
-cargo tauri build
+npx --no-install tauri build
 ```
 
 需要访问 WITRN HID 时，按发行版配置 `/dev/hidraw*` 的 udev 规则。
@@ -204,15 +238,17 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="5fc9", TAG+="uaccess"
 
 ## macOS 自行编译
 
-需要 Xcode Command Line Tools、Rust 稳定版和 Tauri CLI v2：
+需要 Xcode Command Line Tools、Rust 稳定版和 npm 锁定的 Tauri CLI：
 
 ```bash
 npm ci
 npm run build
-cargo tauri build
+npx --no-install tauri build
 ```
 
-macOS private API 的 Cargo feature 与 Tauri 配置必须保持一致；CI 在 macOS 上只做 workspace check，不运行 GUI 或真机检查。
+macOS private API 的 Cargo feature 与 Tauri 配置必须保持一致。平台配置使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同时设置 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留旧系统部署目标，并通过 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳过 Finder 美化。当前没有 Developer ID 签名或 Apple 公证；首次打开方式见 [README 下载与安装](../README.md#-下载与安装)。
+
+普通 macOS CI 做 workspace check；版本 Tag / 手动构建还会生成并验证 DMG，不运行 GUI 或真机检查。
 
 ## 参与贡献
 

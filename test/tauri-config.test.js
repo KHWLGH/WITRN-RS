@@ -89,3 +89,9 @@ test('frontendDist 与构建步骤保持配套', () => {
     'frontendDist 指向 out/，但产出它的构建步骤已经不在了',
   );
 });
+
+test('macOS 打包使用 ad-hoc 签名且最低系统版本保持 12.0', () => {
+  const macOS = readJson('src-tauri/tauri.macos.conf.json').bundle.macOS;
+  assert.equal(macOS.signingIdentity, '-');
+  assert.equal(macOS.minimumSystemVersion, '12.0');
+});

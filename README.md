@@ -29,7 +29,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 除了常规的电压 / 电流 / 功率 / 温度，laPower 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
 
-> **平台说明：** 预构建安装包目前**仅提供 Windows**（MSI / NSIS）。项目在 Windows 上开发与验证；macOS 与 Linux 可自行编译，分别见 [macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)、[Linux 自行编译](docs/DEVELOPMENT.md#linux-自行编译)，以及 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+> **平台说明：** 版本 Tag 通过 GitHub Actions 自动打包 Windows x64、Linux x64、macOS Intel / Apple Silicon，并在检查通过后发布 Release；下载以对应版本的实际附件为准。项目主要在 Windows 上开发与验证，macOS / Linux 的 GUI、设备连接和 macOS 12 兼容性仍需实机验收。构建与发布方式见 [开发与构建](docs/DEVELOPMENT.md#发布流程)。
 
 > **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/laPower/issues) 反馈。
 
@@ -107,9 +107,13 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 **Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
 
-**macOS** —— 不提供预构建包（无 Developer ID / 公证）。Apple Silicon 可自行编译，见 [开发与构建 · macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)。一次已验证的 ARM64 打包步骤、ad-hoc 签名与 Gatekeeper 边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+Windows 安装包当前未做证书签名，首次运行可能显示 SmartScreen 提示。
 
-**Linux** —— 不提供预构建包，但可以自行编译。请参考 [开发与构建 · Linux 自行编译](docs/DEVELOPMENT.md#linux-自行编译)，其中包含必需的系统依赖和访问 `hidraw` 所需的 udev 规则（缺少规则会导致扫不到任何设备）。
+**macOS 12+** —— Intel Mac 下载带 `macos-x64` 的 `.dmg`，Apple Silicon（M1 及以后）下载带 `macos-arm64` 的 `.dmg`，打开后将 `laPower.app` 拖到 Applications。应用采用 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证；首次启动如果被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中允许本次打开。macOS 12 是构建目标，旧系统兼容性仍需实机验证；历史验证边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+
+**Linux (x64)** —— 下载带 `linux-x64` 的 `.deb`、`.rpm` 或 `.AppImage`。Debian / Ubuntu 可用 `sudo apt install ./laPower_<版本>_linux-x64.deb`；Fedora 等使用 RPM 的发行版可用 `sudo dnf install ./laPower_<版本>_linux-x64.rpm`。AppImage 先执行 `chmod +x ./laPower_<版本>_linux-x64.AppImage`，再直接运行；可能需要安装发行版的 FUSE 2 运行库。安装包基于 Ubuntu 22.04 构建，不承诺适用于所有发行版。
+
+Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [udev 规则](docs/DEVELOPMENT.md#udev-规则必需)，否则可能无法扫描或打开设备。Release 中的 `SHA256SUMS` 可用于校验七个安装包。
 
 ## 🚀 快速上手
 

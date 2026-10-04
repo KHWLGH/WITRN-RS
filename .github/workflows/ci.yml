@@ -3,6 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize runs of the same ref, including failed tag reruns. Never cancel a release upload.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -18,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install JavaScript tooling
@@ -84,7 +93,7 @@ jobs:
       # time, so the Rust-only jobs still need the Node build step.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Build the frontend distribution
@@ -159,7 +168,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install JavaScript tooling
@@ -207,3 +216,170 @@ jobs:
           name: perf-results
           path: bench/results/
           if-no-files-found: ignore
+          overwrite: true
+
+  package:
+    name: Package (${{ matrix.package }})
+    needs: [validate, backend-other-platforms, crate-features, perf-shape]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: windows-x64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+          - package: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - package: macos-x64
+            os: macos-26-intel
+            target: x86_64-apple-darwin
+            bundles: dmg
+            architecture: x86_64
+          - package: macos-arm64
+            os: macos-26
+            target: aarch64-apple-darwin
+            bundles: dmg
+            architecture: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CI: 'true'
+      # tauri-action defaults this to true, which re-enables Finder AppleScript on CI.
+      TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked JavaScript tooling and Tauri CLI
+        run: npm ci
+
+      - name: Install Linux packaging and device dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          build-essential curl file pkg-config libssl-dev libudev-dev
+          libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          librsvg2-dev libxdo-dev patchelf libfuse2 xdg-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: package-${{ matrix.target }}
+
+      - name: Set macOS deployment target
+        if: runner.os == 'macOS'
+        run: echo 'MACOSX_DEPLOYMENT_TARGET=12.0' >> "$GITHUB_ENV"
+
+      - name: Remove installers restored from the Rust cache
+        env:
+          PACKAGE_ID: ${{ matrix.package }}
+        run: node scripts/release.mjs clean
+
+      # Tauri runs beforeBuildCommand itself, producing the minified frontend.
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v1
+        with:
+          tauriScript: npx --no-install tauri
+          args: --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+
+      - name: Verify macOS architecture, signature, deployment target and DMG
+        if: runner.os == 'macOS'
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+          PACKAGE_ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          bundle="target/$PACKAGE_TARGET/release/bundle"
+          app="$bundle/macos/laPower.app"
+          binary="$app/Contents/MacOS/lapower"
+          test "$(lipo -archs "$binary")" = "$PACKAGE_ARCH"
+          codesign --verify --deep --strict "$app"
+          codesign -dvv "$app" 2>&1 | grep -F 'Signature=adhoc'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = '12.0'
+          xcrun vtool -show-build "$binary" | grep -E 'minos[[:space:]]+12\.0([[:space:]]|$)'
+          shopt -s nullglob
+          images=("$bundle"/dmg/*.dmg)
+          test "${#images[@]}" -eq 1
+          hdiutil verify "${images[0]}"
+
+      - name: Collect and validate installers
+        env:
+          PACKAGE_ID: ${{ matrix.package }}
+        run: node scripts/release.mjs collect
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.package }}
+          path: dist/packages/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  package-summary:
+    name: Verify all release packages
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist/packages/
+
+      - name: Require seven installers and generate checksums
+        run: node scripts/release.mjs verify
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/packages/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  release:
+    name: Publish GitHub Release
+    needs: package-summary
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/packages/
+
+      - name: Upload, verify and publish the complete release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release.mjs publish
