@@ -82,12 +82,40 @@ export async function verifyPackages(directory, version, { writeChecksums = fals
   return assets;
 }
 
-const RELEASE_BODY = `下载与安装：
+const INSTALL_NOTES = `## 下载与安装
+
 - Windows x64：MSI 或 NSIS setup.exe；当前未做证书签名。
 - macOS 12+：Intel 选择 macos-x64，Apple Silicon 选择 macos-arm64。应用仅有 ad-hoc 签名，未做 Developer ID 签名或公证；首次打开可能需要在“系统设置 → 隐私与安全性”中允许运行。macOS 12 兼容性仍需实机验证。
 - Linux x64：DEB、RPM 或 AppImage；AppImage 需赋予执行权限，访问仪表需按仓库 docs/DEVELOPMENT.md 配置 udev 规则。安装包不会自动修改设备权限。
 - SHA256SUMS：包含七个安装包的 SHA-256 校验和。
 `;
+
+/** Use the versioned Chinese changelog instead of GitHub's untranslated commit/PR summaries. */
+export function releaseNotes(changelog, version, repository) {
+  if (!VERSION.test(version)) throw new Error(`无效的产品版本：${version}`);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '')) throw new Error('无效的发布仓库');
+  const sections = changelog.replaceAll('\r\n', '\n').split(/^## /m).slice(1);
+  const matches = sections.filter((section) => section.split('\n', 1)[0].match(/^\[([^\]]+)\]/)?.[1] === version);
+  if (matches.length !== 1) throw new Error(`CHANGELOG.md 必须包含唯一的 [${version}] 版本章节`);
+  const content = matches[0].slice(matches[0].indexOf('\n') + 1).trim();
+  if (!/^\s*[-*] \S/m.test(content)) throw new Error(`CHANGELOG.md 的 [${version}] 版本章节为空`);
+  const headings = {
+    Added: '新增',
+    Changed: '变更',
+    Fixed: '修复',
+    Removed: '移除',
+    Deprecated: '弃用',
+    Security: '安全',
+  };
+  const base = `https://github.com/${repository}/blob/v${version}/`;
+  const changes = content
+    .replace(
+      /^### (Added|Changed|Fixed|Removed|Deprecated|Security)[ \t]*$/gm,
+      (_, heading) => `### ${headings[heading]}`,
+    )
+    .replace(/\]\((?![a-z][a-z\d+.-]*:|#|\/)([^)\s]+)\)/gi, (_, path) => `](${base}${path})`);
+  return `## 更新内容\n\n${changes}\n\n${INSTALL_NOTES}\n完整更新日志：[CHANGELOG.md](${base}CHANGELOG.md)\n`;
+}
 
 /** All network access is injectable so failure/retry/public-release guards can be tested offline. */
 export async function publishRelease({
@@ -97,6 +125,7 @@ export async function publishRelease({
   repository,
   token,
   commit,
+  changelogPath = join(ROOT, 'CHANGELOG.md'),
   apiUrl = 'https://api.github.com',
   request = fetch,
 }) {
@@ -105,6 +134,7 @@ export async function publishRelease({
     throw new Error('发布需要 GITHUB_REPOSITORY、GITHUB_TOKEN 和 GITHUB_SHA');
   }
   const assets = await verifyPackages(directory, version);
+  const body = releaseNotes(await readFile(changelogPath, 'utf8'), version, repository);
   const endpoint = `${apiUrl.replace(/\/$/, '')}/repos/${repository}`;
   async function api(url, { method = 'GET', json, body, contentType = 'application/vnd.github+json' } = {}) {
     const response = await request(url, {
@@ -142,10 +172,9 @@ export async function publishRelease({
         tag_name: tag,
         target_commitish: commit,
         name: `laPower ${tag}`,
-        body: RELEASE_BODY,
+        body,
         draft: true,
         prerelease: false,
-        generate_release_notes: true,
       },
     });
   }
@@ -184,7 +213,7 @@ export async function publishRelease({
   }
   const published = await api(`${endpoint}/${releasePath}`, {
     method: 'PATCH',
-    json: { draft: false, prerelease: false, make_latest: 'true' },
+    json: { body, draft: false, prerelease: false, make_latest: 'true' },
   });
   if (published.draft || published.prerelease) throw new Error('GitHub 未将 Release 设为公开正式版本');
   return published.html_url;
@@ -194,7 +223,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const version = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')).version;
     const directory = join(ROOT, 'dist/packages');
-    if (process.argv.length !== 3) throw new Error('用法：node scripts/release.mjs clean|collect|verify|publish');
+    if (process.argv.length !== 3) throw new Error('用法：node scripts/release.mjs clean|collect|verify|notes|publish');
     switch (process.argv[2]) {
       case 'clean':
         await cleanBundles(process.env.PACKAGE_ID);
@@ -205,6 +234,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       case 'verify':
         console.log((await verifyPackages(directory, version, { writeChecksums: true })).map((a) => a.name).join('\n'));
         break;
+      case 'notes': {
+        const repository = process.env.GITHUB_REPOSITORY;
+        const body = releaseNotes(await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8'), version, repository);
+        const path = join(ROOT, 'dist/release-notes.md');
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, body);
+        console.log(`中文发布说明已生成：${path}`);
+        break;
+      }
       case 'publish': {
         const url = await publishRelease({
           directory,
@@ -224,7 +262,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         break;
       }
       default:
-        throw new Error('用法：node scripts/release.mjs clean|collect|verify|publish');
+        throw new Error('用法：node scripts/release.mjs clean|collect|verify|notes|publish');
     }
   } catch (error) {
     console.error(error.message);

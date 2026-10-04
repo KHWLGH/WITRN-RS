@@ -89,6 +89,8 @@ Tag 必须为 `vX.Y.Z`，且与清单版本一致；不一致会在打包前失�
 
 只有全部质量检查与四目标打包成功，才会汇总七个安装包并生成校验和。发布任务使用运行仓库的 `GITHUB_TOKEN` 创建临时草稿，上传七个包与校验文件，再核对远端附件数量、大小和 SHA-256，最后自动公开正式 Release。无需人工点击 Publish，也不需要另设 PAT；只有发布任务获得 `contents: write`，仓库的组织策略需允许这项权限。
 
+中文发布说明由 `scripts/release.mjs` 提取 `CHANGELOG.md` 中与当前版本完全匹配的章节，将分类标题转为中文，补充三平台安装说明和校验和说明。相对文档链接自动指向该 Tag 的文件，不使用 GitHub 自动生成的提交/PR 摘要。版本章节缺失、重复或为空时，发布在调用 GitHub API 前失败；草稿重跑时也会更新发布说明。可设置 `GITHUB_REPOSITORY=KHWLGH/laPower` 后运行 `node scripts/release.mjs notes`，在 `dist/release-notes.md` 预览。
+
 同一 ref 的运行串行处理，不取消正在上传的发布。上传或验证失败时 Release 保持草稿；在 Actions 重跑失败任务即可复用该草稿并替换本次发布的同名附件。草稿若包含其他附件，须人工检查后再重跑；同名 Release 已公开时，任务拒绝自动覆盖。若需修改已发布的二进制，应更新版本并推送新 Tag。
 
 Windows 当前不做证书签名；macOS 使用 ad-hoc 签名，没有 Developer ID 签名和公证；Linux 安装包不会自动设置 udev 权限。本流程不启用自动更新，不构建 Windows/Linux ARM64 或 Mac Universal 包。

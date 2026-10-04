@@ -10,16 +10,34 @@ import {
   PACKAGES,
   packageNames,
   publishRelease,
+  releaseNotes,
   verifyPackages,
 } from '../scripts/release.mjs';
 
 const VERSION = '1.2.3';
+const CHANGELOG = `# Changelog
+
+## [Unreleased]
+### Added
+- 下一个版本的功能
+
+## [${VERSION}] - 2026-10-04
+### Added
+- 新增仪表支持，参见 [使用说明](docs/USAGE.md#监控工作区)。
+### Fixed
+- 修复导入记录，参见 [官网](https://example.com)。
+
+## [1.2.2] - 2026-09-01
+### Removed
+- 旧版本的改动
+`;
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'lapower-release-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'dist/packages');
   await mkdir(directory, { recursive: true });
+  await writeFile(join(root, 'CHANGELOG.md'), CHANGELOG);
   const names = Object.keys(PACKAGES).flatMap((id) => packageNames(VERSION, id));
   for (const name of names) await writeFile(join(directory, name), `installer contents: ${name}`);
   return { root, directory, names };
@@ -90,7 +108,7 @@ const draft = () => ({
 });
 
 async function publisher(t, mockOptions) {
-  const { directory, names } = await fixture(t);
+  const { root, directory, names } = await fixture(t);
   await verifyPackages(directory, VERSION, { writeChecksums: true });
   const mock = githubMock(mockOptions);
   return {
@@ -99,6 +117,7 @@ async function publisher(t, mockOptions) {
     names,
     options: {
       directory,
+      changelogPath: join(root, 'CHANGELOG.md'),
       version: VERSION,
       tag: `v${VERSION}`,
       repository: 'owner/repo',
@@ -204,6 +223,8 @@ test('publish a draft only after all eight uploaded assets pass size and digest 
   assert.equal(url, 'https://github.test/owner/repo/releases/v1.2.3');
   assert.equal(state.release.draft, false);
   assert.equal(state.release.prerelease, false);
+  assert.equal(state.release.body, releaseNotes(CHANGELOG, VERSION, 'owner/repo'));
+  assert.equal(state.release.generate_release_notes, undefined);
   assert.equal(state.assets.length, 8);
   assert.equal(state.calls.at(-2).method, 'GET');
   assert.ok(state.calls.at(-2).pathname.endsWith('/assets'));
@@ -235,6 +256,32 @@ test('rerun replaces only the owned draft assets and then publishes', async (t) 
   assert.ok(state.calls.some(({ method, pathname }) => method === 'DELETE' && pathname.endsWith('/42')));
   assert.equal(state.assets.length, 8);
   assert.equal(state.release.draft, false);
+  assert.equal(state.release.body, releaseNotes(CHANGELOG, VERSION, 'owner/repo'));
+});
+
+test('release notes include only the matching version and keep links usable outside the repository', () => {
+  const body = releaseNotes(CHANGELOG.replaceAll('\n', '\r\n'), VERSION, 'owner/repo');
+  assert.ok(body.includes('### 新增\n- 新增仪表支持'));
+  assert.ok(body.includes('### 修复\n- 修复导入记录'));
+  assert.ok(body.includes('https://github.com/owner/repo/blob/v1.2.3/docs/USAGE.md#监控工作区'));
+  assert.ok(body.includes('[官网](https://example.com)'));
+  assert.ok(!body.includes('下一个版本的功能'));
+  assert.ok(!body.includes('旧版本的改动'));
+});
+
+test('missing, duplicate and empty changelog versions stop publication before any GitHub request', async (t) => {
+  for (const [problem, changelog] of [
+    ['missing', CHANGELOG.replace(`[${VERSION}]`, '[1.2.4]')],
+    ['duplicate', `${CHANGELOG}\n## [${VERSION}]\n- 重复版本\n`],
+    ['empty', `## [${VERSION}]\n### Added\n\n## [1.2.2]\n- 旧内容\n`],
+  ]) {
+    await t.test(problem, async (sub) => {
+      const { options, state } = await publisher(sub);
+      await writeFile(options.changelogPath, changelog);
+      await assert.rejects(publishRelease(options), /CHANGELOG.md/);
+      assert.equal(state.calls.length, 0);
+    });
+  }
 });
 
 test('a failed release listing never creates another draft', async (t) => {
