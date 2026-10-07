@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- macOS 上主窗口隐藏、最小化或被遮挡时，WKWebView 默认的后台策略会节流并约 5 分钟后挂起页面，前端不再确认样本，未确认量达到 8192 后采集停止（1 ms 采样约 8 秒）。主窗口改为关闭 WebView 后台节流（macOS 14+ 生效，Windows / Linux 忽略该项）。
+- macOS 上读线程存活期间退出 App Nap，窗口不可见时 HID 读取与合批定时器不再被系统合并、降级；hidapi 在 macOS 上每台设备只缓存 30 份报告，迟醒即丢点。不阻止系统睡眠。
+
 ## [0.2.2] - 2026-10-04
 
 ### Added

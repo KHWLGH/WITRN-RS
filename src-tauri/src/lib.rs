@@ -1,4 +1,5 @@
 mod acquire;
+mod app_nap;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
 mod file_io;
@@ -602,7 +603,11 @@ where
         consumed: Arc::clone(&consumed),
         end: Arc::clone(&end),
     };
-    let read_join = thread::spawn(move || acquire::run_reader(source, ctx));
+    let read_join = thread::spawn(move || {
+        // 读线程存活期间退出 App Nap：窗口隐藏时 HID 读取与合批定时器不被合并。
+        let _activity = app_nap::AcquisitionActivity::begin();
+        acquire::run_reader(source, ctx)
+    });
 
     let mut joins = vec![read_join, emit_join];
     joins.extend(extra_joins);

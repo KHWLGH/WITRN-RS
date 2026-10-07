@@ -64,6 +64,19 @@ test('Windows 层带上 WebView2 的 GPU 栅格化参数', () => {
   assert.match(args, /--enable-features=CanvasOopRasterization/);
 });
 
+test('主窗口关闭 WebView 后台节流，隐藏时采集不会因缺少 ACK 停止', () => {
+  // 采集是否继续取决于前端：每批样本由 JS 消费后 ack_device_stream，未确认量达到
+  // stream::UNACKED_CAP（8192）时后端停止采集并报错。macOS 的 WKWebView 默认对
+  // 隐藏 / 最小化 / 被遮挡的视图采用 suspend 策略，约 5 分钟后整页挂起，1 ms 采样下
+  // 约 8 秒就会触发上限。Windows 上 WebView2 最小化时仍在运行，所以只在 Windows 上
+  // 验收过的后台录制，在 Mac 上并不成立。
+  // tauri 把该项映射为 WKPreferences.inactiveSchedulingPolicy（macOS 14+），
+  // Windows / Linux 不支持、忽略此键；平台覆盖层同样必须带上它（见上方不变式）。
+  for (const window of base.app.windows) {
+    assert.equal(window.backgroundThrottling, 'disabled');
+  }
+});
+
 test('启动埋点阶段仍不改窗口可见性', () => {
   // 冷启动方案里 "visible:false" 被明确推迟到数字证明它值得做之后（见 docs/DEVELOPMENT.md 的
   // 冷启动分段）。这一条不是永远为真的规则，而是一个"要改就先去看那些数字"的关卡。
