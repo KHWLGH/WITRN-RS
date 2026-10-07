@@ -7,6 +7,7 @@ mod km003c_session;
 mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
 pub mod stream;
+mod titlebar;
 mod usb_port;
 #[cfg(target_os = "windows")]
 mod windows_icon;
@@ -1145,6 +1146,7 @@ pub fn run() {
             boot_timing::get_boot_timing,
             boot_timing::report_boot_timing,
             get_runtime_platform,
+            titlebar::titlebar_double_click,
             connect_device_by_path,
             disconnect_device,
             drain_device_stream,
