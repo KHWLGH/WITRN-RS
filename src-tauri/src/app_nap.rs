@@ -6,10 +6,18 @@
 //! 迟醒约 30 ms 就会丢数据；发射线程 8–50 ms 的合批定时器同样会被合并。
 //!
 //! `NSProcessInfo` 的 user-initiated activity 在读线程存活期间退出 App Nap，
-//! 读线程结束（停止、拔线或出错）即随之释放，进程退出时由系统回收。只采集不录制
-//! 时允许系统空闲睡眠；录制段打开期间换成同时阻止空闲睡眠的 activity（相当于
-//! `caffeinate -i`），无人值守的长时间录制不会因 Mac 自动睡眠而中断。屏幕照常
-//! 熄灭，合盖和手动睡眠不受影响。
+//! 读线程结束（停止、拔线或出错）即随之释放，进程退出时由系统回收。
+//!
+//! 只退出 App Nap 还不够：窗口最小化后进程不再是前台焦点，读线程偶尔仍会迟醒。
+//! WITRN K2 以 100 次/秒采集、最小化 3 分钟实测，样本间隔最大 36 ms，迟到的
+//! 报告按主机接收时刻打戳后挤进同一个 10 ms 选择窗口，约 0.2–1% 的点被合并；
+//! 窗口可见时为 100%。activity 加上 `LatencyCritical`（要求最高的定时器与 I/O
+//! 精度）后，同样条件下最大间隔 18.8 ms，39 个 5 秒窗口全部 100% 保留，进程 CPU
+//! 多约 1 个百分点。
+//!
+//! 只采集不录制时允许系统空闲睡眠；录制段打开期间换成同时阻止空闲睡眠的
+//! activity（相当于 `caffeinate -i`），无人值守的长时间录制不会因 Mac 自动睡眠
+//! 而中断。屏幕照常熄灭，合盖和手动睡眠不受影响。
 
 const ACQUIRING_REASON: &str = "laPower is acquiring measurements";
 const RECORDING_REASON: &str = "laPower is recording measurements";
@@ -62,11 +70,15 @@ mod macos {
     use objc2::runtime::{NSObjectProtocol, ProtocolObject};
     use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
 
-    /// 只退出 App Nap，允许系统空闲睡眠。
-    pub(super) const ACQUIRING: NSActivityOptions =
-        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep;
-    /// 退出 App Nap 并阻止系统空闲睡眠；不阻止屏幕熄灭。
-    pub(super) const RECORDING: NSActivityOptions = NSActivityOptions::UserInitiated;
+    /// 退出 App Nap、保持定时器精度，允许系统空闲睡眠。
+    pub(super) const ACQUIRING: NSActivityOptions = NSActivityOptions(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep.0
+            | NSActivityOptions::LatencyCritical.0,
+    );
+    /// 在 `ACQUIRING` 之外再阻止系统空闲睡眠；不阻止屏幕熄灭。
+    pub(super) const RECORDING: NSActivityOptions = NSActivityOptions(
+        NSActivityOptions::UserInitiated.0 | NSActivityOptions::LatencyCritical.0,
+    );
 
     pub(super) struct Activity(Retained<ProtocolObject<dyn NSObjectProtocol>>);
 
