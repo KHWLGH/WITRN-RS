@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use witrn_hid::{decode_pd_report, Parser};
 
+use crate::app_nap::AcquisitionActivity;
 use crate::pd_capture::{now_ms, PdEvent, PdLog};
 use crate::stream;
 use crate::{drain_pd_pending, enqueue_pd_pending, DeviceData, DeviceInfo, DeviceOutgoing};
@@ -194,6 +195,9 @@ pub(crate) fn run_reader<S: Source>(mut source: S, ctx: ReaderCtx) {
         consumed,
         end,
     } = ctx;
+    // 读线程存活期间退出 App Nap：窗口隐藏时 HID 读取与合批定时器不被合并。
+    // 录制段打开期间另外阻止系统空闲睡眠。
+    let mut activity = AcquisitionActivity::begin();
     let rate_ms = sample_rate
         .load(Ordering::Relaxed)
         .max(source.min_rate_ms());
@@ -265,6 +269,7 @@ pub(crate) fn run_reader<S: Source>(mut source: S, ctx: ReaderCtx) {
                     last_segment = last_segment.max(next);
                     state.segment_start_us = at;
                     pd_capture.store(pd_enabled, Ordering::Release);
+                    activity.set_recording(next != 0);
                     reply
                 }
                 stream::Control::Rate { rate, reply } => {
