@@ -1,4 +1,6 @@
 mod acquire;
+#[cfg(target_os = "macos")]
+mod app_menu;
 mod app_nap;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
@@ -1103,20 +1105,25 @@ fn parse_device_data(buf: &[u8]) -> Option<DeviceData> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     boot_timing::mark("run_enter");
-    #[cfg_attr(target_os = "macos", allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build());
     boot_timing::mark("plugins_registered");
 
-    // decorum injects a native traffic-light positioner on macOS even though
-    // this app uses its own HTML window controls there. That positioner can
-    // dereference a missing Cocoa superview during window creation, so keep
-    // the plugin on the platforms where its overlay titlebar is supported.
+    // macOS keeps the native traffic lights (tauri.macos.conf.json), so it has
+    // no use for decorum's overlay titlebar, and decorum's traffic-light
+    // positioner can dereference a missing Cocoa superview during window
+    // creation. Keep the plugin on Windows and Linux.
     #[cfg(not(target_os = "macos"))]
     {
         builder = builder.plugin(tauri_plugin_decorum::init());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .menu(app_menu::build)
+            .on_menu_event(app_menu::handle);
     }
 
     let app = builder
