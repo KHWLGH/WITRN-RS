@@ -1,5 +1,6 @@
 mod acquire;
 mod app_error;
+mod app_nap;
 mod locale;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;

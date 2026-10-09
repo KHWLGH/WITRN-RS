@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - 修正文档中的旧 PD 列名、独立模式暂停行为和温度服务换行说明，补齐外观设置中的语言选项。
+- macOS 27 + Xcode 27.0（beta）上 release 构建在第一个过程宏处失败：继承 release 的 `strip` 后，dylib 被 dyld 以 LINKEDIT 字符串池未对齐为由拒绝加载。构建脚本与过程宏不进安装包，不再 strip。
+- macOS 上主窗口隐藏、最小化或被遮挡时，WKWebView 默认的后台策略会节流并约 5 分钟后挂起页面，前端不再确认样本，未确认量达到 8192 后采集停止（1 ms 采样约 8 秒）。主窗口改为关闭 WebView 后台节流（macOS 14+ 生效，Windows / Linux 忽略该项）。
+- macOS 上读线程存活期间退出 App Nap 并要求最高定时器精度（`LatencyCritical`），窗口不可见时 HID 读取与合批定时器不再被系统合并、降级；hidapi 在 macOS 上每台设备只缓存 30 份报告，迟醒即丢点。WITRN K2 100 次/秒、最小化 3 分钟实测：只退出 App Nap 时样本间隔最大 36 ms、约 0.2–1% 的点被合并；加上 `LatencyCritical` 后最大 18.8 ms、全部保留。
+- macOS 上记录期间阻止系统空闲睡眠（相当于 `caffeinate -i`），无人值守的长时间记录不再因 Mac 自动睡眠而中断；屏幕照常熄灭，暂停或停止记录后恢复，只采集不记录时不阻止睡眠。
 
 ## [0.2.2] - 2026-10-04
 

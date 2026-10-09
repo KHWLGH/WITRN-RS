@@ -83,8 +83,10 @@ jobs:
         include:
           - os: windows-latest
             run_tests: true
+          # macOS has its own code paths (App Nap activity, shared HID opens,
+          # usb_port location IDs); run the suite there, not only cargo check.
           - os: macos-latest
-            run_tests: false
+            run_tests: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

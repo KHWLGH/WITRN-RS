@@ -51,6 +51,9 @@ sys-locale.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the process-wide policy once during hidapi initialization, before any opens.
 hidapi = { workspace = true, features = ["macos-shared-device"] }
+# App Nap opt-out while a reader runs (src/app_nap.rs); already in the graph through tao/wry.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

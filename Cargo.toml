@@ -53,6 +53,13 @@ panic = "unwind"
 strip = "debuginfo"
 debug = 0
 
+# Build scripts and proc macros run on the build machine and never ship, so stripping them
+# saves nothing. On macOS 27 with Xcode 27.0 (beta), strip leaves dylibs with a mis-aligned
+# LINKEDIT string pool that dyld refuses to load, and the inherited `strip` above broke every
+# proc macro in release builds (serde_derive first). The shipped binary is unaffected.
+[profile.release.build-override]
+strip = false
+
 # Dependencies at opt-level 2 under dev. Otherwise serde_json, hidapi, the parser and the
 # whole emit path run unoptimized in `cargo tauri dev`, several times slower than release,
 # and any startup or first-frame number taken from a dev build measures fiction.
