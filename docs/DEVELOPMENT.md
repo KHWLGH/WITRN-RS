@@ -30,7 +30,7 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 
 ## 词典维护与翻译检查
 
-src/i18n.js 提供 t(key, params)、locale 解析和语言变更订阅，四份词典离线打包，英文作为基准与缺词回退。src/i18n-messages.js 的四列依次为英文、简中、繁中、日文。使用语义键名，保持插值参数名称一致；含数量的消息按需补充单数版本。用户文档以简中版本为内容基准，其他语言保留相同章节、操作细节、参数和示例；`verify-i18n-docs.mjs` 检查各节层级、表格与列表、代码示例、相对链接、章节锚点和截图。
+src/i18n.js 提供 t(key, params)、locale 解析和语言变更订阅，四份词典离线打包，英文作为基准与缺词回退。src/i18n-messages.js 的四列依次为英文、简中、繁中、日文。使用语义键名，保持插值参数名称一致；含数量的消息按需补充单数版本。用户文档以简中版本为内容基准，其他语言的内容由人工校对。
 
 静态 HTML 使用英文兜底和 data-i18n／data-i18n-title／data-i18n-placeholder／data-i18n-aria-label／data-i18n-alt；含图标或输入控件的元素只标记文字 span。动态内容通过 t 生成，持续通知和日志用延迟文字函数。切换只刷新标签、菜单、下拉和图表，不能重新连接或重建数据。
 
@@ -39,7 +39,6 @@ src/i18n.js 提供 t(key, params)、locale 解析和语言变更订阅，四份�
 ```bash
 node --test test/i18n.test.js test/settings-persistence.test.js
 node tools/showcase/verify-i18n.mjs
-node tools/showcase/verify-i18n-docs.mjs
 npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 ```
 

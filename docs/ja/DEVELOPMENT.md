@@ -30,7 +30,7 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 
 ## 辞書の保守と翻訳チェック
 
-`src/i18n.js` は `t(key, params)`、locale 解析、言語変更の購読を提供します。4 辞書をオフラインで同梱し、英語を基準と欠落時のフォールバックに使います。`src/i18n-messages.js` の 4 列は英語、簡体字、繁体字、日本語の順です。意味に基づくキーと共通の補間パラメーター名を使い、件数のあるメッセージには必要に応じて単数形を追加します。利用者向け文書は簡体字版を内容の基準にし、翻訳でも同じ章、操作の詳細、パラメーター、例を保持します。`verify-i18n-docs.mjs` で見出し階層、表・リスト、コード例、相対リンク、アンカー、画像を確認します。
+`src/i18n.js` は `t(key, params)`、locale 解析、言語変更の購読を提供します。4 辞書をオフラインで同梱し、英語を基準と欠落時のフォールバックに使います。`src/i18n-messages.js` の 4 列は英語、簡体字、繁体字、日本語の順です。意味に基づくキーと共通の補間パラメーター名を使い、件数のあるメッセージには必要に応じて単数形を追加します。利用者向け文書は簡体字版を内容の基準にし、翻訳は人が校正します。
 
 静的 HTML は英語のフォールバックと `data-i18n`／`data-i18n-title`／`data-i18n-placeholder`／`data-i18n-aria-label`／`data-i18n-alt` を使います。アイコンや入力欄を含む要素は文字の span だけを指定します。動的表示は `t`、継続表示する通知・ログは遅延文字列関数を使います。切り替えではラベル・メニュー・選択欄・グラフだけを更新し、再接続やデータの再構築をしません。
 
@@ -39,7 +39,6 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 ```bash
 node --test test/i18n.test.js test/settings-persistence.test.js
 node tools/showcase/verify-i18n.mjs
-node tools/showcase/verify-i18n-docs.mjs
 npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 ```
 

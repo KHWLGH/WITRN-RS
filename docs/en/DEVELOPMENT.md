@@ -30,7 +30,7 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 
 ## Dictionary maintenance and translation checks
 
-`src/i18n.js` provides `t(key, params)`, locale resolution and language-change subscriptions. Four dictionaries ship offline, with English as the reference and missing-key fallback. The four columns in `src/i18n-messages.js` are English, Simplified Chinese, Traditional Chinese and Japanese. Use semantic keys, keep interpolation parameter names consistent, and add singular forms for count messages where needed. User documentation uses the Simplified Chinese version as its content reference; translations retain the same sections, operation details, parameters and examples. `verify-i18n-docs.mjs` checks section levels, tables/lists, code examples, relative links, anchors and screenshots.
+`src/i18n.js` provides `t(key, params)`, locale resolution and language-change subscriptions. Four dictionaries ship offline, with English as the reference and missing-key fallback. The four columns in `src/i18n-messages.js` are English, Simplified Chinese, Traditional Chinese and Japanese. Use semantic keys, keep interpolation parameter names consistent, and add singular forms for count messages where needed. User documentation uses the Simplified Chinese version as its content reference; translations are reviewed manually.
 
 Static HTML uses English fallback text and `data-i18n` / `data-i18n-title` / `data-i18n-placeholder` / `data-i18n-aria-label` / `data-i18n-alt`. For elements containing icons or inputs, mark only the text span. Generate dynamic content with `t`, using deferred text functions for persistent notifications and logs. Switching languages refreshes labels, menus, dropdowns and charts without reconnecting or rebuilding data.
 
@@ -39,7 +39,6 @@ Backend application errors use `{code, params, detail?}`; asynchronous events re
 ```bash
 node --test test/i18n.test.js test/settings-persistence.test.js
 node tools/showcase/verify-i18n.mjs
-node tools/showcase/verify-i18n-docs.mjs
 npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 ```
 
