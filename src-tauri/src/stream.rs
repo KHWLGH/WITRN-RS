@@ -816,10 +816,11 @@ mod tests {
     /// same slot. At 100Hz that meant one or two points per emit, i.e. ~100 `app.emit` plus ~100
     /// JS acks per second, each a main-thread hop competing with the rAF that draws it.
     ///
-    /// Asserted as a ratio rather than an absolute: the driver sleeps at a nominal cadence and
-    /// Windows inflates it, so only "same points, strictly fewer flushes" is stable. It fails
-    /// against the old constant, which is why it is worth its ~0.5s of sleeping.
+    /// Report-only: both runs use the real scheduler. Even their ratio is noisy when a shared
+    /// macOS runner delays them differently (19 short-window flushes versus 10 long-window flushes
+    /// failed the 2x assertion). Deterministic cadence and emitter tests remain CI gates.
     #[test]
+    #[ignore = "batch timing comparison: cargo test --lib -- --ignored --nocapture"]
     fn the_rate_derived_window_collapses_the_emit_count() {
         let cadence = Duration::from_millis(10);
         let (points, short_flushes) = batch_shape(cadence, Duration::from_millis(BATCH_MS_FLOOR));
