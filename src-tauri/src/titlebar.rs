@@ -43,7 +43,7 @@ fn system_double_click_action() -> DoubleClickAction {
 
 #[cfg(not(target_os = "macos"))]
 fn system_double_click_action() -> DoubleClickAction {
-    DoubleClickAction::Zoom
+    double_click_action(None, false)
 }
 
 #[tauri::command]
