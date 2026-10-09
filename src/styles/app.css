@@ -30,9 +30,8 @@ html[data-ui-scale-css] .app-shell {
   height: calc(100vh / var(--ui-scale, 1));
 }
 
-/* 无边框窗口在 Linux/macOS 没有 shadow 装饰，加 1px 描边补偿轮廓 */
-:root[data-os="linux"]:not(.is-maximized):not(.is-fullscreen) .app-shell,
-:root[data-os="macos"]:not(.is-maximized):not(.is-fullscreen) .app-shell {
+/* 无边框窗口在 Linux 没有 shadow 装饰，加 1px 描边补偿轮廓；macOS 用系统窗口边框与阴影。 */
+:root[data-os="linux"]:not(.is-maximized):not(.is-fullscreen) .app-shell {
   border: 1px solid var(--stroke-divider);
 }
 
@@ -327,6 +326,30 @@ html[data-ui-scale-css] .app-shell {
 :root[data-window-style="macos"] :is(.titlebar-controls, [data-tauri-decorum-tb]):hover .fi,
 :root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):focus-visible .fi {
   opacity: 1;
+}
+
+/* ── macOS：系统原生红绿灯 ──
+   按钮由系统绘制在标题栏左侧（tauri.macos.conf.json），这里只留出位置、不自绘。
+   原生按钮不随界面缩放：预留宽度按 --ui-scale 反比换算；缩小界面时标题栏的物理高度
+   不低于 100% 时的高度，按钮始终落在标题栏内。放大界面时标题栏变高、按钮仍在原处。
+   全屏时系统隐藏红绿灯，预留随之收起。 */
+:root[data-os="macos"] .titlebar {
+  height: max(var(--titlebar-height), calc(var(--titlebar-height) / var(--ui-scale, 1)));
+}
+
+:root[data-os="macos"] .titlebar-controls {
+  order: -1;
+  width: calc(var(--window-native-controls-width) / var(--ui-scale, 1));
+  padding: 0;
+}
+
+:root[data-os="macos"].is-fullscreen .titlebar-controls {
+  display: none;
+}
+
+/* 原生按钮不能换皮肤，设置里的窗口风格只对 Windows / Linux 有意义。 */
+:root[data-os="macos"] #window-style-row {
+  display: none;
 }
 
 /* ── Linux 边缘调整大小热区（最大化 / 全屏时隐藏） ── */

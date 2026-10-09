@@ -1002,6 +1002,9 @@ async function setupEventListener() {
       setTempConnected(false);
       console.info('Temperature service disconnected');
     }),
+
+    // macOS 应用菜单 Settings…（⌘,），与标题栏齿轮按钮同一路径
+    listen('open-settings', () => showView('settings')),
   ]);
   document.addEventListener('witrn:monitor-changed', syncTriggerConnection);
 }

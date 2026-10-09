@@ -12,13 +12,16 @@ export function normalizeWindowStyle(value) {
 }
 
 /**
+ * 解析实际使用的皮肤。macOS 使用系统原生红绿灯，不能换皮肤，总是 'macos'；
+ * 偏好只对 Windows / Linux 的自绘按钮生效。theme-boot.js 的首帧判定与此保持一致。
  * @param {unknown} preference
  * @param {unknown} os 真实平台（data-os），不能由风格偏好覆盖。
  * @returns {'windows'|'macos'}
  */
 export function resolveWindowStyle(preference, os) {
+  if (os === 'macos') return 'macos';
   const pref = normalizeWindowStyle(preference);
-  return pref === 'auto' ? (os === 'macos' ? 'macos' : 'windows') : pref;
+  return pref === 'auto' ? 'windows' : pref;
 }
 
 /**

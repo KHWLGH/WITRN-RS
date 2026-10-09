@@ -2,8 +2,8 @@
 /**
  * 窗口动作始终按真实 data-os 分发，data-window-style 只负责 CSS 皮肤。
  * Windows 保留 decorum 原节点、ID、class、click/hover 监听和 Snap（macOS 皮肤下由 guardDecorumSnap 常驻拦下）；
- * Mac/Linux 单次创建自绘按钮。Mac 不注册 decorum，也不创建 Tao 未实现的缩放热区。
- * close() 继续进入现有 onCloseRequested 确认流程。
+ * Linux 单次创建自绘按钮。Mac 使用系统原生红绿灯（tauri.macos.conf.json），这里只留占位，
+ * 不注册 decorum，也不创建缩放热区。close() 继续进入现有 onCloseRequested 确认流程。
  */
 
 import { onLanguageChange, t } from '../i18n.js';
@@ -36,6 +36,10 @@ export function refreshWindowControlLanguage() {
 }
 
 onLanguageChange(() => refreshWindowControlLanguage());
+
+/** 标题栏里不能用来拖动窗口的子区域。 */
+const NO_DRAG =
+  'button, select, input, textarea, a, [role="button"], [contenteditable], .titlebar-connect, .titlebar-tabs';
 
 /** @param {HTMLElement} btn @param {string} icon @param {string} label */
 function setIcon(btn, icon, label) {
@@ -118,19 +122,27 @@ export function initWindowControls() {
   const isMac = os === 'macos';
   initialized = true;
 
-  titlebar.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    if (
-      target.closest(
-        'button, select, input, textarea, a, [role="button"], [contenteditable], .titlebar-connect, .titlebar-tabs, .titlebar-controls, [data-tauri-decorum-tb]',
-      )
-    )
-      return;
-    event.preventDefault();
-    void appWindow.startDragging().catch(() => {});
-  });
+  // macOS 的 .titlebar-controls 只是红绿灯旁的空白占位，可以拖；其他平台那里是按钮。
+  const noDrag = isMac ? NO_DRAG : `${NO_DRAG}, .titlebar-controls, [data-tauri-decorum-tb]`;
+  /** @param {EventTarget|null} target */
+  const isDragArea = (target) => target instanceof Element && !target.closest(noDrag);
+
+  if (isMac) {
+    // mousedown.detail 是系统点击计数：单击开始拖动；双击按「系统设置 › 桌面与程序坞 ›
+    // 连按窗口标题栏以…」缩放、最小化或不处理，与原生标题栏一致。
+    titlebar.addEventListener('mousedown', (event) => {
+      if (event.button !== 0 || !isDragArea(event.target)) return;
+      event.preventDefault();
+      if (event.detail === 2) void window.__TAURI__.core.invoke('titlebar_double_click').catch(() => {});
+      else if (event.detail === 1) void appWindow.startDragging().catch(() => {});
+    });
+  } else {
+    titlebar.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !isDragArea(event.target)) return;
+      event.preventDefault();
+      void appWindow.startDragging().catch(() => {});
+    });
+  }
 
   /** @type {HTMLElement|null} */
   let maxBtn = null;
@@ -158,17 +170,10 @@ export function initWindowControls() {
         root.classList.toggle('is-maximized', maximized);
         root.classList.toggle('is-fullscreen', fullscreen);
         if (maxBtn) {
-          const expanded = isMac ? fullscreen : maximized;
           setIcon(
             maxBtn,
-            expanded ? 'restore' : 'maximize',
-            isMac
-              ? fullscreen
-                ? t('windowExitFullscreen')
-                : t('windowEnterFullscreen')
-              : maximized
-                ? t('windowRestore')
-                : t('windowMaximize'),
+            maximized ? 'restore' : 'maximize',
+            maximized ? t('windowRestore') : t('windowMaximize'),
           );
         }
         paint();
@@ -183,6 +188,9 @@ export function initWindowControls() {
   if (os === 'windows') {
     guardDecorumSnap();
     paint = restyleDecorumButtons();
+  } else if (isMac) {
+    // 系统红绿灯浮在这块占位之上；全屏、平铺、最小化都由系统按钮处理。
+    container.setAttribute('aria-hidden', 'true');
   } else {
     /** @param {string} action @param {string} icon @param {string} label @param {() => Promise<unknown>} onClick */
     const mkBtn = (action, icon, label, onClick) => {
@@ -197,9 +205,8 @@ export function initWindowControls() {
       return btn;
     };
     mkBtn('minimize', 'subtract', t('windowMinimize'), () => appWindow.minimize());
-    maxBtn = mkBtn('maximize', 'maximize', isMac ? t('windowEnterFullscreen') : t('windowMaximize'), async () => {
-      if (isMac) await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
-      else await appWindow.toggleMaximize();
+    maxBtn = mkBtn('maximize', 'maximize', t('windowMaximize'), async () => {
+      await appWindow.toggleMaximize();
       await syncWindowState();
     });
     mkBtn('close', 'dismiss', t('windowClose'), () => appWindow.close());
@@ -207,7 +214,6 @@ export function initWindowControls() {
 
   refreshLanguage = () => {
     const maximized = root.classList.contains('is-maximized');
-    const fullscreen = root.classList.contains('is-fullscreen');
     const min = document.getElementById('decorum-tb-minimize') ?? container.querySelector('.wc-btn-minimize');
     const close = document.getElementById('decorum-tb-close') ?? container.querySelector('.wc-btn-close');
     if (min instanceof HTMLElement) setIcon(min, 'subtract', t('windowMinimize'));
@@ -215,14 +221,8 @@ export function initWindowControls() {
     if (maxBtn) {
       setIcon(
         maxBtn,
-        isMac ? (fullscreen ? 'restore' : 'maximize') : maximized ? 'restore' : 'maximize',
-        isMac
-          ? fullscreen
-            ? t('windowExitFullscreen')
-            : t('windowEnterFullscreen')
-          : maximized
-            ? t('windowRestore')
-            : t('windowMaximize'),
+        maximized ? 'restore' : 'maximize',
+        maximized ? t('windowRestore') : t('windowMaximize'),
       );
     }
     paint();

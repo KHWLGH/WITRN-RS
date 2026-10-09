@@ -243,10 +243,10 @@ export const messages = {
   responseLog: ['Response log', '返回日志', '回應記錄', '応答ログ'],
   protocolLog: ['Protocol response log', '协议返回日志', '協議回應記錄', 'プロトコル応答ログ'],
   windowStyleHint: [
-    'Changes title bar appearance. On Mac the green button toggles full screen; on other platforms it maximizes or restores.',
-    '仅改变标题栏外观，不改变系统窗口行为；Mac 绿钮切换全屏，其他平台最大化/还原。',
-    '改變標題列外觀；Mac 綠鈕切換全螢幕，其他平台最大化／還原。',
-    'タイトルバーの外観を変更します。Mac の緑のボタンはフルスクリーン、他の環境では最大化／元に戻す操作です。',
+    'Changes only the appearance of title bar buttons, without changing window behavior.',
+    '仅改变标题栏按钮的外观，不改变窗口行为。',
+    '僅改變標題列按鈕的外觀，不改變視窗行為。',
+    'タイトルバーのボタンの外観のみを変更し、ウィンドウの動作は変えません。',
   ],
   uiScale: ['UI scale', '界面缩放', '介面縮放', 'UI の拡大率'],
   uiScaleHint: [
