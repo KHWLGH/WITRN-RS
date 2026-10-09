@@ -19,6 +19,7 @@
 //! activity（相当于 `caffeinate -i`），无人值守的长时间录制不会因 Mac 自动睡眠
 //! 而中断。屏幕照常熄灭，合盖和手动睡眠不受影响。
 
+#[cfg(target_os = "macos")]
 const ACQUIRING_REASON: &str = "laPower is acquiring measurements";
 const RECORDING_REASON: &str = "laPower is recording measurements";
 
@@ -98,7 +99,7 @@ mod macos {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
