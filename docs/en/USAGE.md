@@ -208,7 +208,7 @@ WITRN devices do not show this tab or receive control commands.
 
 ## Settings
 
-The main settings list is on the left; device and About information appear on the right in wide windows.
+Open settings with the gear button in the title bar. On macOS, you can also press ⌘, or choose “Settings…” from the application menu. The main settings list is on the left; device and About information appear on the right in wide windows.
 
 ### Appearance
 
@@ -216,12 +216,12 @@ The main settings list is on the left; device and About information appear on th
 | --- | --- | --- |
 | `Theme` | `Follow system` / `Light` / `Dark` | Follow system |
 | `Language` | `Follow system` / `简体中文` / `繁體中文` / `English` / `日本語`; automatic mode shows the effective language | Follow system |
-| `Window style` | `Follow platform` / `Windows style` / `macOS style` | Follow platform |
+| `Window style` | `Follow platform` / `Windows style` / `macOS style` (Windows / Linux only) | Follow platform |
 | `UI scale` | Slider, 50–200% | 100% |
 
-UI scale resizes the whole interface, including chart and title bar. Lower it if system scaling crowds the window. It applies when dragging ends, avoiding repeated layout changes while dragging.
+UI scale resizes the whole interface, including chart and title bar. Lower it if system scaling crowds the window. It applies when dragging ends, avoiding repeated layout changes while dragging. On macOS, the native traffic lights keep their size and the title bar reserves fixed space for them.
 
-On first run and after resetting settings, the theme follows OS appearance. Existing choices are retained. `Follow platform` selects the platform title-bar style independently of the light/dark theme.
+On first run and after resetting settings, the theme follows OS appearance. Existing choices are retained. `Follow platform` selects the platform title-bar style independently of the light/dark theme. macOS uses native traffic lights for full screen, tiling and minimization. Double-clicking empty title-bar space follows the Desktop & Dock setting, so the window-style option is hidden on macOS.
 
 ### Charts and recording
 
@@ -307,6 +307,12 @@ Imported and live messages use different log generations, so historical captures
 This is usually a **permission issue**. `hidapi` must open `/dev/hidrawN`, typically accessible only by root by default. The app can start normally with an empty device list and no error for a regular user.
 
 See [Development and build · udev rules](DEVELOPMENT.md#udev-rules-required).
+
+### Unattended long recordings on macOS
+
+- While recording, laPower prevents idle system sleep. The display can still turn off; pausing or stopping recording releases the sleep assertion. Acquisition without recording follows the system sleep settings.
+- Closing the lid or choosing Sleep still puts the Mac to sleep. Do neither during a recording.
+- On macOS 14+, minimizing, hiding or covering the window does not suspend acquisition. macOS 12–13 cannot disable WKWebView background throttling, so keep the window visible for long recordings.
 
 ### Incorrect or missing measurements
 

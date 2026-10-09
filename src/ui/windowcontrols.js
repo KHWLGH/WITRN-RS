@@ -170,11 +170,7 @@ export function initWindowControls() {
         root.classList.toggle('is-maximized', maximized);
         root.classList.toggle('is-fullscreen', fullscreen);
         if (maxBtn) {
-          setIcon(
-            maxBtn,
-            maximized ? 'restore' : 'maximize',
-            maximized ? t('windowRestore') : t('windowMaximize'),
-          );
+          setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? t('windowRestore') : t('windowMaximize'));
         }
         paint();
       } while (syncAgain);
@@ -219,11 +215,7 @@ export function initWindowControls() {
     if (min instanceof HTMLElement) setIcon(min, 'subtract', t('windowMinimize'));
     if (close instanceof HTMLElement) setIcon(close, 'dismiss', t('windowClose'));
     if (maxBtn) {
-      setIcon(
-        maxBtn,
-        maximized ? 'restore' : 'maximize',
-        maximized ? t('windowRestore') : t('windowMaximize'),
-      );
+      setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? t('windowRestore') : t('windowMaximize'));
     }
     paint();
   };
