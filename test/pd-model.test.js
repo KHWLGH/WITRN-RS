@@ -101,7 +101,7 @@ test('summarize maps sink role and cable plug', () => {
 
 test('summarize tolerates missing header', () => {
   const s = summarize(node('Broken', [leaf('SOP*', 'SOP')]));
-  assert.equal(s.type, '未知');
+  assert.equal(s.type, 'Unknown');
   assert.equal(s.role, '');
   assert.equal(s.summary, '');
 });

@@ -1,4 +1,5 @@
 // @ts-check
+import { t as translate } from './i18n.js';
 /**
  * @file PD 报文纯逻辑 — 摘要提取、过滤、视口切片、捕获文件。无 DOM / Tauri 依赖。
  *
@@ -43,7 +44,7 @@ export const PD_ROW_HEIGHT_WRAP = 40;
 /** 电压范围里的非断行连字符，避免 `5.00-21.00V` 从中间拆开。 */
 export const NOTE_NB_HYPHEN = '\u2011';
 /** V/I 列说明：仪表最近一次 0xFF 采样，不是报文同时刻。 */
-export const VI_SAMPLE_TITLE = '最近一次测量采样，不是报文同时刻';
+export const VI_SAMPLE_TITLE = 'Most recent measurement sample; not simultaneous with the message';
 /** 视口上下各多渲染的行数。 */
 export const PD_OVERSCAN = 12;
 /** 超过该条数 toast 警告，但默认继续存储。 */
@@ -121,7 +122,7 @@ export function summarize(meta) {
 
   const header = findChild(meta, 'Message Header') ?? findChild(meta, 'Extended Message Header') ?? null;
   const typeValue = findChild(header, 'Message Type')?.value;
-  const type = typeof typeValue === 'string' ? typeValue : '未知';
+  const type = typeof typeValue === 'string' ? typeValue : 'Unknown';
 
   let role = '';
   const powerRole = findChild(header, 'Port Power Role')?.value;
@@ -932,37 +933,43 @@ export function buildPdCaptureFile(entries) {
   return { app: 'laPower', kind: 'pd-capture', version: 2, exportedAt: new Date().toISOString(), entries: packed };
 }
 
+/** Keep the existing error string API and a description that can be translated again.
+ * @param {string} code @param {Record<string,string>} [params] */
+function captureFailure(code, params = {}) {
+  return { ok: /** @type {const} */ (false), error: translate(code, params), description: { code, params } };
+}
+
 /**
  * 解析并校验捕获文件（传入已 JSON.parse 的对象）。
  * v1：整树，用 summarize(meta) 重算摘要。
  * v2：紧凑日志（bytes 和/或 meta）。
  * @param {unknown} raw
- * @returns {{ ok: true, entries: (PdEntry|PdDivider)[] } | { ok: false, error: string }}
+ * @returns {{ ok: true, entries: (PdEntry|PdDivider)[] } | { ok: false, error: string, description: {code:string, params:Record<string,string>} }}
  */
 export function parsePdCaptureFile(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: '不是有效的捕获文件' };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return captureFailure('pdInvalidFile');
   const file = /** @type {Record<string, unknown>} */ (raw);
-  if (file.kind !== 'pd-capture') return { ok: false, error: '文件类型不匹配（缺少 pd-capture 标记）' };
+  if (file.kind !== 'pd-capture') return captureFailure('pdInvalidKind');
   if (file.version !== 1 && file.version !== 2) {
-    return { ok: false, error: `不支持的文件版本: ${String(file.version)}` };
+    return captureFailure('pdInvalidVersion', { version: String(file.version) });
   }
-  if (!Array.isArray(file.entries)) return { ok: false, error: '缺少报文数组' };
+  if (!Array.isArray(file.entries)) return captureFailure('pdMissingEntries');
 
   /** @type {(PdEntry|PdDivider)[]} */
   const entries = [];
   for (const item of file.entries) {
-    if (!item || typeof item !== 'object') return { ok: false, error: '存在非法报文条目' };
+    if (!item || typeof item !== 'object') return captureFailure('pdInvalidEntry');
     const rec = /** @type {Record<string, unknown>} */ (item);
     const t = rec.t;
-    if (!Number.isFinite(t)) return { ok: false, error: '存在缺少时间戳的条目' };
+    if (!Number.isFinite(t)) return captureFailure('pdMissingTime');
     if (rec.divider === true) {
       entries.push({ t: /** @type {number} */ (t), divider: true });
       continue;
     }
     if (rec.meta !== undefined) {
-      if (!isValidMeta(rec.meta)) return { ok: false, error: '存在无法解析的报文结构' };
+      if (!isValidMeta(rec.meta)) return captureFailure('pdInvalidStructure');
       const bytes = rec.bytes === undefined ? undefined : normalizeBytes(rec.bytes);
-      if (rec.bytes !== undefined && bytes === undefined) return { ok: false, error: '存在无法解析的原始帧' };
+      if (rec.bytes !== undefined && bytes === undefined) return captureFailure('pdInvalidFrame');
       /** @type {PdEntry} */
       const entry = { t: /** @type {number} */ (t), ...summarize(rec.meta), meta: rec.meta };
       if (bytes) entry.bytes = bytes;
@@ -970,12 +977,12 @@ export function parsePdCaptureFile(raw) {
       entries.push(entry);
       continue;
     }
-    if (file.version === 1) return { ok: false, error: '存在无法解析的报文结构' };
+    if (file.version === 1) return captureFailure('pdInvalidStructure');
     if (typeof rec.sop !== 'string' || typeof rec.type !== 'string') {
-      return { ok: false, error: '存在缺少摘要的报文条目' };
+      return captureFailure('pdMissingSummary');
     }
     const bytes = rec.bytes === undefined ? undefined : normalizeBytes(rec.bytes);
-    if (rec.bytes !== undefined && bytes === undefined) return { ok: false, error: '存在无法解析的原始帧' };
+    if (rec.bytes !== undefined && bytes === undefined) return captureFailure('pdInvalidFrame');
     /** @type {PdEntry} */
     const entry = {
       t: /** @type {number} */ (t),

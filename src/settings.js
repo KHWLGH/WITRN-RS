@@ -11,6 +11,7 @@ import {
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
+import { applyLanguage, errorText, normalizeLanguagePreference, t } from './i18n.js';
 import { clampPdm } from './km003c-model.js';
 import { clampLimitMb } from './recording-limit.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
@@ -78,6 +79,7 @@ function normalizeSettings(saved) {
   if (merged.theme !== 'dark' && merged.theme !== 'light' && merged.theme !== 'system') {
     merged.theme = defaultSettings.theme;
   }
+  merged.language = normalizeLanguagePreference(merged.language);
   merged.windowStyle = normalizeWindowStyle(merged.windowStyle);
   // Mica settings were removed; discard them when loading older LazyStore data.
   const legacyMerged = /** @type {Record<string, unknown>} */ (merged);
@@ -143,6 +145,8 @@ export function echoApUnit() {
 function echoSettingsUI() {
   const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (rateSelect) setSampleRateOption(rateSelect, state.settings.sampleRate);
+  const language = /** @type {HTMLSelectElement|null} */ (document.getElementById('language-select'));
+  if (language) language.value = state.settings.language;
 
   /** @param {string} id @param {boolean} val */
   const setChecked = (id, val) => {
@@ -296,10 +300,8 @@ function reportPersistenceFault(error, stage) {
   console.error(`设置持久化失败 (${stage}):`, error);
   if (persistenceFaultReported) return;
   persistenceFaultReported = true;
-  toast.error(
-    stage === 'load'
-      ? `配置存储不可用，本次会话的设置不会被保存：${error}`
-      : '配置写入失败，重启后将回到当前值（settings.json 在应用数据目录，可能被杀毒软件或同步盘占用）',
+  toast.error(() =>
+    stage === 'load' ? t('settingsLoadFailed', { detail: errorText(error) }) : t('settingsWriteFailed'),
   );
 }
 
@@ -409,6 +411,7 @@ export async function resetSettings() {
   try {
     state.settings = { ...defaultSettings };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
+    await applyLanguage(state.settings.language);
 
     echoSettingsUI();
     echoUiScaleUI();

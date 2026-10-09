@@ -1047,3 +1047,42 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-disabled);
   cursor: not-allowed;
 }
+/* Locale fonts and wrapping apply to every native platform style. */
+:root[lang="ja"] {
+  --font-ui:
+    "Segoe UI", -apple-system, BlinkMacSystemFont, "Yu Gothic UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+}
+:root[lang="zh-TW"] {
+  --font-ui:
+    "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei UI", "PingFang TC", "Noto Sans CJK TC",
+    sans-serif;
+}
+.settings-row-text {
+  min-width: 0;
+}
+.settings-row-desc,
+.fluent-dialog-body,
+.toast-text,
+.trigger-banner {
+  overflow-wrap: anywhere;
+}
+.settings-row-control {
+  flex-shrink: 0;
+}
+.status-metrics {
+  grid-template-columns: repeat(4, max-content) minmax(0, 1fr);
+}
+.statusbar .status-duration > :last-child,
+.statusbar .status-rate > :last-child,
+.statusbar .status-count > :last-child,
+.statusbar .status-remaining > :last-child {
+  min-width: 0;
+}
+@media (max-width: 1000px) {
+  .settings-row {
+    flex-wrap: wrap;
+  }
+  .settings-row-control {
+    max-width: 100%;
+  }
+}

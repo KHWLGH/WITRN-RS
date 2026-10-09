@@ -95,7 +95,7 @@ class Dropdown {
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ['disabled', 'hidden', 'selected', 'value'],
+      attributeFilter: ['disabled', 'hidden', 'selected', 'value', 'title', 'aria-label'],
     });
 
     // .value / .selectedIndex 是属性赋值，不反映到 attribute，MutationObserver 看不到，
@@ -132,6 +132,9 @@ class Dropdown {
     const opt = this.select.options[readIndex(this.select)];
     this.label.textContent = opt ? opt.textContent : '';
     this.button.disabled = this.select.disabled;
+    this.button.title = this.select.title;
+    const label = this.select.getAttribute('aria-label') || this.select.title;
+    if (label) this.button.setAttribute('aria-label', label);
     if (this.select.disabled && this.isOpen) this.close();
     if (this.isOpen) this.renderMenu();
   }

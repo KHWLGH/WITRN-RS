@@ -8,6 +8,8 @@
 
 /** @typedef {{ handle: number, name: string, path: string, size: number }} OpenedFile */
 
+import { t } from './i18n.js';
+
 const encoder = new TextEncoder();
 
 /** @param {string} command @param {unknown} [args] @param {{ headers: Record<string, string> }} [options] */
@@ -21,17 +23,17 @@ function invoke(command, args, options) {
  * @returns {Promise<OpenedFile|null>}
  */
 export function pickExportFile(defaultName) {
-  return invoke('csv_export_pick', { defaultName });
+  return invoke('csv_export_pick', { defaultName, title: t('exportCsv'), filterName: t('csvFile') });
 }
 
 /** @param {string} defaultName @returns {Promise<OpenedFile|null>} */
 export function pickPdExportFile(defaultName) {
-  return invoke('pd_export_pick', { defaultName });
+  return invoke('pd_export_pick', { defaultName, title: t('pdExportTitle'), filterName: t('pdFile') });
 }
 
 /** @returns {Promise<OpenedFile|null>} 选择要导入的 CSV；取消时为 null。 */
 export function pickImportFile() {
-  return invoke('csv_import_pick');
+  return invoke('csv_import_pick', { title: t('importCsv'), filterName: t('csvFile') });
 }
 
 /**
@@ -44,7 +46,7 @@ export async function readChunk(handle) {
   if (bytes instanceof ArrayBuffer) return bytes;
   // 旧版 IPC 以数字数组返回原始字节。
   if (Array.isArray(bytes)) return new Uint8Array(bytes).buffer;
-  throw new Error('读取文件返回了无效数据');
+  throw new Error('fileInvalidBytes');
 }
 
 /** @param {number} handle */

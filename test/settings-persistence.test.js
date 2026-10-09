@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { t } from '../src/i18n.js';
 
 /**
  * 设置持久化的失败路径。
@@ -52,7 +53,7 @@ globalThis.requestAnimationFrame = (cb) => {
 };
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
-const { state } = await import('../src/state.js');
+const { defaultSettings, state } = await import('../src/state.js');
 const { getStore, loadSettings, saveSettings, resetSettings } = await import('../src/settings.js');
 const { toast } = await import('../src/ui/toast.js');
 
@@ -67,7 +68,7 @@ function installStoreStub() {
   calls = [];
   failures = new Map();
   errorToasts = [];
-  toast.error = (message) => errorToasts.push(String(message));
+  toast.error = (message) => errorToasts.push(String(typeof message === 'function' ? message() : message));
   toast.success = () => {};
   toast.warning = () => {};
   let rid = 0;
@@ -130,7 +131,7 @@ test('a write failure is told to the user exactly once per fault period', async 
     assert.equal(await saveSettings(), false);
     assert.equal(await saveSettings(), false);
     assert.equal(errorToasts.length, 1, '防抖保存会反复触发，刷屏就是新 bug');
-    assert.match(errorToasts[0], /写入|不会被保存/);
+    assert.match(errorToasts[0], /Failed to save|may not be saved/);
 
     failures.delete(SAVE);
     assert.equal(await saveSettings(), true);
@@ -159,7 +160,8 @@ test('resetSettings reports whether the reset actually persisted', async () => {
     });
     assert.equal(await resetSettings(), false, 'UI 回到默认但没落盘，不能算成功');
     assert.equal(state.settings.sampleRate, 250, '默认值仍应落到内存里');
-    assert.match(errorToasts.join('\n'), /写入|不会被保存/);
+    assert.equal(errorToasts.at(-1), t('settingsWriteFailed'));
+    assert.equal(state.settings.language, 'auto');
   } finally {
     console.error = log;
   }
@@ -171,6 +173,40 @@ test('a healthy store produces no failure toasts', async () => {
   assert.equal(await saveSettings(), true);
   assert.equal(await getStore(), await getStore(), '单例仍然复用');
   assert.deepEqual(errorToasts, [], '干净路径不该出现任何错误提示');
+});
+
+test('old and invalid language preferences use auto; valid choices survive a store reload', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    for (const language of [undefined, null, 'fr', 'zh-cn', 12, 'auto', 'zh-CN', 'zh-TW', 'en', 'ja']) {
+      window.__TAURI__.core.invoke = async (command, args = {}) => {
+        if (command === 'plugin:store|get' && args.key === 'appSettings') return [{ language }, true];
+        return invoke(command, args);
+      };
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(
+        state.settings.language,
+        ['auto', 'zh-CN', 'zh-TW', 'en', 'ja'].includes(language) ? language : 'auto',
+      );
+    }
+    window.__TAURI__.core.invoke = invoke;
+    state.settings.language = 'ja';
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings };
+    await loadSettings();
+    assert.equal(state.settings.language, 'ja');
+    assert.equal(await resetSettings(), true);
+    assert.equal(state.settings.language, 'auto');
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
 });
 
 test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {

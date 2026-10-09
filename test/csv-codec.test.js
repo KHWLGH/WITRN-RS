@@ -430,7 +430,7 @@ test('a byte-at-a-time feed still parses, and runaway lines are refused', () => 
   for (const ch of text) parser.push(ch);
   assert.equal(parser.rows, 1);
   assert.equal(parser.finish().columns.voltage.at(0), 5);
-  assert.throws(() => createCsvParser({ fallbackStartTime: START }).push('x'.repeat((1 << 20) + 1)), /行过长/);
+  assert.throws(() => createCsvParser({ fallbackStartTime: START }).push('x'.repeat((1 << 20) + 1)), /csvLineTooLong/);
 });
 
 test('range formatting concatenates to exactly the chunked body', () => {

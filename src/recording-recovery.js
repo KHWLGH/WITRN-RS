@@ -1,6 +1,7 @@
 // @ts-check
 /** Shared crash-recovery list and actions for notifications and the settings page. */
 import { deleteSpoolRecovery, listSpoolRecoveries } from './file-io.js';
+import { errorText, onLanguageChange, t } from './i18n.js';
 import { showView } from './shell.js';
 import { toast } from './ui/toast.js';
 
@@ -22,6 +23,17 @@ function notify() {
   for (const subscriber of subscribers) subscriber(snapshot);
 }
 
+function recoveryText(entry) {
+  return t('recoveryFoundOne', { name: entry.name, size: (entry.size / 1048576).toFixed(1) });
+}
+
+export function refreshRecoveryLanguage() {
+  // Toasts retain their current deferred text, including recovery failures.
+  notify();
+}
+
+onLanguageChange(() => refreshRecoveryLanguage());
+
 /** @param {string} id @param {'recover'|'delete'} action */
 export function recoveryActionDisabled(id, action) {
   return !entries.has(id) || processing.has(id) || (action === 'recover' && recovering);
@@ -38,9 +50,10 @@ export function subscribeRecoveries(subscriber) {
 export async function processRecovery(id, action) {
   if (recoveryActionDisabled(id, action)) return false;
   const entry = /** @type {RecoveryEntry} */ (entries.get(id));
-  /** Keep failures visible even when three persistent notifications occupy every toast slot. @param {string} message */
+  /** Keep failures visible even when three persistent notifications occupy every toast slot.
+   * @param {import('./ui/toast.js').ToastText} message */
   const reportFailure = (message) => {
-    notifications.get(id)?.setText(`${entry.name}\n${message}`);
+    notifications.get(id)?.setText(() => `${entry.name}\n${typeof message === 'function' ? message() : message}`);
     toast.error(message);
   };
   processing.add(id);
@@ -57,10 +70,15 @@ export async function processRecovery(id, action) {
     entries.delete(id);
     notifications.get(id)?.dismiss();
     notifications.delete(id);
-    if (action === 'delete') toast.success('临时记录已删除');
+    if (action === 'delete') toast.success(() => t('recoveryDeleted'));
     return true;
   } catch (error) {
-    reportFailure(`${action === 'recover' ? '恢复' : '删除'}临时记录失败: ${error}`);
+    reportFailure(() =>
+      t('recoveryActionFailed', {
+        action: t(action === 'recover' ? 'recover' : 'delete'),
+        detail: errorText(error),
+      }),
+    );
     return false;
   } finally {
     processing.delete(id);
@@ -77,16 +95,16 @@ export function scanRecoveries() {
       for (const entry of found) {
         entries.set(entry.id, entry);
         if (notifications.has(entry.id)) continue;
-        const handle = toast.warning(`发现未正常结束的记录：${entry.name}（${(entry.size / 1048576).toFixed(1)} MB）`, {
+        const handle = toast.warning(() => recoveryText(entry), {
           duration: 0,
           actions: [
             {
-              label: '恢复',
+              label: () => t('recover'),
               onClick: () => processRecovery(entry.id, 'recover'),
               disabled: () => recoveryActionDisabled(entry.id, 'recover'),
             },
             {
-              label: '删除',
+              label: () => t('delete'),
               onClick: () => processRecovery(entry.id, 'delete'),
               disabled: () => recoveryActionDisabled(entry.id, 'delete'),
             },
@@ -98,7 +116,7 @@ export function scanRecoveries() {
     })
     .catch((error) => {
       scan = null;
-      toast.error(`扫描临时恢复文件失败: ${error}`);
+      toast.error(() => t('recoveryScanFailed', { detail: errorText(error) }));
       throw error;
     });
   return scan;

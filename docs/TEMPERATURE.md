@@ -1,4 +1,6 @@
-← 返回 [README](../README.md)
+[English](en/TEMPERATURE.md) | **简体中文** | [繁體中文](zh-TW/TEMPERATURE.md) | [日本語](ja/TEMPERATURE.md)
+
+← 返回 [README](../README.zh-CN.md)
 
 # 外部温度服务
 
@@ -8,6 +10,19 @@ laPower 的温度可以有两个来源：**仪表自带的温度**，或**通过
 - [协议](#协议)
 - [示例服务器](#示例服务器)
 - [故障排查](#故障排查)
+
+## 语言选择
+
+在「设置 → 外观 → 语言」可选择跟随系统、简体中文、繁體中文、English、日本語。切换立即生效并保存偏好，保留连接、记录、数据、图表范围、筛选和选中报文；重置设置回到自动模式。
+
+Linux 按第一项非空的 LC_ALL → LC_MESSAGES → LANG 检测；Windows／macOS 使用原生系统 locale。原生不可用时采用 WebView 首选语言，最终回退英文。Hans 优先选择简中、Hant 优先选择繁中；否则 CN／SG 和无区域 zh 为简中，TW／HK／MO 为繁中，ja 为日文，其余含 C／POSIX 为英文。统一处理大小写、下划线、编码与修饰后缀；手动选择覆盖自动检测。
+
+```bash
+LANG=en_US.UTF-8 ./laPower.AppImage
+LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
+env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
+```
+
 
 ## 选择温度来源
 
@@ -95,7 +110,7 @@ while True:
 
 **连接超时** —— 检查 IP 与端口；服务器若在另一台机器上，确认它绑定的是 `0.0.0.0` 而不是 `127.0.0.1`，以及防火墙是否放行该端口。
 
-**连上了但温度一直是 `--`** —— 确认服务器发送的是纯数字加换行。带单位（`25.1°C`）、带 JSON 包装、或用 `\r\n` 之外的分隔方式都会被判为无效行。
+**连上了但温度一直是 `--`** —— 确认服务器发送的是纯数字加换行。带单位（`25.1°C`）、带 JSON 包装、或不用换行分隔数值都会被判为无效行。LF 和 CRLF 换行均可使用。
 
 **数值跳变或出现明显错误的值** —— 检查是否有多个数值挤在一行里没有换行符。单行超过 256 字节会被整行丢弃。
 

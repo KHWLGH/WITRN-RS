@@ -1,7 +1,7 @@
 // @ts-check
 /** Host receive clock; never compare received_us with performance.now().
  * @typedef {import('./state.js').DeviceData & {generation:number, seq:number, segment:number, received_us:number, wall_anchor_ms:number, segment_start_us:number, rate_ms:number}} StreamSample
- * @typedef {{generation:number, last_seq:number, error?:string|null}} StreamEnd
+ * @typedef {{generation:number, last_seq:number, error?:string|null, description?:{code:string, params:Record<string,unknown>, detail?:string}}} StreamEnd
  * @typedef {{generation:number, wall_anchor_ms:number}} StreamOpen
  * @typedef {{generation:number, after_seq:number, segment:number, received_us:number, wall_anchor_ms:number, rate_ms:number}} StreamBoundary
  * @typedef {{id:number, generation:number, columns:object, baseSeconds:number, lastX:number|null, first:boolean}} RecordingSegment

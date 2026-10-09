@@ -376,7 +376,7 @@ export function createCsvParser(options) {
         start = end + 1;
       }
       carry = start === 0 ? text : text.slice(start);
-      if (carry.length > MAX_LINE_CHARS) throw new Error('CSV 行过长，不是有效的记录文件');
+      if (carry.length > MAX_LINE_CHARS) throw new Error('csvLineTooLong');
     },
     /** 已解析的数据行数。 */
     get rows() {

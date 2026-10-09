@@ -9,6 +9,7 @@
 
 import { getLastRealtime } from '../data.js';
 import { deviceStream } from '../device-stream.js';
+import { errorText, t } from '../i18n.js';
 import {
   buildTriggerCommand,
   clampPdm,
@@ -16,8 +17,8 @@ import {
   commandNeedsPdm,
   describePdo,
   deviceSupportsControl,
+  LOG_LIMIT,
   pdoToRequestFields,
-  prependLog,
   prependOutcome,
   protocolFields,
   triggerTimeoutMs,
@@ -38,6 +39,13 @@ let pendingReqId = null;
 /** 当前命令已收到的进度行，最新在后。 */
 let progress = '';
 let logText = '';
+/** @type {(() => string)[]} */
+const logEntries = [];
+/** @param {() => string} entry */
+function addLog(entry) {
+  logEntries.unshift(entry);
+  while (logEntries.length > 1 && logEntries.map((item) => item()).join('\n\n').length > LOG_LIMIT) logEntries.pop();
+}
 let requestCounter = 0;
 /** @type {TriggerPdo[]} */
 let pdos = [];
@@ -60,7 +68,7 @@ function select(id) {
 }
 
 function stamp() {
-  return new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  return new Date().toLocaleTimeString(undefined, { hour12: false });
 }
 
 /** 当前连接支持协议控制，且流仍然在。 */
@@ -75,20 +83,24 @@ function viewVisible() {
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
 function renderLog() {
+  logText = logEntries
+    .map((entry) => entry())
+    .join('\n\n')
+    .slice(0, LOG_LIMIT);
   const log = /** @type {HTMLTextAreaElement|null} */ (el('km-log'));
   if (!log) return;
   const live = busy && progress ? `${progress}\n\n${logText}`.trim() : logText;
-  const text = live || (busy ? '等待设备回复…' : '尚无回复');
+  const text = live || (busy ? t('connecting') : t('noData'));
   if (log.value !== text) log.value = text;
   log.classList.toggle('is-live', busy);
   const title = el('km-log-title');
-  if (title) title.textContent = busy ? '返回日志 · 进行中' : '返回日志';
+  if (title) title.textContent = busy ? t('triggerLogInProgress') : t('triggerLogTitle');
 }
 
 function renderPdmStatus() {
   const pill = el('km-pdm-status');
   if (!pill) return;
-  pill.textContent = pdmOpen ? 'PDM · 已打开' : 'PDM · 未打开';
+  pill.textContent = pdmOpen ? t('pdmOpen') : t('pdmClosed');
   pill.classList.toggle('is-open', pdmOpen);
 }
 
@@ -102,13 +114,7 @@ function renderEnabled() {
     const node = /** @type {HTMLButtonElement|HTMLInputElement|HTMLSelectElement|null} */ (el(id));
     if (node) {
       node.disabled = !enabled;
-      node.title = enabled
-        ? ''
-        : !available
-          ? '请先连接支持协议控制的 KM003C 或 KM002C'
-          : busy
-            ? '等待当前命令完成'
-            : '请先打开 PDM';
+      node.title = enabled ? '' : !available ? t('triggerUnsupported') : busy ? t('triggerBusy') : t('triggerNeedPdm');
     }
   };
   for (const id of ['btn-km-pdm-open', 'btn-km-pdm-close', 'btn-km-raw']) enable(id, ready);
@@ -134,10 +140,10 @@ function renderEnabled() {
   if (banner) {
     banner.hidden = available && pdmOpen;
     banner.textContent = available
-      ? '先打开 PDM：除自定义命令外，协议命令都在 PDM 会话中执行。'
+      ? t('triggerNeedPdmBanner')
       : state.isConnected
-        ? '当前设备不支持协议控制，请连接 KM003C 或 KM002C。'
-        : '连接 KM003C 或 KM002C 后可用。';
+        ? t('triggerUnsupportedBanner')
+        : t('triggerAvailableBanner');
   }
   const list = el('km-pdo-list');
   list?.classList.toggle('is-disabled', !withPdm);
@@ -183,7 +189,7 @@ function renderPdos() {
   if (pdos.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'trigger-empty';
-    empty.textContent = '读取 PDO 或插入充电器后显示';
+    empty.textContent = t('triggerPdoEmpty');
     list.replaceChildren(empty);
     return;
   }
@@ -293,7 +299,16 @@ function finish() {
 
 /** @param {TriggerOutcome} outcome */
 function applyOutcome(outcome) {
-  logText = prependOutcome(logText, outcome, progress, stamp());
+  const time = stamp();
+  const finalProgress = progress;
+  addLog(() =>
+    prependOutcome(
+      '',
+      { ...outcome, message: outcome.description ? errorText(outcome.description) : outcome.message },
+      finalProgress,
+      time,
+    ),
+  );
   pdmOpen = outcome.pdm_open;
   if (outcome.pdos.length) {
     pdos = outcome.pdos;
@@ -309,7 +324,7 @@ function applyOutcome(outcome) {
 async function run(cmd) {
   if (busy || !controllable()) return;
   if (commandNeedsPdm(cmd) && !pdmOpen) {
-    toast.warning('请先打开 PDM');
+    toast.warning(() => t('triggerNeedPdmWarning'));
     return;
   }
   const reqId = `km-${Date.now()}-${++requestCounter}`;
@@ -321,7 +336,8 @@ async function run(cmd) {
   // 后端每条命令都有串口超时；这里只防后端事件丢失导致界面永远卡在进行中。
   watchdog = setTimeout(() => {
     if (pendingReqId !== reqId) return;
-    logText = prependLog(logText, `[${stamp()}] ERR\n等待设备回复超时`);
+    const time = stamp();
+    addLog(() => `[${time}] ERR\n${t('triggerTimeout')}`);
     finish();
   }, triggerTimeoutMs(cmd));
   try {
@@ -332,16 +348,21 @@ async function run(cmd) {
     applyOutcome(outcome);
   } catch (error) {
     if (pendingReqId !== reqId) return;
-    logText = prependLog(logText, `[${stamp()}] ERR\n${String(error)}`);
+    const time = stamp();
+    addLog(() => `[${time}] ERR\n${errorText(error)}`);
   }
   finish();
 }
 
 function triggerFromForm() {
   const proto = select('km-proto')?.value ?? 'pd';
-  const built = buildTriggerCommand(proto, currentForm());
+  const form = currentForm();
+  const built = buildTriggerCommand(proto, form);
   if ('error' in built) {
-    toast.warning(built.error);
+    toast.warning(() => {
+      const result = buildTriggerCommand(proto, form);
+      return 'error' in result ? result.error : '';
+    });
     return;
   }
   void run(built.cmd);
@@ -361,11 +382,11 @@ async function copyLog() {
   if (!log || !log.value) return;
   try {
     await navigator.clipboard.writeText(log.value);
-    toast.success('已复制日志');
+    toast.success(() => t('triggerCopied'));
   } catch {
     log.focus();
     log.select();
-    toast.info('已选中日志，请使用系统复制');
+    toast.info(() => t('triggerSelected'));
   }
 }
 
@@ -387,10 +408,15 @@ export function handleTriggerProgress(payload) {
  * @param {unknown} payload
  */
 export function handlePdmState(payload) {
-  const p = /** @type {{ generation?: number, open?: boolean, message?: string }} */ (payload ?? {});
+  const p = /** @type {{ generation?: number, open?: boolean, message?: string, description?: unknown }} */ (
+    payload ?? {}
+  );
   if (p.generation !== deviceStream.generation) return;
   pdmOpen = p.open === true;
-  if (p.message) logText = prependLog(logText, `[${stamp()}] ${p.message}`);
+  if (p.description || p.message) {
+    const time = stamp();
+    addLog(() => `[${time}] ${errorText(p.description ?? p.message)}`);
+  }
   if (initialized) renderAll();
 }
 
@@ -442,7 +468,7 @@ export function initTriggerView() {
   click('btn-km-pd-cmd', () => {
     const cmd = Number(input('km-pd-cmd')?.value);
     if (!Number.isInteger(cmd) || cmd < 0 || cmd > 255) {
-      toast.warning('PD cmd 应为 0–255 的整数');
+      toast.warning(() => t('triggerPdCmdRange'));
       return;
     }
     void run({ type: 'pd_cmd', cmd });
@@ -451,7 +477,7 @@ export function initTriggerView() {
   click('btn-km-pd-data', () => {
     const hex = cleanHex(input('km-pd-data')?.value ?? '');
     if (!hex) {
-      toast.warning('pd data 需要偶数位十六进制，例如 018F1401A000FF');
+      toast.warning(() => t('triggerPdDataHex'));
       return;
     }
     void run({ type: 'pd_data', hex });
@@ -463,7 +489,7 @@ export function initTriggerView() {
   click('btn-km-ufcs-cmd', () => {
     const cmd = Number(input('km-ufcs-cmd')?.value);
     if (!Number.isInteger(cmd) || cmd < 0) {
-      toast.warning('UFCS cmd 应为非负整数');
+      toast.warning(() => t('triggerUfcsCmdNonnegative'));
       return;
     }
     void run({ type: 'ufcs_cmd', cmd });
@@ -478,6 +504,7 @@ export function initTriggerView() {
   click('btn-km-log-copy', () => void copyLog());
   click('btn-km-log-clear', () => {
     logText = '';
+    logEntries.length = 0;
     renderLog();
   });
 

@@ -27,6 +27,7 @@ deviceStream.configure({
   onBatch: () => spoolRowsAppended(),
 });
 
+import { t } from './i18n.js';
 import { describeLimit, formatPoints, pointsForLimit, remainingInfo, WARN_FRACTION } from './recording-limit.js';
 import {
   configureSpool,
@@ -164,7 +165,13 @@ export function updateDurationDisplay() {
 
 export function updateSampleRateStatus() {
   const el = document.getElementById('status-sample-rate');
-  setTextIfChanged(el, formatSampleRateLabel(state.settings.sampleRate));
+  const intervalMs = state.settings.sampleRate;
+  const perSecond = Number((1000 / intervalMs).toFixed(2));
+  const value =
+    intervalMs > 1000
+      ? t('secondsPerSample', { value: perSecond, seconds: Number((intervalMs / 1000).toFixed(2)) })
+      : t('samplesPerSecond', { value: perSecond });
+  setTextIfChanged(el, value || formatSampleRateLabel(intervalMs));
   refreshRecordLimitUI();
 }
 
@@ -212,14 +219,14 @@ function admitRecordedPoint(cols) {
   if (used < limit) {
     if (used >= limit * WARN_FRACTION && limitWarnedFor !== cols) {
       limitWarnedFor = cols;
-      toast.warning(`已用单次记录上限的 90%（${formatPoints(used)} / ${formatPoints(limit)}），达到上限时会自动暂停`);
+      toast.warning(() => t('limitWarning', { used: formatPoints(used), limit: formatPoints(limit) }));
     }
     return true;
   }
   if (limitReachedFor !== cols) {
     limitReachedFor = cols;
     void stopRecording().catch(() => {});
-    toast.warning(`已达到单次记录上限（${formatPoints(limit)}），记录已自动暂停。导出或清空后可继续记录。`, {
+    toast.warning(() => t('limitReached', { limit: formatPoints(limit) }), {
       duration: 0,
     });
   }
@@ -530,7 +537,7 @@ function paintEmptyRangeLabels() {
   const el3 = document.getElementById('range-duration');
   setTextIfChanged(el1, '--');
   setTextIfChanged(el2, '--');
-  setTextIfChanged(el3, '无数据');
+  setTextIfChanged(el3, t('noDataRange'));
 }
 
 /**
@@ -577,7 +584,7 @@ function writeRangeLabels(xs) {
   const points = endIndex - startIndex + 1;
   const durationSec = Math.max(0, endSeconds - startSeconds);
   const el3 = document.getElementById('range-duration');
-  setTextIfChanged(el3, `时长: ${formatRelativeHMS(durationSec)} (${points}点)`);
+  setTextIfChanged(el3, t('durationPoints', { duration: formatRelativeHMS(durationSec), points }));
   if (state.settings.statsRange) markStaleRangeStatsPending();
 }
 
@@ -653,7 +660,7 @@ export function updateRealtimeDisplay(data) {
     if (showDir) {
       dirEl.classList?.toggle('fi-arrow-right', data.current > 0);
       dirEl.classList?.toggle('fi-arrow-left', data.current < 0);
-      const title = data.current > 0 ? '正向电流' : '反向电流';
+      const title = data.current > 0 ? t('forwardCurrent') : t('reverseCurrent');
       if (dirEl.title !== title) dirEl.title = title;
     }
   }
@@ -957,8 +964,12 @@ function labelRangeSnapshot(result, updating) {
   setTextIfChanged(
     label,
     result && xs
-      ? `统计范围 ${formatRelativeHMS(xs.valueAt(result.startIndex))} – ${formatRelativeHMS(xs.valueAt(result.endIndex))}${updating ? '（更新中）' : ''}`
-      : '正在计算所选范围…',
+      ? t('rangeSnapshot', {
+          start: formatRelativeHMS(xs.valueAt(result.startIndex)),
+          end: formatRelativeHMS(xs.valueAt(result.endIndex)),
+          updating: updating ? t('updating') : '',
+        })
+      : t('calculatingRange'),
   );
 }
 
@@ -1083,7 +1094,7 @@ export function updateStatsDisplay() {
   /** 「(N点)」标签仍是原始行数，这里说明均值实际只折入了有限值。 */
   const setSkipTip = (id, count) => {
     const el = document.getElementById(id);
-    const title = count > 0 ? `${count} 个样本值缺失，未计入` : '';
+    const title = count > 0 ? t('missingSamples', { count }) : '';
     if (el && el.title !== title) el.title = title;
   };
   setSkipTip('avg-voltage', skipped.voltage);
@@ -1368,7 +1379,7 @@ export async function startRecording() {
   }
   if (state.isRecording || recordingStartLock) return;
   if (state.chartSeries.x.length >= recordLimitPoints()) {
-    toast.warning('已达到单次记录上限，请先导出或清空再继续记录');
+    toast.warning(() => t('limitContinue'));
     return;
   }
 
@@ -1400,7 +1411,7 @@ export async function startRecording() {
     state.autoPauseSettings.triggerStartTime = null;
 
     const el = document.getElementById('record-status');
-    if (el) el.textContent = '记录中...';
+    if (el) el.textContent = t('recording');
 
     spoolRecordingStarted();
     startDurationTicker();
@@ -1440,7 +1451,7 @@ export function stopRecording({ discard = false } = {}) {
   void paused.then(spoolRecordingPaused, spoolRecordingPaused);
 
   const el = document.getElementById('record-status');
-  if (el) el.textContent = '停止';
+  if (el) el.textContent = t('stopRecording');
 
   stopDurationTicker();
 

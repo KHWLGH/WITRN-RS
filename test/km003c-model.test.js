@@ -46,7 +46,7 @@ test('each protocol shows only the fields its command uses', () => {
       ['bc', false, false, false, false, false],
     ],
   );
-  assert.equal(protocolFields('ufcs').positionLabel, '请求序号');
+  assert.equal(protocolFields('ufcs').positionLabel, 'Request position');
   assert.deepEqual(protocolFields('qc').voltChoices, ['5V', '9V', '12V', '20V']);
   assert.deepEqual(protocolFields('afc').voltChoices, ['5V', '9V', '12V']);
 });
@@ -66,11 +66,11 @@ test('the form builds the exact command JSON the backend deserializes', () => {
 });
 
 test('invalid numbers are refused with a reason instead of being sent', () => {
-  assert.match(/** @type {any} */ (buildTriggerCommand('pd', form({ position: 0 }))).error, /PDO 序号/);
-  assert.match(/** @type {any} */ (buildTriggerCommand('ufcs', form({ position: 1.5 }))).error, /请求序号/);
-  assert.match(/** @type {any} */ (buildTriggerCommand('scp', form({ voltMv: 70000 }))).error, /电压/);
-  assert.match(/** @type {any} */ (buildTriggerCommand('pd', form({ curMa: Number.NaN }))).error, /电流/);
-  assert.match(/** @type {any} */ (buildTriggerCommand('fcp', form({ volt: '20V' }))).error, /电压档位/);
+  assert.match(/** @type {any} */ (buildTriggerCommand('pd', form({ position: 0 }))).error, /PDO position/);
+  assert.match(/** @type {any} */ (buildTriggerCommand('ufcs', form({ position: 1.5 }))).error, /Request position/);
+  assert.match(/** @type {any} */ (buildTriggerCommand('scp', form({ voltMv: 70000 }))).error, /Voltage/);
+  assert.match(/** @type {any} */ (buildTriggerCommand('pd', form({ curMa: Number.NaN }))).error, /Current/);
+  assert.match(/** @type {any} */ (buildTriggerCommand('fcp', form({ volt: '20V' }))).error, /Select a voltage/);
   // Fields a protocol does not use are not validated.
   assert.ok('cmd' in buildTriggerCommand('qc', form({ position: 0, curMa: -1 })));
 });
@@ -94,12 +94,12 @@ test('scans get the long waits, and PDM-free commands are exactly open/close/raw
 test('outcome heads distinguish scans, successes and failures', () => {
   assert.equal(outcomeHead(outcome()), 'OK');
   assert.equal(outcomeHead(outcome({ ok: false, message: 'fail' })), 'ERR');
-  assert.equal(outcomeHead(outcome({ protocols: [{ id: 'pd', label: 'PD' }] })), '检测完成');
-  assert.equal(outcomeHead(outcome({ message: 'QC2.0 : OK\nFCP : FAIL' })), '检测完成');
+  assert.equal(outcomeHead(outcome({ protocols: [{ id: 'pd', label: 'PD' }] })), 'Detection complete');
+  assert.equal(outcomeHead(outcome({ message: 'QC2.0 : OK\nFCP : FAIL' })), 'Detection complete');
 });
 
 test('the log shows streamed progress when the final reply is empty, newest first, bounded', () => {
-  let log = prependOutcome('', outcome({ message: '(无回复)' }), 'PD : OK\nQC2.0 : OK', '10:00:00');
+  let log = prependOutcome('', outcome({ message: '' }), 'PD : OK\nQC2.0 : OK', '10:00:00');
   assert.equal(log, '[10:00:00] OK\nPD : OK\nQC2.0 : OK');
   log = prependOutcome(
     log,
@@ -139,7 +139,7 @@ test('PDO rows read like the meter and fill the request form sensibly', () => {
     label: '',
     programmable: true,
   };
-  assert.deepEqual(describePdo(fixed), { position: '#2', kind: '固定', voltage: '9.00 V', current: '3.00 A' });
+  assert.deepEqual(describePdo(fixed), { position: '#2', kind: 'Fixed', voltage: '9.00 V', current: '3.00 A' });
   assert.deepEqual(describePdo(pps), { position: '#4', kind: 'PPS', voltage: '3.30–11.00 V', current: '5.00 A' });
   assert.equal(describePdo(battery).current, '—');
   assert.deepEqual(pdoToRequestFields(fixed, form({ voltMv: 5000 })), {

@@ -69,6 +69,7 @@ struct PdmState {
     generation: u64,
     open: bool,
     message: &'static str,
+    description: crate::app_error::AppError,
 }
 
 /// Every POWER-Z meter on the bus. Enumeration problems are logged, never fatal: they
@@ -106,6 +107,8 @@ pub(crate) fn device_infos() -> Vec<DeviceInfo> {
                 product: device.product,
                 model_name,
                 display_name,
+                model_description: None,
+                interface_description: None,
                 interface_number: i32::from(bulk::INTERFACE_VENDOR),
                 usage_page: 0,
                 family: DeviceFamily::Km003c,
@@ -228,6 +231,7 @@ fn trigger_loop(
                             generation,
                             open: false,
                             message: "PDM 已断开，请重新打开",
+                            description: crate::app_error::AppError::new("triggerNeedPdm", ""),
                         },
                     );
                 }
@@ -257,35 +261,54 @@ pub(crate) async fn km003c_trigger(
     req_id: String,
     cmd: TriggerCommand,
     state: State<'_, AppState>,
-) -> Result<TriggerOutcome, String> {
-    let (tx, busy, cancel) = {
-        let slot = state.km003c.lock().map_err(|_| "KM003C 控制状态已损坏")?;
-        let control = slot
-            .as_ref()
-            .filter(|control| control.generation == generation)
-            .ok_or("设备未连接或已更换")?;
-        (
-            control.tx.clone(),
-            Arc::clone(&control.busy),
-            Arc::clone(&control.cancel),
-        )
-    };
-    if busy.swap(true, Ordering::AcqRel) {
-        return Err("上一条协议命令仍在执行".into());
+) -> Result<serde_json::Value, crate::app_error::AppError> {
+    let result: Result<TriggerOutcome, String> = async {
+        let (tx, busy, cancel) = {
+            let slot = state.km003c.lock().map_err(|_| "KM003C 控制状态已损坏")?;
+            let control = slot
+                .as_ref()
+                .filter(|control| control.generation == generation)
+                .ok_or("设备未连接或已更换")?;
+            (
+                control.tx.clone(),
+                Arc::clone(&control.busy),
+                Arc::clone(&control.cancel),
+            )
+        };
+        if busy.swap(true, Ordering::AcqRel) {
+            return Err("上一条协议命令仍在执行".into());
+        }
+        let guard = BusyGuard(busy);
+        // Cleared before sending: a cancel that races the dequeue still applies to this command.
+        cancel.store(false, Ordering::Release);
+        let (reply, outcome) = mpsc::channel();
+        tx.send(TriggerMsg::Run { cmd, req_id, reply })
+            .map_err(|_| "设备未连接")?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let _guard = guard;
+            outcome.recv()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|_| "协议控制线程已退出".to_string())
     }
-    let guard = BusyGuard(busy);
-    // Cleared before sending: a cancel that races the dequeue still applies to this command.
-    cancel.store(false, Ordering::Release);
-    let (reply, outcome) = mpsc::channel();
-    tx.send(TriggerMsg::Run { cmd, req_id, reply })
-        .map_err(|_| "设备未连接")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
-        outcome.recv()
-    })
-    .await
-    .map_err(|error| error.to_string())?
-    .map_err(|_| "协议控制线程已退出".to_string())
+    .await;
+    result
+        .map(|outcome| {
+            let mut value = serde_json::to_value(&outcome).expect("serializable trigger outcome");
+            if !outcome.ok {
+                let code = match outcome.code.as_deref() {
+                    Some("pdm_required") => "triggerNeedPdm",
+                    Some("cancelled") => "triggerCancelled",
+                    _ => "operationFailed",
+                };
+                value["description"] =
+                    serde_json::to_value(crate::app_error::AppError::new(code, outcome.message))
+                        .expect("serializable message");
+            }
+            value
+        })
+        .map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// Abort the command in flight; its reply arrives with code `cancelled`.
@@ -293,15 +316,18 @@ pub(crate) async fn km003c_trigger(
 pub(crate) fn km003c_cancel_trigger(
     generation: u64,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    let slot = state.km003c.lock().map_err(|_| "KM003C 控制状态已损坏")?;
-    if let Some(control) = slot
-        .as_ref()
-        .filter(|control| control.generation == generation)
-    {
-        control.cancel.store(true, Ordering::Release);
-    }
-    Ok(())
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let slot = state.km003c.lock().map_err(|_| "KM003C 控制状态已损坏")?;
+        if let Some(control) = slot
+            .as_ref()
+            .filter(|control| control.generation == generation)
+        {
+            control.cancel.store(true, Ordering::Release);
+        }
+        Ok(())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 struct Km003cSource {
@@ -505,7 +531,8 @@ impl Km003cSource {
                 self.sample_rate.store(10, Ordering::Release);
                 let _ = self.app.emit(
                     "km003c-high-rate",
-                    serde_json::json!({ "ok": false, "message": error }),
+                    serde_json::json!({ "ok": false, "message": error,
+                        "description": crate::app_error::AppError::new("backendFailure", error.clone()) }),
                 );
                 return self.read_average(out);
             }
@@ -638,7 +665,8 @@ impl Km003cSource {
         self.sample_rate.store(10, Ordering::Release);
         let _ = self.app.emit(
             "km003c-high-rate",
-            serde_json::json!({ "ok": false, "message": message }),
+            serde_json::json!({ "ok": false, "message": message,
+                "description": crate::app_error::AppError::new("backendFailure", message.clone()) }),
         );
     }
 

@@ -74,7 +74,7 @@ const { toast } = await import('../src/ui/toast.js');
 
 const START = new Date(2026, 8, 28, 14, 30, 0).getTime();
 const toasts = [];
-toast.error = (message) => toasts.push(String(message));
+toast.error = (message) => toasts.push(String(typeof message === 'function' ? message() : message));
 let pauses = 0;
 spool.configureSpool({ onFailure: () => pauses++ });
 
@@ -189,7 +189,7 @@ test('a failed write pauses recording once and tells the user the data is still 
   }
   assert.equal(pauses, 1);
   assert.equal(toasts.length, 1);
-  assert.match(toasts[0], /磁盘已满.*数据仍在内存中/);
+  assert.match(toasts[0], /磁盘已满.*data remains in memory/);
   assert.equal(spool.spoolPath(), null);
 });
 

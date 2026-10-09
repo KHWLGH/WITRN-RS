@@ -7,6 +7,7 @@ import {
   handleMonitorHidden,
   handleMonitorShown,
   initChart,
+  refreshChartLanguage,
   refreshChartScales,
   scheduleChartUpdate,
   setRangeDragging,
@@ -45,8 +46,9 @@ import {
 } from './device.js';
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
+import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
 import { clampLimitMb } from './recording-limit.js';
-import { scanRecoveries } from './recording-recovery.js';
+import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
   applyRealtimePanelWidth,
@@ -67,14 +69,20 @@ import {
   updateTempUIVisibility,
 } from './temperature.js';
 import { applyThemePreference } from './theme.js';
-import { initCommandOverflow, syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
+import {
+  initCommandOverflow,
+  refreshCommandOverflowLanguage,
+  syncAutoPauseUI,
+  syncFollowLinkageUI,
+  syncTempUI,
+} from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
 import { createMenu } from './ui/menu.js';
 import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
-import { applyUiScale, clampUiScalePercent, previewUiScalePercent } from './ui-scale.js';
+import { applyUiScale, clampUiScalePercent, fillUiScaleHint, previewUiScalePercent } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
 import {
   applyPdSplitLayout,
@@ -82,6 +90,7 @@ import {
   ingestPdBatch,
   initPdView,
   markPdDisconnect,
+  refreshPdLanguage,
   syncPdView,
 } from './views/pd.js';
 import { initSettingsView } from './views/settings-view.js';
@@ -96,6 +105,9 @@ import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+
+/** @type {{ setLabel: (id: string, label: string) => void }|null} */
+let exportMenu = null;
 
 // ─── Close confirmation ──────────────────────────────────────────────────────
 
@@ -117,7 +129,7 @@ async function confirmAndExit() {
   if (__isClosingWindow || __closeConfirmOpen) return;
 
   __closeConfirmOpen = true;
-  const confirmed = await ask('确定要退出吗？', { title: '确认退出', kind: 'warning' });
+  const confirmed = await ask(() => t('exitPrompt'), { title: () => t('confirmExit'), kind: 'warning' });
   __closeConfirmOpen = false;
   if (!confirmed) return;
   __isClosingWindow = true;
@@ -131,7 +143,7 @@ async function confirmAndExit() {
     // 退出失败必须复位，否则窗口再也关不掉；只写 console 的话用户看到的是「点了没反应」。
     console.error('退出失败:', e);
     __isClosingWindow = false;
-    toast.error(`退出失败: ${e}`);
+    toast.error(() => t('operationFailed', { detail: errorText(e) }));
   }
 }
 
@@ -503,9 +515,9 @@ function setupControls() {
   // getElementById('export-with-temp') 切换其可见性
   const exportBtn = document.getElementById('btn-export');
   if (exportBtn) {
-    createMenu(exportBtn, [
-      { id: 'export-no-temp', label: '不带温度', onSelect: () => exportCSV(false) },
-      { id: 'export-with-temp', label: '带温度', onSelect: () => exportCSV(true) },
+    exportMenu = createMenu(exportBtn, [
+      { id: 'export-no-temp', label: t('withoutTemperature'), onSelect: () => exportCSV(false) },
+      { id: 'export-with-temp', label: t('withTemperature'), onSelect: () => exportCSV(true) },
     ]);
   }
 
@@ -517,10 +529,10 @@ function setupControls() {
   initMonitorSplitter();
 
   btn('btn-reset-settings', async () => {
-    const yes = await ask('确定要重置所有配置为默认值吗？', { title: '确认重置配置', kind: 'warning' });
+    const yes = await ask(() => t('resetPrompt'), { title: () => t('confirmReset'), kind: 'warning' });
     if (!yes) return;
     // 只有真的落盘才算「已恢复默认」；写盘失败由 settings.js 说明，这里不再报成功。
-    if (await resetSettings()) toast.success('已恢复默认设置');
+    if (await resetSettings()) toast.success(() => t('resetAll'));
     applyPdSplitLayout();
   });
 
@@ -542,6 +554,41 @@ function setupControls() {
   });
   themeSystem?.addEventListener('change', () => {
     if (themeSystem.checked) applyThemeChoice('system');
+  });
+
+  const languageSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('language-select'));
+  languageSelect?.addEventListener('change', () => {
+    const preference = normalizeLanguagePreference(languageSelect.value);
+    state.settings.language = preference;
+    void applyLanguage(preference).then(() => {
+      debouncedSaveSettings();
+    });
+  });
+
+  // Language changes keep the running device/recording session intact; refresh only
+  // the views whose text is derived from current state.
+  onLanguageChange(() => {
+    fillUiScaleHint();
+    const recordStatus = document.getElementById('record-status');
+    if (recordStatus) recordStatus.textContent = t(state.isRecording ? 'recording' : 'stopRecording');
+    exportMenu?.setLabel('export-no-temp', t('withoutTemperature'));
+    exportMenu?.setLabel('export-with-temp', t('withTemperature'));
+    refreshCommandOverflowLanguage();
+    refreshChartLanguage();
+    updateSampleRateStatus();
+    updateDurationDisplay();
+    refreshRecordButton();
+    updateStatsDisplay();
+    updateEnergyDisplay();
+    syncDeviceCapabilities();
+    syncTempUI(state.isTempConnected);
+    syncTempSourceUI();
+    refreshRecoveryLanguage();
+    syncAutoPauseUI(state.autoPauseSettings.enabled);
+    syncFollowLinkageUI(state.settings.pdFollowRecording);
+    syncTriggerView();
+    refreshPdLanguage();
+    document.dispatchEvent(new CustomEvent('witrn:language-changed'));
   });
 
   // 窗口风格只更新 CSS 属性；动作始终由真实 OS 决定。
@@ -633,12 +680,10 @@ function setupControls() {
     // 跟随记录开启时两侧同生共死：这里连带清掉 PD 缓冲，PD 侧的清空同样连带重置这里。
     // 两边各自只调用对方的无级联版本，不会互相递归。
     const follow = state.settings.pdFollowRecording;
-    const yes = await ask(
-      follow
-        ? '确定要清空图表并重置所有统计数据吗？\n跟随记录已开启，PD 分析已捕获的报文也会一并清空。'
-        : '确定要清空图表并重置所有统计数据吗？',
-      { title: '确认重置', kind: 'error' },
-    );
+    const yes = await ask(() => (follow ? t('clearChartLinkedPrompt') : t('clearChartPrompt')), {
+      title: () => t('confirmReset'),
+      kind: 'error',
+    });
     if (!yes) return;
     clearAndResetStats();
     if (follow) clearPdEntries();
@@ -671,7 +716,7 @@ function setupControls() {
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         input.value = String(state.settings.tempPort);
         input.classList.add('input-invalid');
-        toast.warning('请输入 1 到 65535 之间的有效端口');
+        toast.warning(() => t('enterValidPort'));
         return;
       }
       input.classList.remove('input-invalid');
@@ -847,20 +892,26 @@ function setupShell() {
     handleMonitorHidden();
     suspendMonitorDisplay();
   };
-  registerView({ id: 'monitor', icon: 'pulse', label: '监控', onShow: showMonitor, onHide: hideMonitor });
+  registerView({ id: 'monitor', icon: 'pulse', label: t('monitor'), onShow: showMonitor, onHide: hideMonitor });
   const visibilityChanged = () => {
     if (state.windowVisible && !document.hidden) refreshMonitorDisplay();
     else hideMonitor();
   };
   document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('witrn:window-visibility', visibilityChanged);
-  registerView({ id: 'pd', icon: 'flash', label: 'PD 分析', init: initPdView, onShow: syncPdView });
-  registerView({ id: 'trigger', icon: 'options', label: '协议控制', init: initTriggerView, onShow: syncTriggerView });
+  registerView({ id: 'pd', icon: 'flash', label: t('pdWorkspace'), init: initPdView, onShow: syncPdView });
+  registerView({
+    id: 'trigger',
+    icon: 'options',
+    label: t('protocolWorkspace'),
+    init: initTriggerView,
+    onShow: syncTriggerView,
+  });
   // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
   registerView({
     id: 'settings',
     icon: 'settings',
-    label: '设置',
+    label: t('settings'),
     init: initSettingsView,
   });
 
@@ -870,9 +921,9 @@ function setupShell() {
     const bar = initTabBar(
       tabsContainer,
       [
-        { id: 'monitor', icon: 'pulse', label: '监控' },
-        { id: 'pd', icon: 'flash', label: 'PD 分析' },
-        { id: 'trigger', icon: 'options', label: '协议控制' },
+        { id: 'monitor', icon: 'pulse', label: t('monitor') },
+        { id: 'pd', icon: 'flash', label: t('pdWorkspace') },
+        { id: 'trigger', icon: 'options', label: t('protocolWorkspace') },
       ],
       showView,
     );
@@ -919,18 +970,23 @@ async function setupEventListener() {
     listen('km003c-pdm-state', (/** @type {{ payload: unknown }} */ event) => {
       handlePdmState(event.payload);
     }),
-    listen('km003c-high-rate', (/** @type {{ payload: { ok?: boolean; message?: string } }} */ event) => {
-      if (event.payload?.ok === false) {
-        void applySampleRate(10);
-        toast.warning(`POWER-Z 高速采样不可用，已退回 100 次/秒：${event.payload.message ?? ''}`);
-      }
-    }),
+    listen(
+      'km003c-high-rate',
+      (/** @type {{ payload: { ok?: boolean; message?: string; description?: unknown } }} */ event) => {
+        if (event.payload?.ok === false) {
+          void applySampleRate(10);
+          toast.warning(() =>
+            t('highRateFallback', { detail: errorText(event.payload.description ?? event.payload.message ?? '') }),
+          );
+        }
+      },
+    ),
 
     listen('device-disconnected', async () => {
       if (state.isConnected) {
         await disconnectDevice();
         markPdDisconnect();
-        toast.warning('设备连接已断开');
+        toast.warning(() => t('deviceConnectionLost'));
       }
     }),
 
@@ -971,11 +1027,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   setConnectionReady(false);
   const platformReady = probePlatform();
   const settingsReady = loadSettings();
+  const languageReady = settingsReady.then(() => initI18n());
   const closeReady = setupCloseConfirm()
     .then(() => true)
     .catch((error) => {
       console.error('关闭监听初始化失败:', error);
-      toast.error(`关闭监听初始化失败: ${error}`);
+      toast.error(() => t('operationFailed', { detail: errorText(error) }));
       return false;
     });
   const listenersReady = setupEventListener()
@@ -985,21 +1042,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     })
     .catch((error) => {
       console.error('设备监听初始化失败:', error);
-      toast.error(`设备监听初始化失败，无法连接设备: ${error}`);
+      toast.error(() => t('operationFailed', { detail: errorText(error) }));
       return false;
     });
   const devicesReady = refreshDeviceList().then(() => {
     window.__WITRN_BOOT__?.mark('devicesScanned');
   });
 
-  // Start IPC before constructing dropdowns; setting reads await replies, so interceptors are
-  // still installed in this synchronous turn before loadSettings can echo select.value.
+  await Promise.all([platformReady, settingsReady, languageReady]);
+  // Native selects retain loaded values; enhance them only after locale resolution.
   enhanceSelects();
-  await Promise.all([platformReady, settingsReady]);
   initChart();
   setupChartToggles();
   setupControls();
   setupShell();
+  fillUiScaleHint();
   applyPdSplitLayout();
   window.addEventListener('resize', applyPdSplitLayout);
   updateSampleRateStatus();

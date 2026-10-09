@@ -34,6 +34,7 @@ import { ChartFillPolicy, ChartRenderPolicy, liveChartIntervalMs } from './chart
 import { wheelZoomFactor } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
+import { getResolvedLanguage, t } from './i18n.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
@@ -46,8 +47,14 @@ import { formatRelativeHMS, hexToRgba } from './utils.js';
  * ⚠ 只允许追加，不允许重排：seriesMax[3]（功率）是导航图的量程来源。
  */
 const FIELDS = ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'];
-const LABELS = ['电压', '电流', '功率', '温度', 'D+', 'D-', 'CC1', 'CC2'];
+const LABEL_KEYS = ['voltage', 'current', 'power', 'temperature', 'dp', 'dn', 'cc1', 'cc2'];
 const UNITS = [' V', ' A', ' W', ' °C', ' V', ' V', ' V', ' V'];
+function chartLabel(index) {
+  return t(LABEL_KEYS[index]);
+}
+function chartAxisTitle(key, unit) {
+  return `${t(key)} (${unit})`;
+}
 /** 各 series 挂靠的 scale：D+/D-/CC1/CC2 复用电压 scale（不新增轴）。 */
 const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
@@ -1849,7 +1856,12 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
     u.ctx.font = axis.font[0];
     size += u.ctx.measureText(longest).width / (uPlot.pxRatio || devicePixelRatio || 1);
   }
-  return Math.ceil(Math.max(size, 28));
+  let titleSize = 0;
+  if (axis.axisTitle) {
+    u.ctx.font = Array.isArray(axis.labelFont) ? axis.labelFont[0] : `12px ${CHART_FONT}`;
+    titleSize = u.ctx.measureText(axis.axisTitle).width / (uPlot.pxRatio || devicePixelRatio || 1) + 8;
+  }
+  return Math.ceil(Math.max(size, titleSize, 28));
 }
 
 /**
@@ -2098,10 +2110,31 @@ function renderLegend() {
     dot.className = 'chart-legend-dot';
     dot.style.background = /** @type {any} */ (chartTheme)[FIELDS[si - 1]];
     item.appendChild(dot);
-    item.appendChild(document.createTextNode(LABELS[si - 1]));
+    item.appendChild(document.createTextNode(chartLabel(si - 1)));
     fragment.appendChild(item);
   }
   el.replaceChildren(fragment);
+}
+
+/** Refresh chart labels after a language change without replacing chart data or state. */
+export function refreshChartLanguage() {
+  const chart = state.mainChart;
+  if (!chart) return;
+  for (let i = 0; i < FIELDS.length; i++) {
+    if (chart.series[i + 1]) chart.series[i + 1].label = chartLabel(i);
+  }
+  const axes = chart.axes ?? [];
+  const titles = [
+    chartAxisTitle('voltage', 'V'),
+    chartAxisTitle('current', 'A'),
+    chartAxisTitle('power', 'W'),
+    chartAxisTitle('temperature', '°C'),
+  ];
+  for (let i = 0; i < titles.length; i++) {
+    if (axes[i + 1]) axes[i + 1].axisTitle = titles[i];
+  }
+  renderLegend();
+  chart.redraw?.(true, true);
 }
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
@@ -2176,6 +2209,7 @@ function tooltipPlugin() {
   let lastGen = -1;
   let lastMask = -1;
   let lastTheme = -1;
+  let lastLanguage = '';
   let visibleRows = 0;
   let shown = false;
   let sizeDirty = true;
@@ -2211,7 +2245,14 @@ function tooltipPlugin() {
     for (let i = 0; i < FIELDS.length; i++) {
       if (u.series[i + 1]?.show) mask |= 1 << i;
     }
-    if (realIdx !== lastIndex || dataGen !== lastGen || mask !== lastMask || tooltipThemeGen !== lastTheme) {
+    const language = getResolvedLanguage();
+    if (
+      realIdx !== lastIndex ||
+      dataGen !== lastGen ||
+      mask !== lastMask ||
+      tooltipThemeGen !== lastTheme ||
+      language !== lastLanguage
+    ) {
       const heading = formatRelativeHMS(Number(xVal));
       if (title.textContent !== heading) title.textContent = heading;
       visibleRows = 0;
@@ -2223,7 +2264,7 @@ function tooltipPlugin() {
         const display = show ? '' : 'none';
         if (row.style.display !== display) row.style.display = display;
         if (show) {
-          const label = `${LABELS[i]}: ${Number(value).toFixed(3)}${UNITS[i]}`;
+          const label = `${chartLabel(i)}: ${Number(value).toFixed(3)}${UNITS[i]}`;
           if (text.nodeValue !== label) text.nodeValue = label;
           visibleRows++;
         }
@@ -2233,6 +2274,7 @@ function tooltipPlugin() {
       lastGen = dataGen;
       lastMask = mask;
       lastTheme = tooltipThemeGen;
+      lastLanguage = language;
       sizeDirty = true;
     }
     if (visibleRows === 0) {
@@ -2470,7 +2512,7 @@ export function initChart() {
     series: [
       {},
       ...FIELDS.map((field, i) => ({
-        label: LABELS[i],
+        label: chartLabel(i),
         scale: SERIES_SCALES[i],
         auto: false,
         stroke: () => /** @type {any} */ (chartTheme)[field],
@@ -2498,10 +2540,10 @@ export function initChart() {
         grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
         ticks: { show: true, stroke: () => chartTheme.grid, width: 1, size: 8 },
       },
-      mkYAxis('voltage', '电压 (V)', () => chartTheme.voltage, 3),
-      mkYAxis('current', '电流 (A)', () => chartTheme.current, 3),
-      mkYAxis('power', '功率 (W)', () => chartTheme.power, 1),
-      mkYAxis('temp', '温度 (°C)', () => chartTheme.tempAxis, 1),
+      mkYAxis('voltage', chartAxisTitle('voltage', 'V'), () => chartTheme.voltage, 3),
+      mkYAxis('current', chartAxisTitle('current', 'A'), () => chartTheme.current, 3),
+      mkYAxis('power', chartAxisTitle('power', 'W'), () => chartTheme.power, 1),
+      mkYAxis('temp', chartAxisTitle('temperature', '°C'), () => chartTheme.tempAxis, 1),
     ],
     hooks: {
       drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],

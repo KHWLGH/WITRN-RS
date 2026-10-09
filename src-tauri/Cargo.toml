@@ -46,6 +46,7 @@ tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
+sys-locale.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the process-wide policy once during hidapi initialization, before any opens.

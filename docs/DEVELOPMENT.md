@@ -1,4 +1,6 @@
-← 返回 [README](../README.md)
+[English](en/DEVELOPMENT.md) | **简体中文** | [繁體中文](zh-TW/DEVELOPMENT.md) | [日本語](ja/DEVELOPMENT.md)
+
+← 返回 [README](../README.zh-CN.md)
 
 # 开发与构建
 
@@ -13,6 +15,38 @@
 - [Linux 自行编译](#linux-自行编译)
 - [macOS 自行编译](#macos-自行编译)
 - [参与贡献](#参与贡献)
+
+## 语言选择
+
+在「设置 → 外观 → 语言」可选择跟随系统、简体中文、繁體中文、English、日本語。切换立即生效并保存偏好，保留连接、记录、数据、图表范围、筛选和选中报文；重置设置回到自动模式。
+
+Linux 按第一项非空的 LC_ALL → LC_MESSAGES → LANG 检测；Windows／macOS 使用原生系统 locale。原生不可用时采用 WebView 首选语言，最终回退英文。Hans 优先选择简中、Hant 优先选择繁中；否则 CN／SG 和无区域 zh 为简中，TW／HK／MO 为繁中，ja 为日文，其余含 C／POSIX 为英文。统一处理大小写、下划线、编码与修饰后缀；手动选择覆盖自动检测。
+
+```bash
+LANG=en_US.UTF-8 ./laPower.AppImage
+LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
+env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
+```
+
+## 词典维护与翻译检查
+
+src/i18n.js 提供 t(key, params)、locale 解析和语言变更订阅，四份词典离线打包，英文作为基准与缺词回退。src/i18n-messages.js 的四列依次为英文、简中、繁中、日文。使用语义键名，保持插值参数名称一致；含数量的消息按需补充单数版本。用户文档以简中版本为内容基准，其他语言保留相同章节、操作细节、参数和示例；`verify-i18n-docs.mjs` 检查各节层级、表格与列表、代码示例、相对链接、章节锚点和截图。
+
+静态 HTML 使用英文兜底和 data-i18n／data-i18n-title／data-i18n-placeholder／data-i18n-aria-label／data-i18n-alt；含图标或输入控件的元素只标记文字 span。动态内容通过 t 生成，持续通知和日志用延迟文字函数。切换只刷新标签、菜单、下拉和图表，不能重新连接或重建数据。
+
+应用后端错误使用 {code, params, detail?}，异步事件保留原有字段并添加 description；前端翻译 code，保留原始诊断，仍兼容插件字符串错误。文件对话框标题与过滤器由前端翻译，原生按钮跟随 OS。PD 标准名、解码字段、原始回复、单位和 CSV／PD 数据格式保持兼容。
+
+```bash
+node --test test/i18n.test.js test/settings-persistence.test.js
+node tools/showcase/verify-i18n.mjs
+node tools/showcase/verify-i18n-docs.mjs
+npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
+```
+
+检查四语、浅深主题、900×600／1280×800、连接和记录／PDM 状态、PD 选择和筛选、CSV／PD 往返、错误、文件入口及无障碍标签。Linux AppImage 的 LANG／LC_* 实机启动验收需在 Linux 完成，浏览器模拟不替代原生或硬件验收。
+
+[本次 i18n 验证记录（英文）](I18N_VALIDATION.md)列出已完成检查及实机验收范围。
+
 
 ## 环境要求
 
@@ -44,10 +78,10 @@ npx --no-install tauri build
 开发时统一使用以下命令设置版本号，无需逐个文件手改：
 
 ```bash
-npm run version:set -- 0.2.2
+npm run version:set -- 0.2.3
 ```
 
-将 `0.2.2` 换成目标版本即可。命令接受不含前导零的 `X.Y.Z`，先校验所有文件，再同步以下位置；重复设置同一版本不会重复写入，也不会创建 Git 提交或 tag、更新依赖或修改更新日志：
+将 `0.2.3` 换成目标版本即可。命令接受不含前导零的 `X.Y.Z`，先校验所有文件，再同步以下位置；重复设置同一版本不会重复写入，也不会创建 Git 提交或 tag、更新依赖或修改更新日志：
 
 | 文件 | 字段 |
 | --- | --- |
@@ -83,8 +117,8 @@ macOS 构建显式使用 `--bundles app,dmg`：Tauri 在仅构建 DMG 时会清�
 完成上述首次验收后，更新版本、整理更新日志、运行质量检查并提交，再推送与清单一致的 Tag，例如：
 
 ```bash
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 Tag 必须为 `vX.Y.Z`，且与清单版本一致；不一致会在打包前失败。CI 使用 Node.js 24、Rust stable、固定的 Tauri CLI 2.12.1 和 `tauri-apps/tauri-action@v1`。npm 通过 `npm ci` 安装，Cargo 使用 `--locked`；Rust 缓存按目标区分并指向工作区根目录 `target/`。Linux 固定 Ubuntu 22.04，以减少对较新 glibc 的依赖。
@@ -162,7 +196,7 @@ npm run showcase:capture
 
 预览默认监听 `http://127.0.0.1:4173`，默认显示浅色主题；独立软件视图可用 `/app/?theme=dark` 或 `/app/?theme=system` 指定深色或跟随系统。软件标题栏可选择虚拟设备、连接与断开，记录按钮可开始和暂停。开发工具外层提供「填充 120 秒展示数据」「冻结」「继续模拟」「推进 10 秒」「重置预览」；填充按钮自动连接当前选择的设备与本机温度源并开始记录。协议控制需要选择 POWER-Z 并连接，然后打开 PDM。端口可用 `npm run showcase:dev -- --port 4174` 指定，服务只监听本机。
 
-截图命令使用 Chromium、Windows 风格、1280×800 CSS 视口、2 倍像素密度及 100% 界面缩放，生成 2560×1600 PNG。默认使用 POWER-Z、本机温度源与相同的 120 秒模拟数据，先冻结虚拟时间，再等待实际图表、报文详情、字体与控件渲染完成。输出为 `docs/screenshots/{dark,light}-{record,pd,trigger,settings}.png`，覆盖 README 的 8 张展示图。
+截图命令使用 Chromium、Windows 风格、1280×800 CSS 视口、2 倍像素密度及 100% 界面缩放，生成 2560×1600 PNG。默认使用 POWER-Z、本机温度源与相同的 120 秒模拟数据，先冻结虚拟时间，再等待实际图表、报文详情、字体与控件渲染完成。输出为 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每种语言各 8 张展示图（共 32 张）。
 
 可以只截取指定页面、主题或更改输出目录：
 
@@ -171,7 +205,7 @@ npm run showcase:capture -- --theme light --page pd,trigger --output output/show
 npm run showcase:capture -- --help
 ```
 
-`--theme` 支持 `light,dark`，默认按浅色、深色顺序生成；`--page` 支持 `record,pd,trigger,settings`。输出目录相对于仓库根目录，也可使用绝对路径。修改 `tools/showcase/scenario.js` 可以调整虚拟设备信息、随机种子、充电曲线、握手时刻及 PDO / 协议检测结果。`bridge.js` 实现 Tauri 命令、事件、录制段、ACK、内存设置与文件句柄；未实现的调用会明确报错。CSV / PD 导出通过浏览器下载，CSV 导入通过浏览器文件选择器；PD 导入仅支持包含已固化样例原始报文的文件，任意真机报文解码仍应使用原生软件。
+`--language` 支持 zh-CN、zh-TW、en、ja（逗号分隔，默认全部）；`--theme` 支持 `light,dark`，默认按浅色、深色顺序生成；`--page` 支持 `record,pd,trigger,settings`。输出目录相对于仓库根目录，也可使用绝对路径。修改 `tools/showcase/scenario.js` 可以调整虚拟设备信息、随机种子、充电曲线、握手时刻及 PDO / 协议检测结果。`bridge.js` 实现 Tauri 命令、事件、录制段、ACK、内存设置与文件句柄；未实现的调用会明确报错。CSV / PD 导出通过浏览器下载，CSV 导入通过浏览器文件选择器；PD 导入仅支持包含已固化样例原始报文的文件，任意真机报文解码仍应使用原生软件。
 
 `pd-fixtures.json` 保存由现有 `witrn-hid` Rust 解析器产生的原始报文与解码树，普通预览和截图无需 Rust 编译。更改 PD 原始样例后，可在安装 Rust 的环境中运行 `node tools/showcase/generate-pd.mjs` 重新生成；临时生成器写入忽略的 `output/`，编译产物写入 `target/`。
 
@@ -250,7 +284,7 @@ npm run build
 npx --no-install tauri build
 ```
 
-macOS private API 的 Cargo feature 与 Tauri 配置必须保持一致。平台配置使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同时设置 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留旧系统部署目标，并通过 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳过 Finder 美化。当前没有 Developer ID 签名或 Apple 公证；首次打开方式见 [README 下载与安装](../README.md#-下载与安装)。
+macOS private API 的 Cargo feature 与 Tauri 配置必须保持一致。平台配置使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同时设置 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留旧系统部署目标，并通过 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳过 Finder 美化。当前没有 Developer ID 签名或 Apple 公证；首次打开方式见 [README 下载与安装](../README.zh-CN.md#-下载与安装)。
 
 普通 macOS CI 做 workspace check；版本 Tag / 手动构建还会生成并验证 DMG，不运行 GUI 或真机检查。
 

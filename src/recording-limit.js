@@ -6,6 +6,8 @@
  * 落盘 CSV 按 128 字节 / 行估算（带温度、段号及逐点间隔）。界面标「约」。
  */
 
+import { t } from './i18n.js';
+
 export const BYTES_PER_POINT = 112;
 export const CSV_BYTES_PER_ROW = 128;
 export const LIMIT_MB_MIN = 64;
@@ -40,16 +42,16 @@ export function formatDuration(seconds) {
   const days = Math.floor(s / 86400);
   const hours = Math.floor((s % 86400) / 3600);
   const minutes = Math.floor((s % 3600) / 60);
-  if (days > 0) return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`;
-  if (hours > 0) return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`;
-  if (minutes > 0) return `${minutes} 分 ${s % 60} 秒`;
-  return `${s} 秒`;
+  if (days > 0) return t(hours > 0 ? 'daysHours' : 'days', { days, hours });
+  if (hours > 0) return t(minutes > 0 ? 'hoursMinutes' : 'hours', { hours, minutes });
+  if (minutes > 0) return t('minutesSeconds', { minutes, seconds: s % 60 });
+  return t('seconds', { seconds: s });
 }
 
 /** 「537 万点」「8,400 点」 @param {number} points */
 export function formatPoints(points) {
   const n = Math.max(0, Math.floor(points));
-  return n >= 10_000 ? `${(n / 10_000).toFixed(n >= 1_000_000 ? 0 : 1)} 万点` : `${n.toLocaleString('en-US')} 点`;
+  return t('points', { count: n.toLocaleString('en-US') });
 }
 
 /** @param {number} bytes */
@@ -67,8 +69,15 @@ export function describeLimit(mb, rateMs) {
   const points = pointsForLimit(mb);
   const perSecond = rateMs > 0 ? 1000 / rateMs : 0;
   const rate =
-    perSecond >= 1 ? `${Number(perSecond.toFixed(2))} 次/秒` : `${Number((rateMs / 1000).toFixed(2))} 秒 1 次`;
-  return `约 ${formatPoints(points)}；按当前 ${rate} 约可记录 ${formatDuration((points * rateMs) / 1000)}，落盘 CSV 约 ${formatMegabytes(points * CSV_BYTES_PER_ROW)}。`;
+    perSecond >= 1
+      ? t('samplesPerSecond', { value: Number(perSecond.toFixed(2)) })
+      : t('everySeconds', { seconds: Number((rateMs / 1000).toFixed(2)) });
+  return t('limitDescription', {
+    points: formatPoints(points),
+    rate,
+    duration: formatDuration((points * rateMs) / 1000),
+    size: formatMegabytes(points * CSV_BYTES_PER_ROW),
+  });
 }
 
 /**
@@ -87,7 +96,14 @@ export function remainingInfo(used, limit, rateMs) {
     fraction,
     full,
     warn: fraction < 1 - WARN_FRACTION,
-    text: full ? '已满' : `${Math.floor(fraction * 100)}% · 约 ${formatDuration(seconds)}`,
-    title: `已用 ${formatPoints(used)} / 上限 ${formatPoints(limit)}（约 ${formatMegabytes(used * BYTES_PER_POINT)} / ${formatMegabytes(limit * BYTES_PER_POINT)}）`,
+    text: full
+      ? t('capacityFull')
+      : t('remainingTime', { percent: Math.floor(fraction * 100), duration: formatDuration(seconds) }),
+    title: t('capacityUsage', {
+      used: formatPoints(used),
+      limit: formatPoints(limit),
+      usedSize: formatMegabytes(used * BYTES_PER_POINT),
+      size: formatMegabytes(limit * BYTES_PER_POINT),
+    }),
   };
 }

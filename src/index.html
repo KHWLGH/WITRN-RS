@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <script src="theme-boot.js"></script>
@@ -27,17 +27,17 @@
         <div class="titlebar-tabs" id="titlebar-tabs"><!-- ui/tabbar.js 渲染 --></div>
         <div class="titlebar-drag" id="titlebar-drag"></div>
         <div class="titlebar-connect">
-          <select id="device-select" class="ribbon-select device-dropdown" title="选择要连接的设备">
-            <option value="">-- 点击刷新扫描设备 --</option>
+          <select id="device-select" class="ribbon-select device-dropdown" title="Select a device to connect" data-i18n-title="selectDevice">
+            <option value="" data-i18n="scanDevices">-- Click to scan for devices --</option>
           </select>
-          <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="刷新设备列表">
+          <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="Refresh device list" data-i18n-title="refreshDevices">
             <i class="fi fi-refresh" aria-hidden="true"></i>
           </button>
-          <button type="button" class="cmd-btn" id="btn-connect" title="设备事件监听尚未就绪" disabled>
-            <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label">连接</span>
+          <button type="button" class="cmd-btn" id="btn-connect" title="Device event listeners are not ready" data-i18n-title="listenerNotReady" disabled>
+            <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label"><span data-i18n="connect">Connect</span></span>
           </button>
         </div>
-        <button type="button" class="tab tab-icon-only" id="btn-settings-tab" title="设置" aria-label="设置">
+        <button type="button" class="tab tab-icon-only" id="btn-settings-tab" title="Settings" data-i18n-title="settings" aria-label="Settings" data-i18n-aria-label="settings">
           <i class="fi fi-settings" aria-hidden="true"></i>
         </button>
         <div class="titlebar-controls" id="titlebar-controls"><!-- Linux: ui/windowcontrols.js 自绘 --></div>
@@ -48,44 +48,44 @@
         <section class="view" id="view-monitor" role="tabpanel" aria-labelledby="tab-monitor">
           <div class="commandbar">
             <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
-              <i class="fi fi-record" aria-hidden="true"></i>开始记录
+              <i class="fi fi-record" aria-hidden="true"></i><span data-i18n="startRecording">Start recording</span>
             </button>
             <span class="cmd-sep"></span>
-            <span class="cmd-label">采样率</span>
-            <select id="sample-rate" class="ribbon-select" title="采样率（显示为 每秒次数；值为毫秒）">
-              <option value="1" hidden>1000 次/秒</option>
-              <option value="10">100 次/秒</option>
-              <option value="100">10 次/秒</option>
-              <option value="250" selected>4 次/秒</option>
-              <option value="500">2 次/秒</option>
-              <option value="1000">1 次/秒</option>
-              <option value="5000">0.2 次/秒 (5秒1次)</option>
-              <option value="10000">0.1 次/秒 (10秒1次)</option>
+            <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
+            <select id="sample-rate" class="ribbon-select" title="Sample rate (samples per second; stored as milliseconds)" data-i18n-title="sampleRateHint">
+              <option value="1" hidden data-i18n="rate1000">1000 samples/s</option>
+              <option value="10" data-i18n="rate100">100 samples/s</option>
+              <option value="100" data-i18n="rate10">10 samples/s</option>
+              <option value="250" selected data-i18n="rate4">4 samples/s</option>
+              <option value="500" data-i18n="rate2">2 samples/s</option>
+              <option value="1000" data-i18n="rate1">1 sample/s</option>
+              <option value="5000" data-i18n="rate02">0.2 samples/s (1 every 5s)</option>
+              <option value="10000" data-i18n="rate01">0.1 samples/s (1 every 10s)</option>
             </select>
             <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-export" title="导出CSV"><i class="fi fi-export" aria-hidden="true"></i>导出CSV</button>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-import" title="导入CSV">
-              <i class="fi fi-download" aria-hidden="true"></i>导入CSV
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button>
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
+              <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
             </button>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-clear-chart" title="清空图表并重置统计与能量">
-              <i class="fi fi-clear" aria-hidden="true"></i>一键重置
+            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
+              <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
             </button>
-            <button type="button" class="cmd-btn cmd-btn-icon" id="btn-cmd-overflow" hidden title="更多" aria-label="更多">
+            <button type="button" class="cmd-btn cmd-btn-icon" id="btn-cmd-overflow" hidden title="More" data-i18n-title="more" aria-label="More" data-i18n-aria-label="more">
               <i class="fi fi-more" aria-hidden="true"></i>
             </button>
             <span class="cmd-spacer"></span>
-            <button type="button" class="cmd-btn" id="btn-flyout-display" title="显示通道设置"><i class="fi fi-eye" aria-hidden="true"></i>显示</button>
+            <button type="button" class="cmd-btn" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
             <div class="cmd-action-group" id="auto-pause-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
                 <i class="fi fi-pause" aria-hidden="true"></i>
-                <span>自动暂停</span>
+                <span><span data-i18n="autoPause">Auto pause</span></span>
               </button>
               <button
                 type="button"
                 class="cmd-btn cmd-btn-icon cmd-settings-btn"
                 id="btn-flyout-autopause"
-                aria-label="自动暂停设置"
-                title="自动暂停设置"
+                aria-label="Auto pause settings" data-i18n-aria-label="autoPauseSettings"
+                title="Auto pause settings" data-i18n-title="autoPauseSettings"
               >
                 <i class="fi fi-settings" aria-hidden="true"></i>
               </button>
@@ -93,14 +93,14 @@
             <div class="cmd-action-group" id="temperature-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
                 <i class="fi fi-fire" aria-hidden="true"></i>
-                <span id="temp-toggle-label">温度服务</span>
+                <span id="temp-toggle-label"><span data-i18n="temperatureService">Temperature service</span></span>
               </button>
               <button
                 type="button"
                 class="cmd-btn cmd-btn-icon cmd-settings-btn"
                 id="btn-flyout-temp"
-                aria-label="温度服务设置"
-                title="温度服务设置"
+                aria-label="Temperature service settings" data-i18n-aria-label="temperatureSettings"
+                title="Temperature service settings" data-i18n-title="temperatureSettings"
               >
                 <i class="fi fi-settings" aria-hidden="true"></i>
               </button>
@@ -113,22 +113,22 @@
               <div id="stats-snapshot-label" class="stats-snapshot-label" hidden></div>
               <div class="realtime-card voltage">
                 <div class="realtime-body">
-                  <div class="realtime-label"><span class="realtime-dot"></span><span>电压</span></div>
+                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="voltage">Voltage</span></span></div>
                   <div class="realtime-content">
                     <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-voltage"></span></div>
                     <div class="realtime-value" id="rt-voltage">--</div>
                     <div class="realtime-unit">V</div>
                   </div>
                   <div class="realtime-stats">
-                    <span><span class="stat-k">最小</span><span id="min-voltage">--</span></span>
-                    <span><span class="stat-k">平均</span><span id="avg-voltage">--</span></span>
-                    <span><span class="stat-k">最大</span><span id="max-voltage">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="minimum">Min</span></span><span id="min-voltage">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="average">Average</span></span><span id="avg-voltage">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="maximum">Max</span></span><span id="max-voltage">--</span></span>
                   </div>
                 </div>
               </div>
               <div class="realtime-card current">
                 <div class="realtime-body">
-                  <div class="realtime-label"><span class="realtime-dot"></span><span>电流</span></div>
+                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="current">Current</span></span></div>
                   <div class="realtime-content">
                     <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-current"></span></div>
                     <i class="fi fi-arrow-right realtime-direction" id="rt-current-dir" hidden></i>
@@ -136,45 +136,45 @@
                     <div class="realtime-unit">A</div>
                   </div>
                   <div class="realtime-stats">
-                    <span><span class="stat-k">最小</span><span id="min-current">--</span></span>
-                    <span><span class="stat-k">平均</span><span id="avg-current">--</span></span>
-                    <span><span class="stat-k">最大</span><span id="max-current">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="minimum">Min</span></span><span id="min-current">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="average">Average</span></span><span id="avg-current">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="maximum">Max</span></span><span id="max-current">--</span></span>
                   </div>
                 </div>
               </div>
               <div class="realtime-card power">
                 <div class="realtime-body">
-                  <div class="realtime-label"><span class="realtime-dot"></span><span>功率</span></div>
+                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="power">Power</span></span></div>
                   <div class="realtime-content">
                     <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-power"></span></div>
                     <div class="realtime-value" id="rt-power">--</div>
                     <div class="realtime-unit">W</div>
                   </div>
                   <div class="realtime-stats">
-                    <span><span class="stat-k">最小</span><span id="min-power">--</span></span>
-                    <span><span class="stat-k">平均</span><span id="avg-power">--</span></span>
-                    <span><span class="stat-k">最大</span><span id="max-power">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="minimum">Min</span></span><span id="min-power">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="average">Average</span></span><span id="avg-power">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="maximum">Max</span></span><span id="max-power">--</span></span>
                   </div>
                 </div>
               </div>
               <div class="realtime-card temperature" id="temp-card">
                 <div class="realtime-body">
-                  <div class="realtime-label"><span class="realtime-dot"></span><span>温度</span></div>
+                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="temperature">Temperature</span></span></div>
                   <div class="realtime-content">
                     <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-temp"></span></div>
                     <div class="realtime-value" id="rt-temp">--</div>
                     <div class="realtime-unit">°C</div>
                   </div>
                   <div class="realtime-stats">
-                    <span><span class="stat-k">最低</span><span id="min-temp">--</span></span>
-                    <span><span class="stat-k">平均</span><span id="avg-temp">--</span></span>
-                    <span><span class="stat-k">最高</span><span id="max-temp">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="minimumTemperature">Min</span></span><span id="min-temp">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="average">Average</span></span><span id="avg-temp">--</span></span>
+                    <span><span class="stat-k"><span data-i18n="maximumTemperature">Max</span></span><span id="max-temp">--</span></span>
                   </div>
                 </div>
               </div>
               <div class="realtime-card energy">
                 <div class="realtime-metric">
-                  <div class="realtime-label">累计能量</div>
+                  <div class="realtime-label"><span data-i18n="energy">Energy</span></div>
                   <div class="realtime-content">
                     <div class="realtime-value" id="rt-energy">--</div>
                     <div class="realtime-unit">Wh</div>
@@ -182,7 +182,7 @@
                   <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill energy" id="lv-energy"></span></span>
                 </div>
                 <div class="realtime-metric">
-                  <div class="realtime-label">累计容量</div>
+                  <div class="realtime-label"><span data-i18n="capacity">Capacity</span></div>
                   <div class="realtime-content">
                     <div class="realtime-value" id="rt-capacity">--</div>
                     <div class="realtime-unit">mAh</div>
@@ -191,28 +191,28 @@
                 </div>
               </div>
               <div class="realtime-card signals">
-                <div class="realtime-label">信号线</div>
+                <div class="realtime-label"><span data-i18n="signals">Signal lines</span></div>
                 <div class="signal-grid">
                   <div class="signal-cell">
-                    <span class="signal-name dp">D+</span>
+                    <span class="signal-name dp"><span data-i18n="dp">D+</span></span>
                     <span class="signal-value" id="rt-dp">--</span>
                     <span class="signal-unit">V</span>
                     <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill dp" id="lv-dp"></span></span>
                   </div>
                   <div class="signal-cell">
-                    <span class="signal-name dn">D-</span>
+                    <span class="signal-name dn"><span data-i18n="dn">D-</span></span>
                     <span class="signal-value" id="rt-dn">--</span>
                     <span class="signal-unit">V</span>
                     <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill dn" id="lv-dn"></span></span>
                   </div>
                   <div class="signal-cell">
-                    <span class="signal-name cc1">CC1</span>
+                    <span class="signal-name cc1"><span data-i18n="cc1">CC1</span></span>
                     <span class="signal-value" id="rt-cc1">--</span>
                     <span class="signal-unit">V</span>
                     <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill cc1" id="lv-cc1"></span></span>
                   </div>
                   <div class="signal-cell">
-                    <span class="signal-name cc2">CC2</span>
+                    <span class="signal-name cc2"><span data-i18n="cc2">CC2</span></span>
                     <span class="signal-value" id="rt-cc2">--</span>
                     <span class="signal-unit">V</span>
                     <span class="mini-bar" aria-hidden="true"><span class="mini-bar-fill cc2" id="lv-cc2"></span></span>
@@ -228,7 +228,7 @@
               aria-valuemin="200"
               aria-valuemax="360"
               aria-valuenow="250"
-              aria-label="调整读数栏宽度"
+              aria-label="Adjust readings panel width" data-i18n-aria-label="adjustReadings"
               tabindex="0"
             ></div>
 
@@ -239,8 +239,8 @@
                 <div id="main-chart"></div>
                 <div class="empty-state chart-empty" id="chart-empty">
                   <i class="fi fi-pulse" aria-hidden="true"></i>
-                  <div class="empty-state-title">暂无数据</div>
-                  <div>连接设备后点击开始记录</div>
+                  <div class="empty-state-title"><span data-i18n="noDataYet">No data yet</span></div>
+                  <div><span data-i18n="startHint">Connect a device, then start recording</span></div>
                 </div>
               </div>
 
@@ -248,19 +248,19 @@
               <div class="timeline-container">
                 <div class="timeline-info">
                   <span id="range-start-time">--</span>
-                  <span id="range-duration">全部</span>
+                  <span id="range-duration"><span data-i18n="all">All</span></span>
                   <span id="range-end-time">--</span>
                 </div>
                 <div class="timeline-track">
                   <div id="navigator-chart"></div>
                   <div class="dual-slider-container">
-                    <div class="slider-track-fill" id="slider-fill" title="拖动以平移选中范围"></div>
+                    <div class="slider-track-fill" id="slider-fill" title="Drag to pan the selected range" data-i18n-title="panRange"></div>
                     <div
                       class="range-handle"
                       id="range-handle-start"
                       role="slider"
                       tabindex="0"
-                      aria-label="范围起点"
+                      aria-label="Range start" data-i18n-aria-label="rangeStart"
                       aria-valuemin="0"
                       aria-valuemax="100"
                       aria-valuenow="0"
@@ -271,7 +271,7 @@
                       id="range-handle-end"
                       role="slider"
                       tabindex="0"
-                      aria-label="范围终点"
+                      aria-label="Range end" data-i18n-aria-label="rangeEnd"
                       aria-valuemin="0"
                       aria-valuemax="100"
                       aria-valuenow="100"
@@ -290,45 +290,45 @@
         <section class="view" id="view-pd" role="tabpanel" aria-labelledby="tab-pd" hidden>
           <div class="commandbar">
             <button type="button" class="cmd-btn cmd-state-btn" id="btn-pd-pause" disabled>
-              <i class="fi fi-pause" aria-hidden="true"></i>暂停
+              <i class="fi fi-pause" aria-hidden="true"></i><span data-i18n="pause">Pause</span>
             </button>
-            <button type="button" class="cmd-btn" id="btn-pd-clear" title="清空报文列表" disabled>
-              <i class="fi fi-clear" aria-hidden="true"></i>清空
-            </button>
-            <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn" id="btn-pd-export" title="导出 PD 捕获" disabled>
-              <i class="fi fi-export" aria-hidden="true"></i>导出
-            </button>
-            <button type="button" class="cmd-btn" id="btn-pd-import" title="导入 PD 捕获" disabled>
-              <i class="fi fi-download" aria-hidden="true"></i>导入
+            <button type="button" class="cmd-btn" id="btn-pd-clear" title="Clear message list" data-i18n-title="clearMessages" disabled>
+              <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="clear">Clear</span>
             </button>
             <span class="cmd-sep"></span>
-            <input type="text" id="pd-filter" class="ribbon-input pd-filter" placeholder="按消息类型过滤…" />
-            <label class="ribbon-checkbox" title="GoodCRC 是链路层确认帧，数量占一半以上">
+            <button type="button" class="cmd-btn" id="btn-pd-export" title="Export PD capture" data-i18n-title="pdExportTitle" disabled>
+              <i class="fi fi-export" aria-hidden="true"></i><span data-i18n="export">Export</span>
+            </button>
+            <button type="button" class="cmd-btn" id="btn-pd-import" title="Import PD capture" data-i18n-title="pdImportTitle" disabled>
+              <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="import">Import</span>
+            </button>
+            <span class="cmd-sep"></span>
+            <input type="text" id="pd-filter" class="ribbon-input pd-filter" placeholder="Filter by message type…" data-i18n-placeholder="pdFilter" />
+            <label class="ribbon-checkbox" title="GoodCRC is a link-layer acknowledgement and often accounts for most frames" data-i18n-title="goodCrcHint">
               <input type="checkbox" id="pd-hide-goodcrc" checked />
               <span class="checkmark"></span>
-              隐藏 GoodCRC
+              <span data-i18n="hideGoodCrc">Hide GoodCRC</span>
             </label>
-            <label class="ribbon-checkbox" title="出现新报文时自动滚动到底部">
+            <label class="ribbon-checkbox" title="Scroll to the bottom when new messages arrive" data-i18n-title="autoscrollHint">
               <input type="checkbox" id="pd-autoscroll" checked />
               <span class="checkmark"></span>
-              自动滚动
+              <span data-i18n="autoscroll">Auto scroll</span>
             </label>
             <label
               class="ribbon-checkbox"
-              title="跟随记录：开启后 PD 分析与主监控完全联动&#10;· 仅在主监控记录时采集 PD 报文（未记录时报文直接丢弃，不进缓冲）&#10;· 左侧的开始/暂停按钮同时控制主监控的记录&#10;· 两侧的清空互相联动，清空任意一侧都会同时清空图表与报文&#10;关闭后三者互不影响：PD 独立采集、独立暂停、独立清空。"
+              title="Follow recording:&#10;• Capture PD messages only while monitoring is recording; other messages are discarded.&#10;• Start/pause controls both monitoring and PD capture.&#10;• Clearing either view clears both charts and messages.&#10;When disabled, PD capture, pause and clear operate independently." data-i18n-title="followRecordingHelp"
             >
               <input type="checkbox" id="pd-follow-recording" checked />
               <span class="checkmark"></span>
-              跟随记录
+              <span data-i18n="followRecording">Follow recording</span>
             </label>
             <span class="cmd-spacer"></span>
             <button
               type="button"
               class="cmd-btn cmd-btn-icon"
               id="btn-pd-layout"
-              title="左右分栏（宽屏）"
-              aria-label="切换分栏方向"
+              title="Side-by-side layout (wide window)" data-i18n-title="splitLayout"
+              aria-label="Toggle pane layout" data-i18n-aria-label="toggleLayout"
               aria-pressed="false"
             >
               <i class="fi fi-split-side" id="pd-layout-icon" aria-hidden="true"></i>
@@ -339,21 +339,21 @@
             <div class="pd-master">
               <div class="pd-table-head" id="pd-table-head" hidden>
                 <span class="pd-col-n">#</span>
-                <span class="pd-col-time">Elapsed</span>
+                <span class="pd-col-time" data-i18n="pdElapsed">Elapsed</span>
                 <span class="pd-col-sop">SOP</span>
                 <span class="pd-col-msg">Msg</span>
                 <span class="pd-col-id">ID</span>
-                <span class="pd-col-dir">Direction</span>
+                <span class="pd-col-dir" data-i18n="pdDirection">Direction</span>
                 <span class="pd-col-obj">Obj</span>
                 <span class="pd-col-rev">Rev</span>
                 <span class="pd-col-vi">V/I</span>
-                <span class="pd-col-note">Note</span>
+                <span class="pd-col-note" data-i18n="pdNote">Note</span>
               </div>
               <div class="pd-list" id="pd-list" hidden></div>
               <div class="empty-state" id="pd-empty">
                 <i class="fi fi-flash" aria-hidden="true"></i>
-                <div class="empty-state-title">等待 USB-PD 通信</div>
-                <div>连接设备后自动捕获 USB-PD 报文（插拔充电器时的握手最有价值）</div>
+                <div class="empty-state-title"><span data-i18n="waitingPd">Waiting for USB-PD traffic</span></div>
+                <div><span data-i18n="waitingPdHint">PD messages are captured after connecting; charger connection handshakes are particularly useful</span></div>
               </div>
             </div>
             <div
@@ -364,14 +364,14 @@
               aria-valuemin="22"
               aria-valuemax="80"
               aria-valuenow="56"
-              aria-label="调整列表与详情高度"
+              aria-label="Adjust list and detail height" data-i18n-aria-label="pdAdjustHeight"
               tabindex="0"
             ></div>
             <div class="pd-detail-pane">
               <div class="empty-state" id="pd-detail-empty">
                 <i class="fi fi-select" aria-hidden="true"></i>
-                <div class="empty-state-title">选择报文查看详情</div>
-                <div>点击上方列表中的报文行，此处按字 / 表拆开当前帧</div>
+                <div class="empty-state-title"><span data-i18n="selectMessage">Select a message to see details</span></div>
+                <div><span data-i18n="selectMessageHint">Click a message above to inspect its words and decoded tables</span></div>
               </div>
               <div class="pd-detail-body" id="pd-detail-body" hidden></div>
             </div>
@@ -381,34 +381,34 @@
         <!-- ── 协议控制工作区（POWER-Z KM003C / KM002C） ── -->
         <section class="view" id="view-trigger" role="tabpanel" aria-labelledby="tab-trigger" hidden>
           <div class="commandbar">
-            <span class="trigger-pill" id="km-pdm-status">PDM · 未打开</span>
-            <select id="km-pdm-type" class="ribbon-select" title="PD 类型">
-              <option value="0">自动</option>
+            <span class="trigger-pill" id="km-pdm-status"><span data-i18n="pdmClosed">PDM · Closed</span></span>
+            <select id="km-pdm-type" class="ribbon-select" title="PD type" data-i18n-title="pdType">
+              <option value="0" data-i18n="automatic">Automatic</option>
               <option value="1" selected>PD 3.0</option>
               <option value="2">PD 3.1</option>
-              <option value="3">私有 PPS</option>
+              <option value="3" data-i18n="privatePps">Private PPS</option>
             </select>
-            <select id="km-pdm-em" class="ribbon-select" title="线缆模拟（E-Marker）">
-              <option value="0">线缆模拟：关闭</option>
-              <option value="1" selected>线缆模拟：20V 5A</option>
-              <option value="2">线缆模拟：50V 5A EPR</option>
-              <option value="3">线缆模拟：LA135 6.75A</option>
+            <select id="km-pdm-em" class="ribbon-select" title="Cable emulation (E-Marker)" data-i18n-title="emulation">
+              <option value="0" data-i18n="emOff">Cable emulation: off</option>
+              <option value="1" selected data-i18n="em20">Cable emulation: 20V 5A</option>
+              <option value="2" data-i18n="em50">Cable emulation: 50V 5A EPR</option>
+              <option value="3" data-i18n="emLa">Cable emulation: LA135 6.75A</option>
             </select>
-            <select id="km-pdm-sink" class="ribbon-select" title="Sink 能力">
+            <select id="km-pdm-sink" class="ribbon-select" title="Sink capabilities" data-i18n-title="sink">
               <option value="0" selected>Sink：3A PPS</option>
               <option value="1">Sink：5A PPS</option>
             </select>
-            <button type="button" class="cmd-btn" id="btn-km-pdm-open" title="打开 PDM 协议会话">
-              <i class="fi fi-play" aria-hidden="true"></i>打开
+            <button type="button" class="cmd-btn" id="btn-km-pdm-open" title="Open PDM session" data-i18n-title="openPdm">
+              <i class="fi fi-play" aria-hidden="true"></i><span data-i18n="open">Open</span>
             </button>
-            <button type="button" class="cmd-btn" id="btn-km-pdm-close" title="关闭 PDM 协议会话">
-              <i class="fi fi-dismiss" aria-hidden="true"></i>关闭
+            <button type="button" class="cmd-btn" id="btn-km-pdm-close" title="Close PDM session" data-i18n-title="closePdm">
+              <i class="fi fi-dismiss" aria-hidden="true"></i><span data-i18n="windowClose">Close</span>
             </button>
-            <button type="button" class="cmd-btn" id="btn-km-pdm-apply" title="应用 PD 类型、线缆模拟与 Sink 参数">
-              <i class="fi fi-success" aria-hidden="true"></i>应用
+            <button type="button" class="cmd-btn" id="btn-km-pdm-apply" title="Apply PD type, cable emulation and Sink parameters" data-i18n-title="applyPdm">
+              <i class="fi fi-success" aria-hidden="true"></i><span data-i18n="apply">Apply</span>
             </button>
             <span class="cmd-spacer"></span>
-            <span class="trigger-live" title="实时读数">
+            <span class="trigger-live" title="Live readings" data-i18n-title="readings">
               <span class="trigger-live-metric voltage"><span class="trigger-live-value" id="km-live-voltage">--</span><span class="trigger-live-unit">V</span></span>
               <span class="trigger-live-metric current"><span class="trigger-live-value" id="km-live-current">--</span><span class="trigger-live-unit">A</span></span>
               <span class="trigger-live-metric power"><span class="trigger-live-value" id="km-live-power">--</span><span class="trigger-live-unit">W</span></span>
@@ -416,20 +416,20 @@
           </div>
           <div class="trigger-body">
             <div class="trigger-controls">
-              <div class="trigger-banner" id="km-banner">连接 POWER-Z 设备后可用；除自定义命令外，先打开 PDM。</div>
+              <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
               <section class="trigger-section">
-                <h2 class="trigger-section-title">电压触发</h2>
+                <h2 class="trigger-section-title"><span data-i18n="voltageTrigger">Voltage trigger</span></h2>
                 <div class="trigger-actions">
-                  <button type="button" class="btn" id="btn-km-read-pdo">读取 PDO</button>
-                  <button type="button" class="btn" id="btn-km-scan" title="扫描支持的快充协议，最长约 90 秒">自动检测</button>
-                  <button type="button" class="btn" id="btn-km-scan-full" title="包含私有协议的完整扫描，最长约 3 分钟">
-                    完整检测
+                  <button type="button" class="btn" id="btn-km-read-pdo"><span data-i18n="readPdo">Read PDOs</span></button>
+                  <button type="button" class="btn" id="btn-km-scan" title="Scan fast-charge protocols (up to about 90 seconds)" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
+                  <button type="button" class="btn" id="btn-km-scan-full" title="Full scan including private protocols (up to about 3 minutes)" data-i18n-title="fullScanHint">
+                    <span data-i18n="fullScan">Full scan</span>
                   </button>
-                  <button type="button" class="btn" id="btn-km-reset" title="退出当前协议，恢复默认 5V">复位</button>
+                  <button type="button" class="btn" id="btn-km-reset" title="Exit the current protocol and restore the default 5V" data-i18n-title="protocolResetHint"><span data-i18n="protocolReset">Reset</span></button>
                 </div>
                 <div class="trigger-form">
                   <label class="trigger-field">
-                    <span class="trigger-field-label">协议</span>
+                    <span class="trigger-field-label"><span data-i18n="protocol">Protocol</span></span>
                     <select id="km-proto" class="ribbon-select">
                       <option value="pd" selected>PD</option>
                       <option value="qc">QC 2.0</option>
@@ -445,11 +445,11 @@
                     </select>
                   </label>
                   <label class="trigger-field" id="km-field-position">
-                    <span class="trigger-field-label" id="km-position-label">PDO 序号</span>
+                    <span class="trigger-field-label" id="km-position-label"><span data-i18n="pdoPosition">PDO position</span></span>
                     <input type="number" id="km-req-pos" class="ribbon-input" min="1" max="15" step="1" value="1" />
                   </label>
                   <label class="trigger-field" id="km-field-qc-volt" hidden>
-                    <span class="trigger-field-label">电压</span>
+                    <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
                     <select id="km-qc-volt" class="ribbon-select">
                       <option value="5V">5V</option>
                       <option value="9V" selected>9V</option>
@@ -458,14 +458,14 @@
                     </select>
                   </label>
                   <label class="trigger-field" id="km-field-volt">
-                    <span class="trigger-field-label">电压</span>
+                    <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
                     <span class="trigger-input-unit">
                       <input type="number" id="km-req-volt" class="ribbon-input" min="0" max="60000" step="20" value="5000" />
                       <span class="cmd-label">mV</span>
                     </span>
                   </label>
                   <label class="trigger-field" id="km-field-cur">
-                    <span class="trigger-field-label">电流</span>
+                    <span class="trigger-field-label"><span data-i18n="current">Current</span></span>
                     <span class="trigger-input-unit">
                       <input type="number" id="km-req-cur" class="ribbon-input" min="0" max="10000" step="50" value="3000" />
                       <span class="cmd-label">mA</span>
@@ -474,26 +474,26 @@
                   <div class="trigger-form-actions">
                     <button type="button" class="btn" id="btn-km-qc3-up" hidden>QC3 +200 mV</button>
                     <button type="button" class="btn" id="btn-km-qc3-down" hidden>QC3 −200 mV</button>
-                    <button type="button" class="btn btn-accent" id="btn-km-trigger">触发</button>
+                    <button type="button" class="btn btn-accent" id="btn-km-trigger"><span data-i18n="trigger">Trigger</span></button>
                   </div>
                 </div>
               </section>
               <section class="trigger-section">
-                <h2 class="trigger-section-title">PDO 列表<span class="trigger-hint">点击一行填入请求</span></h2>
+                <h2 class="trigger-section-title"><span data-i18n="pdoList">PDO list</span><span class="trigger-hint"><span data-i18n="pdoClick">Click a row to fill the request</span></span></h2>
                 <div class="trigger-pdo-list" id="km-pdo-list" role="list">
-                  <div class="trigger-empty">读取 PDO 或插入充电器后显示</div>
+                  <div class="trigger-empty"><span data-i18n="pdoEmpty">Read PDOs or connect a charger</span></div>
                 </div>
                 <div class="trigger-protocols" id="km-protocols" hidden></div>
               </section>
               <details class="trigger-section trigger-advanced">
-                <summary>高级协议命令</summary>
+                <summary><span data-i18n="advanced">Advanced protocol commands</span></summary>
                 <div class="trigger-form">
                   <label class="trigger-field">
                     <span class="trigger-field-label">PD cmd</span>
                     <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
                   </label>
                   <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-pd-cmd">发送 pd cmd</button>
+                    <button type="button" class="btn" id="btn-km-pd-cmd"><span data-i18n="sendPdCmd">Send pd cmd</span></button>
                     <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
                   </div>
                   <label class="trigger-field trigger-field-wide">
@@ -501,37 +501,37 @@
                     <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
                   </label>
                   <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-pd-data">发送 pd data</button>
-                    <button type="button" class="btn" id="btn-km-ufcs-pdo">读取 UFCS PDO</button>
+                    <button type="button" class="btn" id="btn-km-pd-data"><span data-i18n="sendPdData">Send pd data</span></button>
+                    <button type="button" class="btn" id="btn-km-ufcs-pdo"><span data-i18n="readUfcs">Read UFCS PDOs</span></button>
                   </div>
                   <label class="trigger-field">
                     <span class="trigger-field-label">UFCS cmd</span>
                     <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
                   </label>
                   <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-ufcs-cmd">发送 ufcs cmd</button>
+                    <button type="button" class="btn" id="btn-km-ufcs-cmd"><span data-i18n="sendUfcs">Send ufcs cmd</span></button>
                   </div>
                   <label class="trigger-field trigger-field-wide">
-                    <span class="trigger-field-label">自定义命令</span>
-                    <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="如 pd pdo" spellcheck="false" />
+                    <span class="trigger-field-label"><span data-i18n="customCommand">Custom command</span></span>
+                    <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="For example: pd pdo" data-i18n-placeholder="customPlaceholder" spellcheck="false" />
                   </label>
                   <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-raw">发送命令</button>
+                    <button type="button" class="btn" id="btn-km-raw"><span data-i18n="sendCommand">Send command</span></button>
                   </div>
                 </div>
               </details>
             </div>
             <div class="trigger-log-pane">
               <div class="trigger-log-head">
-                <span id="km-log-title">返回日志</span>
+                <span id="km-log-title"><span data-i18n="responseLog">Response log</span></span>
                 <span class="cmd-spacer"></span>
                 <button type="button" class="cmd-btn" id="btn-km-cancel" hidden>
-                  <i class="fi fi-dismiss" aria-hidden="true"></i>取消
+                  <i class="fi fi-dismiss" aria-hidden="true"></i><span data-i18n="cancel">Cancel</span>
                 </button>
-                <button type="button" class="cmd-btn" id="btn-km-log-copy">复制</button>
-                <button type="button" class="cmd-btn" id="btn-km-log-clear">清空</button>
+                <button type="button" class="cmd-btn" id="btn-km-log-copy"><span data-i18n="copy">Copy</span></button>
+                <button type="button" class="cmd-btn" id="btn-km-log-clear"><span data-i18n="clear">Clear</span></button>
               </div>
-              <textarea id="km-log" class="trigger-log" readonly spellcheck="false" aria-label="协议返回日志"></textarea>
+              <textarea id="km-log" class="trigger-log" readonly spellcheck="false" aria-label="Protocol response log" data-i18n-aria-label="protocolLog"></textarea>
             </div>
           </div>
         </section>
@@ -539,61 +539,76 @@
         <!-- ── 设置（主栏选项 + 宽屏设备/关于侧栏） ── -->
         <section class="view" id="view-settings" role="tabpanel" aria-labelledby="btn-settings-tab" hidden>
           <div class="page settings-page">
-            <h1 class="page-title">设置</h1>
+            <h1 class="page-title"><span data-i18n="settings">Settings</span></h1>
             <div class="settings-layout">
               <div class="settings-main">
                 <section class="settings-section">
-                  <h2 class="settings-section-title">外观</h2>
+                  <h2 class="settings-section-title"><span data-i18n="appearance">Appearance</span></h2>
                   <div class="settings-group">
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title">主题</div>
-                        <div class="settings-row-desc">跟随操作系统外观，或选择浅色、深色。</div>
+                        <div class="settings-row-title"><span data-i18n="theme">Theme</span></div>
+                        <div class="settings-row-desc"><span data-i18n="followSystemAppearance">Follow the operating system appearance, or choose light or dark.</span></div>
                       </div>
-                      <div class="settings-row-control" role="radiogroup" aria-label="主题">
+                      <div class="settings-row-control" role="radiogroup" aria-label="Theme" data-i18n-aria-label="theme">
                         <div class="seg">
                           <label class="seg-item">
                             <input type="radio" name="theme-choice" id="theme-choice-system" checked />
-                            <span>跟随系统</span>
+                            <span><span data-i18n="followSystem">Follow system</span></span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="theme-choice" id="theme-choice-light" />
-                            <span>浅色</span>
+                            <span><span data-i18n="light">Light</span></span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="theme-choice" id="theme-choice-dark" />
-                            <span>深色</span>
+                            <span><span data-i18n="dark">Dark</span></span>
                           </label>
                         </div>
                       </div>
                     </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="language-select"><span data-i18n="language">Language</span></label>
+                        <div class="settings-row-desc"><span data-i18n="languageHint">Follow the system language or choose a language manually.</span></div>
+                      </div>
+                      <div class="settings-row-control">
+                        <select id="language-select" class="ribbon-select" aria-label="Language" data-i18n-aria-label="language">
+                          <option value="auto" data-i18n="followSystem">Follow system</option>
+                          <option value="zh-CN" data-i18n="simplifiedChinese">简体中文</option>
+                          <option value="zh-TW" data-i18n="traditionalChinese">繁體中文</option>
+                          <option value="en" data-i18n="english">English</option>
+                          <option value="ja" data-i18n="japanese">日本語</option>
+                        </select>
+                      </div>
+                    </div>
                     <div class="settings-row" id="window-style-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title" id="window-style-label">窗口风格</div>
-                        <div class="settings-row-desc" id="window-style-hint">仅改变标题栏外观，不改变系统窗口行为；Mac 绿钮切换全屏，其他平台最大化/还原。</div>
+                        <div class="settings-row-title" id="window-style-label"><span data-i18n="windowStyle">Window style</span></div>
+                        <div class="settings-row-desc" id="window-style-hint"><span data-i18n="windowStyleHint">Changes title bar appearance. On Mac the green button toggles full screen; on other platforms it maximizes or restores.</span></div>
                       </div>
                       <div class="settings-row-control">
                         <div class="seg" role="radiogroup" aria-labelledby="window-style-label" aria-describedby="window-style-hint">
                           <label class="seg-item">
                             <input type="radio" name="window-style" id="window-style-auto" value="auto" checked />
-                            <span>跟随平台</span>
+                            <span><span data-i18n="followPlatform">Follow platform</span></span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="window-style" id="window-style-windows" value="windows" />
-                            <span>Windows 风格</span>
+                            <span><span data-i18n="windowsStyle">Windows style</span></span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="window-style" id="window-style-macos" value="macos" />
-                            <span>macOS 风格</span>
+                            <span><span data-i18n="macosStyle">macOS style</span></span>
                           </label>
                         </div>
                       </div>
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <label class="settings-row-title" for="ui-scale">界面缩放</label>
+                        <label class="settings-row-title" for="ui-scale"><span data-i18n="uiScale">UI scale</span></label>
                         <div class="settings-row-desc" id="ui-scale-hint">
-                          等比缩放整个界面（含图表与标题栏）。系统缩放偏大导致窗口拥挤时可调低；默认 100% 跟随系统。
+                          <span data-i18n="uiScaleHint">Scale the whole interface, including charts and the title bar. Reduce it if system scaling crowds the window; 100% follows the system.</span>
                         </div>
                       </div>
                       <div class="settings-row-control settings-scale">
@@ -605,7 +620,7 @@
                           step="5"
                           value="100"
                           class="scale-slider"
-                          title="界面缩放比例"
+                          title="UI scale percentage" data-i18n-title="uiScaleTitle"
                         />
                         <span id="ui-scale-value" class="scale-value">100%</span>
                       </div>
@@ -613,22 +628,22 @@
                   </div>
                 </section>
                 <section class="settings-section">
-                  <h2 class="settings-section-title">图表与记录</h2>
+                  <h2 class="settings-section-title"><span data-i18n="chartAndRecording">Charts &amp; recording</span></h2>
                   <div class="settings-group">
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title">图表纵向余量</div>
-                        <div class="settings-row-desc">曲线顶部预留的空白比例；自动约为 25%，让曲线保持中高位置。</div>
+                        <div class="settings-row-title"><span data-i18n="headroom">Chart headroom</span></div>
+                        <div class="settings-row-desc"><span data-i18n="headroomHint">Empty space above curves; automatic mode reserves about 25%.</span></div>
                       </div>
-                      <div class="settings-row-control" role="radiogroup" aria-label="图表纵向余量">
+                      <div class="settings-row-control" role="radiogroup" aria-label="Chart headroom" data-i18n-aria-label="headroom">
                         <div class="seg">
                           <label class="seg-item">
                             <input type="radio" name="headroom-mode" id="headroom-mode-auto" checked />
-                            <span>自动</span>
+                            <span><span data-i18n="automatic">Automatic</span></span>
                           </label>
                           <label class="seg-item">
                             <input type="radio" name="headroom-mode" id="headroom-mode-custom" />
-                            <span>自定义</span>
+                            <span><span data-i18n="custom">Custom</span></span>
                           </label>
                         </div>
                         <span class="opacity-wrap">
@@ -647,9 +662,9 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title">记录电流方向</div>
+                        <div class="settings-row-title"><span data-i18n="signedCurrent">Record current direction</span></div>
                         <div class="settings-row-desc">
-                          开启后新记录/导入的数据保留电流符号（正向为正、反向为负），侧栏以箭头指示方向；关闭时记录绝对值。不改写已有数据，导出跟随当前记录值。
+                          <span data-i18n="signedCurrentHint">Keep the sign in new recordings and imports (forward positive, reverse negative). Existing data stays unchanged; exports keep recorded values.</span>
                         </div>
                       </div>
                       <div class="settings-row-control">
@@ -661,7 +676,7 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <label class="settings-row-title" for="record-limit">单次记录上限</label>
+                        <label class="settings-row-title" for="record-limit"><span data-i18n="recordLimit">Recording limit</span></label>
                         <div class="settings-row-desc" id="record-limit-hint">--</div>
                       </div>
                       <div class="settings-row-control">
@@ -674,7 +689,7 @@
                             max="8192"
                             step="64"
                             class="ribbon-input no-spin"
-                            title="当前图表里全部数据的内存上限"
+                            title="Memory limit for all data in the current chart" data-i18n-title="recordLimitTitle"
                           />
                           <span class="opacity-suffix">MB</span>
                         </span>
@@ -682,9 +697,9 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title">保留临时恢复文件</div>
+                        <div class="settings-row-title"><span data-i18n="keepRecovery">Keep temporary recovery files</span></div>
                         <div class="settings-row-desc">
-                          记录时约每秒写入应用缓存，仅用于崩溃恢复；正常清空、导入或退出后自动删除。显式导出才会生成用户文件。
+                          <span data-i18n="keepRecoveryHint">Write to the app cache about once a second for crash recovery. Files are removed after a normal clear, import or exit. Export to save a user file.</span>
                         </div>
                         <div class="settings-row-desc" id="spool-recovery-status" hidden></div>
                       </div>
@@ -697,13 +712,13 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title">重置所有配置</div>
+                        <div class="settings-row-title"><span data-i18n="resetAll">Reset all settings</span></div>
                         <div class="settings-row-desc">
-                          恢复采样率、显示通道、界面缩放、自动暂停、温度服务等全部设置的默认值。
+                          <span data-i18n="resetSettingsHint">Restore defaults for language, sample rate, channels, UI scale, auto pause, temperature and other settings.</span>
                         </div>
                       </div>
                       <div class="settings-row-control">
-                        <button type="button" class="btn" id="btn-reset-settings">重置所有配置</button>
+                        <button type="button" class="btn" id="btn-reset-settings"><span data-i18n="resetAll">Reset all settings</span></button>
                       </div>
                     </div>
                   </div>
@@ -711,7 +726,7 @@
               </div>
               <aside class="settings-aside">
                 <section class="settings-section">
-                  <h2 class="settings-section-title">设备</h2>
+                  <h2 class="settings-section-title"><span data-i18n="device">Device</span></h2>
                   <div class="settings-group settings-group-stack">
                     <div class="settings-kv">
                       <div class="settings-kv-row">
@@ -724,33 +739,33 @@
                       </div>
                       <div class="settings-kv-row">
                         <span class="settings-kv-label">SN</span>
-                        <span class="settings-kv-value" id="device-sn" title="设备序列号">--</span>
+                        <span class="settings-kv-value" id="device-sn" title="Device serial number" data-i18n-title="deviceSerial">--</span>
                       </div>
                     </div>
                     <p class="settings-row-desc" id="device-note">
-                      HID 枚举得到的厂商 ID、产品 ID 与 USB 序列号。维简硬件的序列号通常是生产批次日期，不是单机编号。
+                      <span data-i18n="deviceHidNote">Vendor ID, product ID, and USB serial number from HID enumeration. WITRN hardware serial numbers usually identify the production batch rather than an individual unit.</span>
                     </p>
                   </div>
                 </section>
                 <section class="settings-section">
-                  <h2 class="settings-section-title">关于</h2>
+                  <h2 class="settings-section-title"><span data-i18n="about">About</span></h2>
                   <div class="settings-group settings-group-stack">
-                    <img class="about-icon" src="assets/app-icon.png" width="80" height="80" alt="laPower 图标" loading="lazy" />
+                    <img class="about-icon" src="assets/app-icon.png" width="80" height="80" alt="laPower icon" data-i18n-alt="appIcon" loading="lazy" />
                     <div class="settings-kv">
                       <div class="settings-kv-row">
-                        <span class="settings-kv-label">版本</span>
+                        <span class="settings-kv-label"><span data-i18n="version">Version</span></span>
                         <span>laPower <span id="about-version">--</span></span>
                       </div>
                       <div class="settings-kv-row">
-                        <span class="settings-kv-label">许可证</span>
+                        <span class="settings-kv-label"><span data-i18n="license">License</span></span>
                         <span>GPL-3.0-only</span>
                       </div>
                       <div class="settings-kv-row">
-                        <span class="settings-kv-label">仓库</span>
+                        <span class="settings-kv-label"><span data-i18n="repository">Repository</span></span>
                         <span class="settings-kv-value selectable">github.com/KHWLGH/laPower</span>
                       </div>
                     </div>
-                    <p class="settings-row-desc">第三方组件：uPlot (MIT) · Fluent System Icons (MIT)</p>
+                    <p class="settings-row-desc"><span data-i18n="thirdParty">Third-party components: uPlot (MIT) · Fluent System Icons (MIT)</span></p>
                   </div>
                 </section>
               </aside>
@@ -761,20 +776,20 @@
 
       <!-- 全局状态栏 -->
       <footer class="statusbar" id="statusbar">
-        <div class="status-metrics" aria-label="记录状态">
-          <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="开始或暂停记录">
-            <span class="status-label">记录:</span><span id="record-status">停止</span>
+        <div class="status-metrics" aria-label="Recording status" data-i18n-aria-label="statsRecording">
+          <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="Start or pause recording" data-i18n-title="toggleRecording">
+            <span class="status-label"><span data-i18n="statusRecording">Recording:</span></span><span id="record-status"><span data-i18n="stopRecording">Stopped</span></span>
           </span>
-          <span class="status-item status-duration"><span class="status-label">时长:</span><span id="record-duration">--</span></span>
-          <span class="status-item status-rate"><span class="status-label">采样:</span><span id="status-sample-rate">4 次/秒</span></span>
-          <span class="status-item status-count"><span class="status-label">点数:</span><span id="data-count">0</span></span>
-          <span class="status-item status-remaining" id="status-remaining" title="单次记录剩余容量">
-            <span class="status-label">剩余:</span><span id="record-remaining">--</span>
+          <span class="status-item status-duration"><span class="status-label"><span data-i18n="statusDuration">Duration:</span></span><span id="record-duration">--</span></span>
+          <span class="status-item status-rate"><span class="status-label"><span data-i18n="statusSample">Sample:</span></span><span id="status-sample-rate"><span data-i18n="rate4">4 samples/s</span></span></span>
+          <span class="status-item status-count"><span class="status-label"><span data-i18n="statusPoints">Points:</span></span><span id="data-count">0</span></span>
+          <span class="status-item status-remaining" id="status-remaining" title="Remaining recording capacity" data-i18n-title="remainingCapacity">
+            <span class="status-label"><span data-i18n="remainingLabel">Remaining:</span></span><span id="record-remaining">--</span>
           </span>
         </div>
-        <span class="status-item status-connection" title="连接状态">
+        <span class="status-item status-connection" title="Connection status" data-i18n-title="connectionState">
           <span class="status-indicator" id="connection-status"></span>
-          <span id="connection-text">未连接</span>
+          <span id="connection-text"><span data-i18n="disconnectedStatus">Disconnected</span></span>
         </span>
       </footer>
     </div>
@@ -782,59 +797,59 @@
     <!-- 浮出面板内容（flyout.js 控制显隐；ID 与既有 settings/temperature 逻辑保持契约） -->
     <div id="flyout-display" hidden>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="显示/隐藏电压曲线">
+        <label class="ribbon-checkbox" title="Show/hide voltage curve" data-i18n-title="showVoltage">
           <input type="checkbox" id="show-voltage" checked />
           <span class="checkmark voltage"></span>
-          电压
+          <span data-i18n="voltage">Voltage</span>
         </label>
-        <span class="opacity-wrap" title="填充不透明度（0 = 关闭填充）">
+        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-voltage" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="显示/隐藏电流曲线">
+        <label class="ribbon-checkbox" title="Show/hide current curve" data-i18n-title="showCurrent">
           <input type="checkbox" id="show-current" checked />
           <span class="checkmark current"></span>
-          电流
+          <span data-i18n="current">Current</span>
         </label>
-        <span class="opacity-wrap" title="填充不透明度（0 = 关闭填充）">
+        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-current" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="显示/隐藏功率曲线">
+        <label class="ribbon-checkbox" title="Show/hide power curve" data-i18n-title="showPower">
           <input type="checkbox" id="show-power" checked />
           <span class="checkmark power"></span>
-          功率
+          <span data-i18n="power">Power</span>
         </label>
-        <span class="opacity-wrap" title="填充不透明度（0 = 关闭填充）">
+        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>
       <div class="flyout-row" id="show-temp-container">
-        <label class="ribbon-checkbox" title="显示/隐藏温度曲线">
+        <label class="ribbon-checkbox" title="Show/hide temperature curve" data-i18n-title="showTemp">
           <input type="checkbox" id="show-temp" checked />
           <span class="checkmark temp"></span>
-          温度
+          <span data-i18n="temperature">Temperature</span>
         </label>
-        <span class="opacity-wrap" title="填充不透明度（0 = 关闭填充）">
+        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>
       <div class="flyout-divider"></div>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="在图表中叠加 D+/D- 曲线（复用电压坐标轴）">
+        <label class="ribbon-checkbox" title="Overlay D+/D- curves on the voltage axis" data-i18n-title="showDpDn">
           <input type="checkbox" id="show-dpdn" />
           <span class="checkmark dpdn"></span>
           D+ / D-
         </label>
       </div>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="在图表中叠加 CC1/CC2 曲线（复用电压坐标轴）">
+        <label class="ribbon-checkbox" title="Overlay CC1/CC2 curves on the voltage axis" data-i18n-title="showCc">
           <input type="checkbox" id="show-cc" />
           <span class="checkmark cc"></span>
           CC1 / CC2
@@ -842,35 +857,35 @@
       </div>
       <div class="flyout-divider"></div>
       <div class="flyout-row">
-        <label class="ribbon-checkbox" title="勾选后仅统计当前选中范围的数据">
+        <label class="ribbon-checkbox" title="Calculate statistics only for the selected range" data-i18n-title="statsRangeHint">
           <input type="checkbox" id="stats-range-toggle" />
           <span class="checkmark"></span>
-          仅统计选中范围
+          <span data-i18n="statsRange">Selected range only</span>
         </label>
       </div>
     </div>
 
     <div id="flyout-autopause" hidden>
       <div class="flyout-row">
-        <span class="flyout-row-label">条件</span>
+        <span class="flyout-row-label"><span data-i18n="condition">Condition</span></span>
         <select id="ap-basis" class="ribbon-select">
-          <option value="none">无</option>
-          <option value="voltage">电压 &lt;</option>
-          <option value="current">电流 &lt;</option>
-          <option value="power">功率 &lt;</option>
+          <option value="none" data-i18n="none">None</option>
+          <option value="voltage" data-i18n="voltageBelow">Voltage &lt;</option>
+          <option value="current" data-i18n="currentBelow">Current &lt;</option>
+          <option value="power" data-i18n="powerBelow">Power &lt;</option>
         </select>
       </div>
       <div class="flyout-row">
-        <span class="flyout-row-label">阈值</span>
+        <span class="flyout-row-label"><span data-i18n="threshold">Threshold</span></span>
         <span class="flyout-input-group">
-          <input type="number" id="ap-condition" value="0.00" step="0.01" class="ribbon-input" title="触发阈值" />
+          <input type="number" id="ap-condition" value="0.00" step="0.01" class="ribbon-input" title="Trigger threshold" data-i18n-title="thresholdTitle" />
           <span id="ap-unit" class="cmd-label"></span>
         </span>
       </div>
       <div class="flyout-row">
-        <span class="flyout-row-label">持续时间</span>
+        <span class="flyout-row-label"><span data-i18n="holdDuration">Hold duration</span></span>
         <span class="flyout-input-group">
-          <input type="number" id="ap-duration" value="10" min="0" class="ribbon-input" title="持续时间" />
+          <input type="number" id="ap-duration" value="10" min="0" class="ribbon-input" title="Hold duration" data-i18n-title="holdDuration" />
           <label for="ap-duration" class="cmd-label">s</label>
         </span>
       </div>
@@ -878,13 +893,13 @@
 
     <div id="flyout-temp" hidden>
       <div class="flyout-row">
-        <span class="flyout-row-label">来源</span>
+        <span class="flyout-row-label"><span data-i18n="source">Source</span></span>
         <span class="flyout-input-group">
           <label class="radio-label">
-            <input type="radio" name="temp-source" id="temp-source-device" /> 本机
+            <input type="radio" name="temp-source" id="temp-source-device" /> <span data-i18n="deviceTemp">Device</span>
           </label>
           <label class="radio-label">
-            <input type="radio" name="temp-source" id="temp-source-external" checked /> 外部
+            <input type="radio" name="temp-source" id="temp-source-external" checked /> <span data-i18n="externalTemp">External</span>
           </label>
         </span>
       </div>
@@ -894,11 +909,11 @@
           <input type="text" id="temp-ip" value="127.0.0.1" class="ribbon-input" />
         </div>
         <div class="flyout-row">
-          <label for="temp-port" class="flyout-row-label">端口</label>
+          <label for="temp-port" class="flyout-row-label"><span data-i18n="port">Port</span></label>
           <input type="number" id="temp-port" value="1573" class="ribbon-input" />
         </div>
       </div>
-      <div class="card-hint" id="temp-source-hint">外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。</div>
+      <div class="card-hint" id="temp-source-hint"><span data-i18n="temperatureExternalHint">External TCP temperature service, one value per line. Use the command bar to connect or disconnect.</span></div>
     </div>
 
     <div class="toast-region" id="toast-region" aria-live="polite"></div>

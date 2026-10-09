@@ -1,4 +1,5 @@
 // @ts-check
+import { t } from './i18n.js';
 /**
  * @file 界面等比缩放 — 设置项 uiScalePercent 的钳位与生效。
  *
@@ -136,5 +137,5 @@ export function fillUiScaleHint() {
   if (!hint) return;
   const dpr = window.devicePixelRatio;
   const sys = Math.round((Number.isFinite(dpr) ? dpr : 1) * 100);
-  hint.textContent = `等比缩放整个界面（含图表与标题栏）。当前系统缩放约 ${sys}%。系统缩放偏大导致窗口拥挤时可调低；默认 100% 跟随系统。`;
+  hint.textContent = t('uiScaleCurrent', { percent: sys });
 }

@@ -173,53 +173,70 @@ async fn dialog_path<R: Runtime + 'static>(
 #[tauri::command]
 pub(crate) async fn csv_export_pick(
     default_name: String,
+    title: Option<String>,
+    filter_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Option<Opened>, String> {
-    let Some(path) = dialog_path(app, move |builder| {
-        builder
-            .add_filter("CSV File", &["csv"])
-            .set_file_name(default_name)
-            .blocking_save_file()
-    })
-    .await?
-    else {
-        return Ok(None);
-    };
-    let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
-    let handle = registry(&state)?.add_writer(Writer {
-        file: BufWriter::with_capacity(WRITE_BUFFER, file),
-        path: path.clone(),
-        patchable: 0,
-        dirty: false,
-    })?;
-    Ok(Some(opened(handle, &path, 0)))
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let Some(path) = dialog_path(app, move |builder| {
+            builder
+                .set_title(title.unwrap_or_else(|| "Export CSV".into()))
+                .add_filter(filter_name.unwrap_or_else(|| "CSV file".into()), &["csv"])
+                .set_file_name(default_name)
+                .blocking_save_file()
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
+        let handle = registry(&state)?.add_writer(Writer {
+            file: BufWriter::with_capacity(WRITE_BUFFER, file),
+            path: path.clone(),
+            patchable: 0,
+            dirty: false,
+        })?;
+        Ok(Some(opened(handle, &path, 0)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command]
 pub(crate) async fn pd_export_pick(
     default_name: String,
+    title: Option<String>,
+    filter_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Option<Opened>, String> {
-    let Some(path) = dialog_path(app, move |builder| {
-        builder
-            .add_filter("PD Capture", &["json"])
-            .set_file_name(default_name)
-            .blocking_save_file()
-    })
-    .await?
-    else {
-        return Ok(None);
-    };
-    let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
-    let handle = registry(&state)?.add_writer(Writer {
-        file: BufWriter::with_capacity(WRITE_BUFFER, file),
-        path: path.clone(),
-        patchable: 0,
-        dirty: false,
-    })?;
-    Ok(Some(opened(handle, &path, 0)))
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let Some(path) = dialog_path(app, move |builder| {
+            builder
+                .set_title(title.unwrap_or_else(|| "Export PD capture".into()))
+                .add_filter(
+                    filter_name.unwrap_or_else(|| "PD capture".into()),
+                    &["json"],
+                )
+                .set_file_name(default_name)
+                .blocking_save_file()
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
+        let handle = registry(&state)?.add_writer(Writer {
+            file: BufWriter::with_capacity(WRITE_BUFFER, file),
+            path: path.clone(),
+            patchable: 0,
+            dirty: false,
+        })?;
+        Ok(Some(opened(handle, &path, 0)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// Native wakeups keep recovery checkpoints independent of WebView timer throttling.
@@ -263,7 +280,8 @@ pub(crate) fn start_spool_checkpoints(app: AppHandle) {
             };
             let _ = app.emit(
                 "spool-checkpoint",
-                serde_json::json!({ "handle": handle, "error": error }),
+                serde_json::json!({ "handle": handle, "error": error,
+                    "description": error.as_ref().map(|detail| crate::app_error::AppError::new("backendFailure", detail.clone())) }),
             );
         }
     });
@@ -272,54 +290,73 @@ pub(crate) fn start_spool_checkpoints(app: AppHandle) {
 /// Ask which CSV to import and open it for reading.
 #[tauri::command]
 pub(crate) async fn csv_import_pick(
+    title: Option<String>,
+    filter_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Option<Opened>, String> {
-    let Some(path) = dialog_path(app, |builder| {
-        builder
-            .add_filter("CSV File", &["csv"])
-            .blocking_pick_file()
-    })
-    .await?
-    else {
-        return Ok(None);
-    };
-    let file = File::open(&path).map_err(|error| format!("无法打开文件: {error}"))?;
-    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
-    let handle = registry(&state)?.add_reader(Reader {
-        file: BufReader::with_capacity(READ_CHUNK, file),
-    })?;
-    Ok(Some(opened(handle, &path, size)))
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let Some(path) = dialog_path(app, move |builder| {
+            builder
+                .set_title(title.unwrap_or_else(|| "Import CSV".into()))
+                .add_filter(filter_name.unwrap_or_else(|| "CSV file".into()), &["csv"])
+                .blocking_pick_file()
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let file = File::open(&path).map_err(|error| format!("无法打开文件: {error}"))?;
+        let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+        let handle = registry(&state)?.add_reader(Reader {
+            file: BufReader::with_capacity(READ_CHUNK, file),
+        })?;
+        Ok(Some(opened(handle, &path, size)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// The next slice of an import, up to 4 MiB; empty once the file is exhausted.
 #[tauri::command(async)]
-pub(crate) fn csv_read_chunk(handle: u32, state: State<'_, AppState>) -> Result<Response, String> {
-    let reader = registry(&state)?
-        .readers
-        .get(&handle)
-        .cloned()
-        .ok_or("读取句柄已关闭")?;
-    let mut reader = reader.lock().map_err(|_| "读取句柄已损坏")?;
-    let mut buf = vec![0u8; READ_CHUNK];
-    let mut filled = 0;
-    // Fill the whole slice unless the file ends: fewer, larger IPC round trips.
-    while filled < buf.len() {
-        match reader.file.read(&mut buf[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(format!("读取文件失败: {error}")),
+pub(crate) fn csv_read_chunk(
+    handle: u32,
+    state: State<'_, AppState>,
+) -> Result<Response, crate::app_error::AppError> {
+    let result: Result<Response, String> = (|| {
+        let reader = registry(&state)?
+            .readers
+            .get(&handle)
+            .cloned()
+            .ok_or("读取句柄已关闭")?;
+        let mut reader = reader.lock().map_err(|_| "读取句柄已损坏")?;
+        let mut buf = vec![0u8; READ_CHUNK];
+        let mut filled = 0;
+        // Fill the whole slice unless the file ends: fewer, larger IPC round trips.
+        while filled < buf.len() {
+            match reader.file.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(format!("读取文件失败: {error}")),
+            }
         }
-    }
-    buf.truncate(filled);
-    Ok(Response::new(buf))
+        buf.truncate(filled);
+        Ok(Response::new(buf))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
-pub(crate) fn csv_read_close(handle: u32, state: State<'_, AppState>) -> Result<(), String> {
-    registry(&state)?.readers.remove(&handle);
-    Ok(())
+pub(crate) fn csv_read_close(
+    handle: u32,
+    state: State<'_, AppState>,
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        registry(&state)?.readers.remove(&handle);
+        Ok(())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// Append the raw request body to a writer (`x-handle` names it).
@@ -327,16 +364,19 @@ pub(crate) fn csv_read_close(handle: u32, state: State<'_, AppState>) -> Result<
 pub(crate) fn csv_write_chunk(
     request: Request<'_>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    let handle = header_u64(&request, "x-handle")? as u32;
-    let bytes = raw_body(&request)?;
-    let writer = writer(&state, handle)?;
-    let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
-    writer.dirty = true;
-    writer
-        .file
-        .write_all(bytes)
-        .map_err(|error| format!("写入文件失败: {error}"))
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let handle = header_u64(&request, "x-handle")? as u32;
+        let bytes = raw_body(&request)?;
+        let writer = writer(&state, handle)?;
+        let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
+        writer.dirty = true;
+        writer
+            .file
+            .write_all(bytes)
+            .map_err(|error| format!("写入文件失败: {error}"))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// Overwrite bytes inside the patchable header (`x-handle`, `x-offset`), same length only.
@@ -344,37 +384,46 @@ pub(crate) fn csv_write_chunk(
 pub(crate) fn csv_write_patch(
     request: Request<'_>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    let handle = header_u64(&request, "x-handle")? as u32;
-    let offset = header_u64(&request, "x-offset")?;
-    let bytes = raw_body(&request)?;
-    let writer = writer(&state, handle)?;
-    let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
-    let end = offset.saturating_add(bytes.len() as u64);
-    if end > writer.patchable {
-        return Err("回写超出表头范围".into());
-    }
-    let file = &mut writer.file;
-    let result = file
-        .flush()
-        .and_then(|()| file.get_mut().seek(SeekFrom::Start(offset)))
-        .and_then(|_| file.get_mut().write_all(bytes))
-        .and_then(|()| file.get_mut().seek(SeekFrom::End(0)))
-        .map(|_| ())
-        .map_err(|error| format!("回写表头失败: {error}"));
-    writer.dirty = true;
-    result
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let handle = header_u64(&request, "x-handle")? as u32;
+        let offset = header_u64(&request, "x-offset")?;
+        let bytes = raw_body(&request)?;
+        let writer = writer(&state, handle)?;
+        let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
+        let end = offset.saturating_add(bytes.len() as u64);
+        if end > writer.patchable {
+            return Err("回写超出表头范围".into());
+        }
+        let file = &mut writer.file;
+        let result = file
+            .flush()
+            .and_then(|()| file.get_mut().seek(SeekFrom::Start(offset)))
+            .and_then(|_| file.get_mut().write_all(bytes))
+            .and_then(|()| file.get_mut().seek(SeekFrom::End(0)))
+            .map(|_| ())
+            .map_err(|error| format!("回写表头失败: {error}"));
+        writer.dirty = true;
+        result
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// Push buffered bytes to the OS and ask it to persist them.
 #[tauri::command(async)]
-pub(crate) fn csv_write_sync(handle: u32, state: State<'_, AppState>) -> Result<(), String> {
-    let writer = writer(&state, handle)?;
-    let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
-    persist_buffer(&mut writer.file, File::sync_data)
-        .map_err(|error| format!("同步文件失败: {error}"))?;
-    writer.dirty = false;
-    Ok(())
+pub(crate) fn csv_write_sync(
+    handle: u32,
+    state: State<'_, AppState>,
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let writer = writer(&state, handle)?;
+        let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
+        persist_buffer(&mut writer.file, File::sync_data)
+            .map_err(|error| format!("同步文件失败: {error}"))?;
+        writer.dirty = false;
+        Ok(())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[derive(Deserialize, Default)]
@@ -393,31 +442,34 @@ pub(crate) fn csv_write_close(
     handle: u32,
     options: Option<CloseOptions>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    let options = options.unwrap_or_default();
-    if options.abort && options.remove_on_success {
-        return Err("abort 与 removeOnSuccess 不能同时使用".into());
-    }
-    let Some(writer_arc) = registry(&state)?.writers.get(&handle).cloned() else {
-        return Ok(());
-    };
-    let mut writer = writer_arc.lock().map_err(|_| "写入句柄已损坏")?;
-    let path = writer.path.clone();
-    let persisted = persist_buffer(&mut writer.file, |file| {
-        if options.sync || options.remove_on_success {
-            file.sync_all()
-        } else {
-            Ok(())
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let options = options.unwrap_or_default();
+        if options.abort && options.remove_on_success {
+            return Err("abort 与 removeOnSuccess 不能同时使用".into());
         }
-    })
-    .map_err(|error| format!("写入文件失败: {error}"));
-    drop(writer);
-    // Keep a failed normal export handle available for its caller's abort cleanup.
-    if persisted.is_ok() || options.abort || options.remove_on_success || !options.sync {
-        registry(&state)?.writers.remove(&handle);
-    }
-    drop(writer_arc);
-    finish_close(&path, persisted, options.abort, options.remove_on_success)
+        let Some(writer_arc) = registry(&state)?.writers.get(&handle).cloned() else {
+            return Ok(());
+        };
+        let mut writer = writer_arc.lock().map_err(|_| "写入句柄已损坏")?;
+        let path = writer.path.clone();
+        let persisted = persist_buffer(&mut writer.file, |file| {
+            if options.sync || options.remove_on_success {
+                file.sync_all()
+            } else {
+                Ok(())
+            }
+        })
+        .map_err(|error| format!("写入文件失败: {error}"));
+        drop(writer);
+        // Keep a failed normal export handle available for its caller's abort cleanup.
+        if persisted.is_ok() || options.abort || options.remove_on_success || !options.sync {
+            registry(&state)?.writers.remove(&handle);
+        }
+        drop(writer_arc);
+        finish_close(&path, persisted, options.abort, options.remove_on_success)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 fn finish_close(
@@ -498,17 +550,20 @@ pub(crate) fn spool_open(
     header_len: u64,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Opened, String> {
-    let dir = spool_dir(&app)?;
-    std::fs::create_dir_all(&dir).map_err(|error| format!("无法创建临时目录: {error}"))?;
-    let (file, path) = create_unique(&dir, &sanitize_stem(&stem))?;
-    let handle = registry(&state)?.add_writer(Writer {
-        file: BufWriter::with_capacity(WRITE_BUFFER, file),
-        path: path.clone(),
-        patchable: header_len,
-        dirty: false,
-    })?;
-    Ok(opened(handle, &path, 0))
+) -> Result<Opened, crate::app_error::AppError> {
+    let result: Result<Opened, String> = (|| {
+        let dir = spool_dir(&app)?;
+        std::fs::create_dir_all(&dir).map_err(|error| format!("无法创建临时目录: {error}"))?;
+        let (file, path) = create_unique(&dir, &sanitize_stem(&stem))?;
+        let handle = registry(&state)?.add_writer(Writer {
+            file: BufWriter::with_capacity(WRITE_BUFFER, file),
+            path: path.clone(),
+            patchable: header_len,
+            dirty: false,
+        })?;
+        Ok(opened(handle, &path, 0))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[derive(Serialize)]
@@ -537,45 +592,50 @@ fn recovery_path<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<PathBuf, St
 }
 
 #[tauri::command(async)]
-pub(crate) fn spool_recovery_list(app: AppHandle) -> Result<Vec<RecoveryEntry>, String> {
-    let dir = spool_dir(&app)?;
-    let mut entries = Vec::new();
-    let Ok(read_dir) = std::fs::read_dir(&dir) else {
-        return Ok(entries);
-    };
-    for item in read_dir.flatten() {
-        let path = item.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("csv")
-            || !path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(recovery_name)
-        {
-            continue;
-        }
-        let metadata = match item.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
+pub(crate) fn spool_recovery_list(
+    app: AppHandle,
+) -> Result<Vec<RecoveryEntry>, crate::app_error::AppError> {
+    let result: Result<Vec<RecoveryEntry>, String> = (|| {
+        let dir = spool_dir(&app)?;
+        let mut entries = Vec::new();
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            return Ok(entries);
         };
-        let modified_ms = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0);
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        entries.push(RecoveryEntry {
-            id: name.clone(),
-            name,
-            size: metadata.len(),
-            modified_ms,
-        });
-    }
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.modified_ms));
-    Ok(entries)
+        for item in read_dir.flatten() {
+            let path = item.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("csv")
+                || !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(recovery_name)
+            {
+                continue;
+            }
+            let metadata = match item.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            let modified_ms = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0);
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            entries.push(RecoveryEntry {
+                id: name.clone(),
+                name,
+                size: metadata.len(),
+                modified_ms,
+            });
+        }
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.modified_ms));
+        Ok(entries)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
@@ -583,24 +643,33 @@ pub(crate) fn spool_recovery_open(
     id: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Opened, String> {
-    let path = recovery_path(&app, &id)?;
-    let file = File::open(&path).map_err(|error| format!("无法打开临时文件: {error}"))?;
-    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
-    let handle = registry(&state)?.add_reader(Reader {
-        file: BufReader::with_capacity(READ_CHUNK, file),
-    })?;
-    Ok(opened(handle, &path, size))
+) -> Result<Opened, crate::app_error::AppError> {
+    let result: Result<Opened, String> = (|| {
+        let path = recovery_path(&app, &id)?;
+        let file = File::open(&path).map_err(|error| format!("无法打开临时文件: {error}"))?;
+        let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+        let handle = registry(&state)?.add_reader(Reader {
+            file: BufReader::with_capacity(READ_CHUNK, file),
+        })?;
+        Ok(opened(handle, &path, size))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
-pub(crate) fn spool_recovery_delete(id: String, app: AppHandle) -> Result<(), String> {
-    let path = recovery_path(&app, &id)?;
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("删除临时文件失败: {error}")),
-    }
+pub(crate) fn spool_recovery_delete(
+    id: String,
+    app: AppHandle,
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let path = recovery_path(&app, &id)?;
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!("删除临时文件失败: {error}")),
+        }
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[cfg(test)]

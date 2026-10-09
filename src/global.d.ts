@@ -5,6 +5,8 @@ declare namespace TauriAPI {
   interface DialogOptions {
     title?: string;
     kind?: 'info' | 'warning' | 'error';
+    okLabel?: string;
+    cancelLabel?: string;
   }
   interface FileDialogOptions extends DialogOptions {
     multiple?: boolean;

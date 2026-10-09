@@ -6,7 +6,7 @@
  * temperature.js 和 views/pd.js 负责，避免这些模块重复修改同一组 DOM。
  */
 
-import { fi } from './icons.js';
+import { t } from '../i18n.js';
 import { createMenu } from './menu.js';
 
 /**
@@ -17,6 +17,14 @@ import { createMenu } from './menu.js';
 function setTip(el, text) {
   el.title = text;
   el.setAttribute('aria-label', text);
+}
+
+/** Update existing icon/text nodes so language changes retain the button's DOM.
+ * @param {HTMLButtonElement} button @param {string} icon @param {string} text */
+function setButtonLabel(button, icon, text) {
+  button.querySelector?.('i.fi')?.setAttribute('class', `fi fi-${icon}`);
+  const label = button.querySelector?.('span');
+  if (label) label.textContent = text;
 }
 
 /**
@@ -30,19 +38,19 @@ export function syncRecordUI(s) {
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-record-toggle'));
   if (!button) return;
 
-  const linked = s.followPd ? '；跟随记录已开启，同时控制 PD 报文采集' : '';
+  const linked = s.followPd ? `；${t('followRecordingHint')}` : '';
   if (s.recording) {
-    button.innerHTML = `${fi('pause')}暂停记录`;
-    setTip(button, `暂停记录，已记录的数据保留，可随时继续${linked}`);
+    setButtonLabel(button, 'pause', t('pauseRecording'));
+    setTip(button, `${t('pauseRecording')}，${t('pauseRecordingHint')}${linked}`);
   } else if (!s.connected) {
-    button.innerHTML = `${fi('record')}${s.hasData ? '继续记录' : '开始记录'}`;
-    setTip(button, '请先连接设备');
+    setButtonLabel(button, 'record', s.hasData ? t('continueRecording') : t('startRecording'));
+    setTip(button, t('pleaseConnect'));
   } else if (s.hasData) {
-    button.innerHTML = `${fi('record')}继续记录`;
-    setTip(button, `继续记录，续接当前时间线，不会清空已有数据${linked}`);
+    setButtonLabel(button, 'record', t('continueRecording'));
+    setTip(button, `${t('continueRecordingHint')}${linked}`);
   } else {
-    button.innerHTML = `${fi('record')}开始记录`;
-    setTip(button, `开始记录${linked}`);
+    setButtonLabel(button, 'record', t('startRecording'));
+    setTip(button, `${t('startRecording')}${linked}`);
   }
 
   button.disabled = !s.connected;
@@ -57,7 +65,7 @@ export function syncAutoPauseUI(enabled) {
 
   button.setAttribute('aria-pressed', String(enabled));
   button.classList.toggle('is-active', enabled);
-  setTip(button, enabled ? '停用自动暂停' : '启用自动暂停');
+  setTip(button, enabled ? t('disableAutoPause') : t('enableAutoPause'));
 }
 
 /** @param {boolean} connected @param {boolean} [busy=false] */
@@ -66,8 +74,16 @@ export function syncTempUI(connected, busy = false) {
   const label = document.getElementById('temp-toggle-label');
   if (!button) return;
 
-  const text = busy ? (connected ? '温度已连接' : '连接中...') : connected ? '温度已连接' : '温度服务';
-  const action = connected ? '断开温度服务' : '连接温度服务';
+  const text = busy
+    ? connected
+      ? `${t('temperatureService')} ${t('connected')}`
+      : t('tempConnecting')
+    : connected
+      ? `${t('temperatureService')} ${t('connected')}`
+      : t('temperatureService');
+  const action = connected
+    ? `${t('disconnect')} ${t('temperatureService')}`
+    : `${t('connect')} ${t('temperatureService')}`;
   button.disabled = busy;
   button.setAttribute('aria-busy', String(busy));
   button.setAttribute('aria-pressed', String(connected));
@@ -95,20 +111,17 @@ export function syncPdCaptureUI(s, opts) {
   const recording = follow && !!opts?.recording;
 
   if (follow && recording) {
-    button.innerHTML = `${fi('pause')}暂停记录`;
-    setTip(button, '暂停记录（跟随记录已开启：同时暂停主监控记录与 PD 采集）');
+    setButtonLabel(button, 'pause', t('pauseRecording'));
+    setTip(button, t('pdFollowPause'));
   } else if (follow) {
-    button.innerHTML = `${fi('record')}开始记录`;
-    setTip(
-      button,
-      opts?.connected ? '开始记录（跟随记录已开启：同时启动主监控记录并开始采集 PD 报文）' : '请先连接设备',
-    );
+    setButtonLabel(button, 'record', t('startRecording'));
+    setTip(button, opts?.connected ? t('pdFollowStart') : t('pleaseConnect'));
   } else if (s.paused) {
-    button.innerHTML = `${fi('play')}继续`;
-    setTip(button, '恢复报文列表刷新');
+    setButtonLabel(button, 'play', t('continueRecording'));
+    setTip(button, t('pdResumeList'));
   } else {
-    button.innerHTML = `${fi('pause')}暂停`;
-    setTip(button, '暂停报文列表刷新（后台继续缓冲）');
+    setButtonLabel(button, 'pause', t('pauseRecording'));
+    setTip(button, t('pdPauseList'));
   }
 
   button.classList.toggle('cmd-primary-btn', follow);
@@ -125,22 +138,18 @@ export function syncPdCaptureUI(s, opts) {
 export function syncFollowLinkageUI(followEnabled) {
   const pdClear = document.getElementById('btn-pd-clear');
   if (pdClear) {
-    setTip(
-      pdClear,
-      followEnabled ? '清空报文列表（跟随记录已开启：同时重置监控图表、统计与累计能量）' : '清空报文列表',
-    );
+    setTip(pdClear, followEnabled ? t('clearMessagesLinked') : t('clearMessages'));
   }
 
   const chartClear = document.getElementById('btn-clear-chart');
   if (chartClear) {
-    setTip(
-      chartClear,
-      followEnabled ? '清空图表并重置统计与能量（跟随记录已开启：同时清空 PD 报文列表）' : '清空图表并重置统计与能量',
-    );
+    setTip(chartClear, followEnabled ? t('clearChartLinked') : t('clearChart'));
   }
 }
 
 const MONITOR_OVERFLOW_IDS = ['btn-export', 'btn-import', 'btn-clear-chart'];
+/** @type {{ setLabel: (id: string, label: string) => void }|null} */
+let overflowMenu = null;
 
 /**
  * 监控命令栏溢出：宽度不够时把导出 / 导入 / 一键重置收进 ⋯ 菜单。
@@ -151,28 +160,28 @@ export function initCommandOverflow(actions) {
   const overflowBtn = document.getElementById('btn-cmd-overflow');
   if (!(bar instanceof HTMLElement) || !overflowBtn) return;
 
-  createMenu(overflowBtn, [
+  overflowMenu = createMenu(overflowBtn, [
     {
       id: 'overflow-export-no-temp',
-      label: '导出CSV（不带温度）',
+      label: `${t('exportCsv')}（${t('withoutTemperature')}）`,
       icon: 'export',
       onSelect: () => actions.exportCSV(false),
     },
     {
       id: 'overflow-export-with-temp',
-      label: '导出CSV（带温度）',
+      label: `${t('exportCsv')}（${t('withTemperature')}）`,
       icon: 'export',
       onSelect: () => actions.exportCSV(true),
     },
     {
       id: 'overflow-import',
-      label: '导入CSV',
+      label: t('importCsv'),
       icon: 'download',
       onSelect: () => document.getElementById('btn-import')?.click(),
     },
     {
       id: 'overflow-clear',
-      label: '一键重置',
+      label: t('reset'),
       icon: 'clear',
       onSelect: () => {
         const btn = document.getElementById('btn-clear-chart');
@@ -198,4 +207,13 @@ export function initCommandOverflow(actions) {
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measure).observe(bar);
   window.addEventListener('resize', measure);
   measure();
+}
+
+/** Refresh labels in the overflow menu after a language change. */
+export function refreshCommandOverflowLanguage() {
+  if (!overflowMenu) return;
+  overflowMenu.setLabel('overflow-export-no-temp', `${t('exportCsv')} (${t('withoutTemperature')})`);
+  overflowMenu.setLabel('overflow-export-with-temp', `${t('exportCsv')} (${t('withTemperature')})`);
+  overflowMenu.setLabel('overflow-import', t('importCsv'));
+  overflowMenu.setLabel('overflow-clear', t('reset'));
 }

@@ -37,6 +37,7 @@ const stored = new Map([
     'appSettings',
     {
       theme: options.get('theme') === 'dark' ? 'dark' : options.get('theme') === 'system' ? 'system' : 'light',
+      language: options.get('language') || 'auto',
       windowStyle: 'windows',
       sampleRate: 10,
       showDpDn: true,
@@ -288,6 +289,8 @@ async function invoke(command, args = {}, ipc = {}) {
   switch (command) {
     case 'get_runtime_platform':
       return 'windows';
+    case 'get_system_locale':
+      return options.get('systemLocale') || navigator.language;
     case 'report_boot_timing':
       return;
     case 'enumerate_devices':

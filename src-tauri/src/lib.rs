@@ -1,4 +1,6 @@
 mod acquire;
+mod app_error;
+mod locale;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
 mod file_io;
@@ -88,6 +90,10 @@ pub struct DeviceInfo {
     pub product: Option<String>,
     pub model_name: String,
     pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) model_description: Option<app_error::AppError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) interface_description: Option<app_error::AppError>,
     pub interface_number: i32,
     pub usage_page: u16,
     pub family: DeviceFamily,
@@ -137,7 +143,7 @@ fn model_name_for(vid: u16, pid: u16) -> String {
         .iter()
         .find(|device| device.vid == vid && device.pid == pid)
         .map(|device| device.name.to_string())
-        .unwrap_or_else(|| format!("未知 WITRN 设备 ({vid:04X}:{pid:04X})"))
+        .unwrap_or_else(|| format!("Unknown WITRN device ({vid:04X}:{pid:04X})"))
 }
 
 fn device_info_from_hid(api: &HidApi, device_info: &HidDeviceInfo) -> DeviceInfo {
@@ -157,6 +163,16 @@ fn device_info_from_hid(api: &HidApi, device_info: &HidDeviceInfo) -> DeviceInfo
         product: device_info.product_string().map(str::to_string),
         model_name,
         display_name,
+        model_description: (!KNOWN_DEVICES
+            .iter()
+            .any(|device| device.vid == vid && device.pid == pid))
+        .then(|| {
+            app_error::AppError::message(
+                "unknownWitrnDevice",
+                [("vid", format!("{vid:04X}")), ("pid", format!("{pid:04X}"))],
+            )
+        }),
+        interface_description: None,
         interface_number: device_info.interface_number(),
         usage_page: device_info.usage_page(),
         family: DeviceFamily::Witrn,
@@ -180,13 +196,25 @@ fn finalize_device_infos(devices: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
         let interface_label = if physical_counts.get(&key).copied().unwrap_or(0) > 1 {
             let index = physical_indices.entry(key).or_insert(0usize);
             *index += 1;
+            let interface = if device.interface_number >= 0 {
+                device.interface_number.to_string()
+            } else {
+                index.to_string()
+            };
+            device.interface_description = Some(app_error::AppError::message(
+                "deviceInterface",
+                [
+                    ("index", interface),
+                    ("usage", format!("{:04X}", device.usage_page)),
+                ],
+            ));
             Some(if device.interface_number >= 0 {
                 format!(
-                    "接口 {} / Usage 0x{:04X}",
+                    "Interface {} / Usage 0x{:04X}",
                     device.interface_number, device.usage_page
                 )
             } else {
-                format!("接口 {} / Usage 0x{:04X}", index, device.usage_page)
+                format!("Interface {} / Usage 0x{:04X}", index, device.usage_page)
             })
         } else {
             None
@@ -274,10 +302,15 @@ fn emit_device_outgoing(
         app.emit("pd-data-batch", pds).map_err(|e| e.to_string())?;
     }
     if let Some(end) = end {
+        let payload = serde_json::json!({
+            "generation": end.generation, "last_seq": end.last_seq, "error": end.error,
+            "description": end.error.as_ref().map(|detail| app_error::AppError::new("streamStopped", detail.clone()))
+        });
         if end.error.is_some() {
-            app.emit("stream-error", end).map_err(|e| e.to_string())?;
+            app.emit("stream-error", &payload)
+                .map_err(|e| e.to_string())?;
         }
-        app.emit("device-stream-end", end)
+        app.emit("device-stream-end", &payload)
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -405,13 +438,23 @@ fn get_runtime_platform() -> &'static str {
     std::env::consts::OS
 }
 
+/// Return the locale selected by the host environment. The frontend applies
+/// the language mapping and browser fallback so this command stays read-only.
+#[tauri::command]
+fn get_system_locale() -> String {
+    locale::system_locale()
+}
+
 /// 枚举所有已连接的设备：维简 HID 仪表与 POWER-Z KM003C / KM002C
 #[tauri::command(async)]
-fn enumerate_devices() -> Result<Vec<DeviceInfo>, String> {
-    let api = HidApi::new().map_err(|e| format!("无法初始化HID API: {}", e))?;
-    let mut devices = collect_supported_device_infos(&api);
-    devices.extend(km003c_session::device_infos());
-    Ok(devices)
+fn enumerate_devices() -> Result<Vec<DeviceInfo>, crate::app_error::AppError> {
+    let result: Result<Vec<DeviceInfo>, String> = (|| {
+        let api = HidApi::new().map_err(|e| format!("无法初始化HID API: {}", e))?;
+        let mut devices = collect_supported_device_infos(&api);
+        devices.extend(km003c_session::device_infos());
+        Ok(devices)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("hidInitFailed", detail))
 }
 
 /// 获取当前连接的设备信息
@@ -425,8 +468,9 @@ fn connect_device_by_path(
     path: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<stream::Open, String> {
-    connect_device_on_path(path, &state, app)
+) -> Result<stream::Open, crate::app_error::AppError> {
+    let result: Result<stream::Open, String> = connect_device_on_path(path, &state, app);
+    result.map_err(|detail| crate::app_error::AppError::new("deviceConnectionFailed", detail))
 }
 
 fn connect_device_on_path(
@@ -577,11 +621,8 @@ where
             emit_running.store(false, Ordering::Release);
             let _ = emit_app.emit(
                 "stream-error",
-                stream::End {
-                    generation,
-                    last_seq: 0,
-                    error: Some(error),
-                },
+                serde_json::json!({ "generation": generation, "last_seq": 0, "error": error,
+                    "description": app_error::AppError::new("streamStopped", error.clone()) }),
             );
         }
     });
@@ -628,7 +669,7 @@ where
 fn disconnect_device(
     generation: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<Option<stream::End>, String> {
+) -> Result<Option<stream::End>, crate::app_error::AppError> {
     drain_device_stream(generation, state)
 }
 
@@ -636,22 +677,25 @@ fn disconnect_device(
 fn drain_device_stream(
     generation: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<Option<stream::End>, String> {
-    let mut slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-    // A stale drain from an old connection must never stop the newer session.
-    let stale = slot
-        .as_ref()
-        .and_then(|task| task.session.as_ref())
-        .is_some_and(|session| generation.is_some_and(|g| session.generation != g));
-    if stale {
-        return Ok(None);
-    }
-    let result = slot.as_mut().map(drain_device_task).transpose()?.flatten();
-    *state
-        .current_device_info
-        .lock()
-        .map_err(|_| "设备信息状态已损坏")? = None;
-    Ok(result)
+) -> Result<Option<stream::End>, crate::app_error::AppError> {
+    let result: Result<Option<stream::End>, String> = (|| {
+        let mut slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+        // A stale drain from an old connection must never stop the newer session.
+        let stale = slot
+            .as_ref()
+            .and_then(|task| task.session.as_ref())
+            .is_some_and(|session| generation.is_some_and(|g| session.generation != g));
+        if stale {
+            return Ok(None);
+        }
+        let result = slot.as_mut().map(drain_device_task).transpose()?.flatten();
+        *state
+            .current_device_info
+            .lock()
+            .map_err(|_| "设备信息状态已损坏")? = None;
+        Ok(result)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// 退休一个终态会话：让已经死掉的连接不再把「断开 / 重连 / 退出」全部锁死。
@@ -662,14 +706,17 @@ fn drain_device_stream(
 fn abandon_device_stream(
     generation: u64,
     state: State<'_, AppState>,
-) -> Result<Option<stream::End>, String> {
-    let mut slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-    let Some(task) = slot.as_mut() else {
-        return Ok(None);
-    };
-    let end = abandon_device_task(task, generation)?;
-    slot.take();
-    Ok(end)
+) -> Result<Option<stream::End>, crate::app_error::AppError> {
+    let result: Result<Option<stream::End>, String> = (|| {
+        let mut slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+        let Some(task) = slot.as_mut() else {
+            return Ok(None);
+        };
+        let end = abandon_device_task(task, generation)?;
+        slot.take();
+        Ok(end)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
@@ -678,44 +725,54 @@ fn set_recording_segment(
     segment: u64,
     pd_enabled: bool,
     state: State<'_, AppState>,
-) -> Result<stream::Boundary, String> {
-    let (reply, rx) = mpsc::channel();
-    {
-        let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-        let task = slot.as_ref().ok_or("device is not connected")?;
-        let session = task.session.as_ref().ok_or("no stream session")?;
-        if session.generation != generation || !task.running.load(Ordering::Acquire) {
-            return Err("stale or stopped stream generation".into());
+) -> Result<stream::Boundary, crate::app_error::AppError> {
+    let result: Result<stream::Boundary, String> = (|| {
+        let (reply, rx) = mpsc::channel();
+        {
+            let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+            let task = slot.as_ref().ok_or("device is not connected")?;
+            let session = task.session.as_ref().ok_or("no stream session")?;
+            if session.generation != generation || !task.running.load(Ordering::Acquire) {
+                return Err("stale or stopped stream generation".into());
+            }
+            session
+                .controls
+                .try_send(stream::Control::Segment {
+                    segment,
+                    pd_enabled,
+                    reply,
+                })
+                .map_err(|e| format!("recording control unavailable: {e}"))?;
         }
-        session
-            .controls
-            .try_send(stream::Control::Segment {
-                segment,
-                pd_enabled,
-                reply,
-            })
-            .map_err(|e| format!("recording control unavailable: {e}"))?;
-    }
-    // No timeout: an indeterminate timed-out start must never silently activate later.
-    rx.recv()
-        .map_err(|_| "device stopped before recording boundary".to_string())?
+        // No timeout: an indeterminate timed-out start must never silently activate later.
+        rx.recv()
+            .map_err(|_| "device stopped before recording boundary".to_string())?
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
-fn ack_device_stream(generation: u64, seq: u64, state: State<'_, AppState>) -> Result<(), String> {
-    let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-    let session = slot
-        .as_ref()
-        .and_then(|task| task.session.as_ref())
-        .ok_or("no stream session")?;
-    if session.generation != generation {
-        return Err("stale stream acknowledgment".into());
-    }
-    if seq > session.produced.load(Ordering::Acquire) {
-        return Err("ack beyond selected seq".into());
-    }
-    session.consumed.fetch_max(seq, Ordering::Release);
-    Ok(())
+fn ack_device_stream(
+    generation: u64,
+    seq: u64,
+    state: State<'_, AppState>,
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+        let session = slot
+            .as_ref()
+            .and_then(|task| task.session.as_ref())
+            .ok_or("no stream session")?;
+        if session.generation != generation {
+            return Err("stale stream acknowledgment".into());
+        }
+        if seq > session.produced.load(Ordering::Acquire) {
+            return Err("ack beyond selected seq".into());
+        }
+        session.consumed.fetch_max(seq, Ordering::Release);
+        Ok(())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command]
@@ -724,36 +781,48 @@ fn set_pd_capture_enabled(enabled: bool, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-fn pd_log_clear(state: State<'_, AppState>) -> Result<u64, String> {
-    Ok(state
-        .pd_log
-        .lock()
-        .map_err(|_| "PD 日志状态已损坏".to_string())?
-        .clear())
+fn pd_log_clear(state: State<'_, AppState>) -> Result<u64, crate::app_error::AppError> {
+    let result: Result<u64, String> = (|| {
+        Ok(state
+            .pd_log
+            .lock()
+            .map_err(|_| "PD 日志状态已损坏".to_string())?
+            .clear())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command]
-fn decode_pd_at(index: u64, state: State<'_, AppState>) -> Result<witrn_hid::Metadata, String> {
-    let log = state
-        .pd_log
-        .lock()
-        .map_err(|_| "PD 日志状态已损坏".to_string())?;
-    log.meta_at(index as usize)
-        .cloned()
-        .ok_or_else(|| "没有这条报文的解码树".to_string())
+fn decode_pd_at(
+    index: u64,
+    state: State<'_, AppState>,
+) -> Result<witrn_hid::Metadata, crate::app_error::AppError> {
+    let result: Result<witrn_hid::Metadata, String> = (|| {
+        let log = state
+            .pd_log
+            .lock()
+            .map_err(|_| "PD 日志状态已损坏".to_string())?;
+        log.meta_at(index as usize)
+            .cloned()
+            .ok_or_else(|| "没有这条报文的解码树".to_string())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("decodeFailed", detail))
 }
 
 #[tauri::command(async)]
 fn pd_log_replace(
     entries: Vec<PdLoadEntry>,
     state: State<'_, AppState>,
-) -> Result<Vec<PdEvent>, String> {
-    let (next, events) = PdLog::build(entries)?;
-    let mut log = state
-        .pd_log
-        .lock()
-        .map_err(|_| "PD 日志状态已损坏".to_string())?;
-    Ok(log.install(next, events))
+) -> Result<Vec<PdEvent>, crate::app_error::AppError> {
+    let result: Result<Vec<PdEvent>, String> = (|| {
+        let (next, events) = PdLog::build(entries)?;
+        let mut log = state
+            .pd_log
+            .lock()
+            .map_err(|_| "PD 日志状态已损坏".to_string())?;
+        Ok(log.install(next, events))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command(async)]
@@ -761,63 +830,67 @@ fn set_sample_rate(
     rate: u64,
     generation: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<Option<stream::Boundary>, String> {
-    if !(1..=60_000).contains(&rate) {
-        return Err("采样间隔必须在 1 到 60000 毫秒之间".to_string());
-    }
-    let minimum = state
-        .current_device_info
-        .lock()
-        .map_err(|_| "设备信息状态已损坏")?
-        .as_ref()
-        .map_or(1, |info| {
-            if info.family == DeviceFamily::Witrn {
-                10
-            } else {
-                1
-            }
-        });
-    if rate < minimum {
-        return Err(format!("当前设备的采样间隔不能低于 {minimum} 毫秒"));
-    }
-    let (reply, rx) = mpsc::channel();
-    {
-        let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-        let live = slot
-            .as_ref()
-            .filter(|task| task.running.load(Ordering::Acquire))
-            .filter(|task| {
-                // 仅对匹配代次下速率命令；旧连接的迟到命令不得改新代。
-                task.session
-                    .as_ref()
-                    .is_some_and(|s| generation.is_none_or(|g| s.generation == g))
-            });
-        if let Some(task) = live {
-            let session = task.session.as_ref().ok_or("no stream session")?;
-            session
-                .controls
-                .try_send(stream::Control::Rate { rate, reply })
-                .map_err(|e| format!("sample rate control unavailable: {e}"))?;
-        } else {
-            state.sample_rate.store(rate, Ordering::Release);
-            return Ok(None);
+) -> Result<Option<stream::Boundary>, crate::app_error::AppError> {
+    let result: Result<Option<stream::Boundary>, String> = (|| {
+        if !(1..=60_000).contains(&rate) {
+            return Err("采样间隔必须在 1 到 60000 毫秒之间".to_string());
         }
-    }
-    rx.recv()
-        .map_err(|_| "device stopped before rate boundary".to_string())?
-        .map(Some)
+        let minimum = state
+            .current_device_info
+            .lock()
+            .map_err(|_| "设备信息状态已损坏")?
+            .as_ref()
+            .map_or(1, |info| {
+                if info.family == DeviceFamily::Witrn {
+                    10
+                } else {
+                    1
+                }
+            });
+        if rate < minimum {
+            return Err(format!("当前设备的采样间隔不能低于 {minimum} 毫秒"));
+        }
+        let (reply, rx) = mpsc::channel();
+        {
+            let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+            let live = slot
+                .as_ref()
+                .filter(|task| task.running.load(Ordering::Acquire))
+                .filter(|task| {
+                    // 仅对匹配代次下速率命令；旧连接的迟到命令不得改新代。
+                    task.session
+                        .as_ref()
+                        .is_some_and(|s| generation.is_none_or(|g| s.generation == g))
+                });
+            if let Some(task) = live {
+                let session = task.session.as_ref().ok_or("no stream session")?;
+                session
+                    .controls
+                    .try_send(stream::Control::Rate { rate, reply })
+                    .map_err(|e| format!("sample rate control unavailable: {e}"))?;
+            } else {
+                state.sample_rate.store(rate, Ordering::Release);
+                return Ok(None);
+            }
+        }
+        rx.recv()
+            .map_err(|_| "device stopped before rate boundary".to_string())?
+            .map(Some)
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command]
 fn pd_log_after(
     after_seq: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<Vec<PdEvent>, String> {
-    state
+) -> Result<Vec<PdEvent>, crate::app_error::AppError> {
+    let result: Result<Vec<PdEvent>, String> = state
         .pd_log
         .lock()
         .map_err(|_| "PD 日志状态已损坏".to_string())
-        .map(|log| log.events_after(after_seq))
+        .map(|log| log.events_after(after_seq));
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// 退出流程的唯一入口：先停后台任务，再强制销毁主窗口。
@@ -833,43 +906,46 @@ fn shutdown(
     last_seq: Option<u64>,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<(), String> {
-    {
-        let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
-        if let Some(task) = slot.as_ref() {
-            let session = task.session.as_ref().ok_or("no stream session")?;
-            let end = session
-                .end
-                .lock()
-                .map_err(|_| "stream end state poisoned")?;
-            let end = end
-                .as_ref()
-                .ok_or("drain_device_stream must complete before shutdown")?;
-            if task.running.load(Ordering::Acquire)
-                || !task.joins.is_empty()
-                || generation != Some(end.generation)
-                || last_seq != Some(end.last_seq)
-                || session.consumed.load(Ordering::Acquire) != end.last_seq
-            {
-                return Err("final stream seq has not been consumed and acknowledged".into());
+) -> Result<(), crate::app_error::AppError> {
+    let result: Result<(), String> = (|| {
+        {
+            let slot = state.device_task.lock().map_err(|_| "设备任务状态已损坏")?;
+            if let Some(task) = slot.as_ref() {
+                let session = task.session.as_ref().ok_or("no stream session")?;
+                let end = session
+                    .end
+                    .lock()
+                    .map_err(|_| "stream end state poisoned")?;
+                let end = end
+                    .as_ref()
+                    .ok_or("drain_device_stream must complete before shutdown")?;
+                if task.running.load(Ordering::Acquire)
+                    || !task.joins.is_empty()
+                    || generation != Some(end.generation)
+                    || last_seq != Some(end.last_seq)
+                    || session.consumed.load(Ordering::Acquire) != end.last_seq
+                {
+                    return Err("final stream seq has not been consumed and acknowledged".into());
+                }
             }
+            // Publish the teardown intent while still holding the device lock so a
+            // concurrent connect either sees the old session or is rejected outright.
+            state.shutting_down.store(true, Ordering::Release);
         }
-        // Publish the teardown intent while still holding the device lock so a
-        // concurrent connect either sees the old session or is rejected outright.
-        state.shutting_down.store(true, Ordering::Release);
-    }
-    if let Ok(mut task) = state.temp_task.lock() {
-        stop_task(&mut task);
-    }
-    // 前端已写完落盘尾部；这里只兜底把缓冲写进磁盘。
-    if let Ok(mut files) = state.files.lock() {
-        files.close_all();
-    }
-    match app.get_webview_window("main") {
-        Some(window) => window.destroy().map_err(|e| e.to_string())?,
-        None => app.exit(0),
-    }
-    Ok(())
+        if let Ok(mut task) = state.temp_task.lock() {
+            stop_task(&mut task);
+        }
+        // 前端已写完落盘尾部；这里只兜底把缓冲写进磁盘。
+        if let Ok(mut files) = state.files.lock() {
+            files.close_all();
+        }
+        match app.get_webview_window("main") {
+            Some(window) => window.destroy().map_err(|e| e.to_string())?,
+            None => app.exit(0),
+        }
+        Ok(())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 /// 连接温度服务
@@ -879,128 +955,136 @@ fn connect_temp_service(
     port: u16,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<String, String> {
-    {
+) -> Result<String, crate::app_error::AppError> {
+    let result: Result<String, String> = (|| {
+        {
+            let mut task_slot = state
+                .temp_task
+                .lock()
+                .map_err(|_| "温度任务状态已损坏".to_string())?;
+            stop_task(&mut task_slot);
+        }
+
+        let addr = format!("{ip}:{port}");
+        let mut addrs: Vec<_> = (ip.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|e| format!("无效地址: {e}"))?
+            .collect();
+        if addrs.is_empty() {
+            return Err(format!("无法解析地址 {addr}"));
+        }
+        addrs.sort_by_key(|socket| u8::from(socket.is_ipv6()));
+
+        let mut last_error = None;
+        let mut stream = None;
+        for socket in addrs {
+            match TcpStream::connect_timeout(&socket, Duration::from_secs(5)) {
+                Ok(connected) => {
+                    stream = Some(connected);
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        let stream = stream.ok_or_else(|| {
+            format!(
+                "连接失败: {}",
+                last_error
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "无可用地址".to_string())
+            )
+        })?;
+
+        stream
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .map_err(|e| format!("设置超时失败: {}", e))?;
+
         let mut task_slot = state
             .temp_task
             .lock()
             .map_err(|_| "温度任务状态已损坏".to_string())?;
         stop_task(&mut task_slot);
-    }
 
-    let addr = format!("{ip}:{port}");
-    let mut addrs: Vec<_> = (ip.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|e| format!("无效地址: {e}"))?
-        .collect();
-    if addrs.is_empty() {
-        return Err(format!("无法解析地址 {addr}"));
-    }
-    addrs.sort_by_key(|socket| u8::from(socket.is_ipv6()));
+        // 启动接收线程
+        let running = Arc::new(AtomicBool::new(true));
+        let running_for_thread = Arc::clone(&running);
 
-    let mut last_error = None;
-    let mut stream = None;
-    for socket in addrs {
-        match TcpStream::connect_timeout(&socket, Duration::from_secs(5)) {
-            Ok(connected) => {
-                stream = Some(connected);
-                break;
-            }
-            Err(error) => last_error = Some(error),
-        }
-    }
-    let stream = stream.ok_or_else(|| {
-        format!(
-            "连接失败: {}",
-            last_error
-                .map(|e| e.to_string())
-                .unwrap_or_else(|| "无可用地址".to_string())
-        )
-    })?;
-
-    stream
-        .set_read_timeout(Some(Duration::from_millis(250)))
-        .map_err(|e| format!("设置超时失败: {}", e))?;
-
-    let mut task_slot = state
-        .temp_task
-        .lock()
-        .map_err(|_| "温度任务状态已损坏".to_string())?;
-    stop_task(&mut task_slot);
-
-    // 启动接收线程
-    let running = Arc::new(AtomicBool::new(true));
-    let running_for_thread = Arc::clone(&running);
-
-    let join = thread::spawn(move || {
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
-        loop {
-            if !running_for_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            // 读超时会带着已读到的半行数据返回 Err，因此只在整行处理完之后才清空缓冲，
-            // 让下一轮把剩余部分续上——每轮开头就清会把半行丢掉，剩下的半行成为坏数据。
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    if running_for_thread.load(Ordering::Relaxed) {
-                        let _ = app.emit("temp-disconnected", ());
-                    }
+        let join = thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            loop {
+                if !running_for_thread.load(Ordering::Relaxed) {
                     break;
                 }
-                Ok(_) => {
-                    if line.len() > 256 {
-                        line.clear();
-                    } else {
-                        let trimmed = line.trim();
-                        if let Ok(temp) = trimmed.parse::<f32>() {
-                            if temp.is_finite() {
-                                let _ = app.emit("temp-data", temp);
-                            }
+                // 读超时会带着已读到的半行数据返回 Err，因此只在整行处理完之后才清空缓冲，
+                // 让下一轮把剩余部分续上——每轮开头就清会把半行丢掉，剩下的半行成为坏数据。
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        if running_for_thread.load(Ordering::Relaxed) {
+                            let _ = app.emit("temp-disconnected", ());
                         }
-                        line.clear();
+                        break;
                     }
-                }
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) =>
-                {
-                    if line.len() > 256 {
-                        line.clear();
+                    Ok(_) => {
+                        if line.len() > 256 {
+                            line.clear();
+                        } else {
+                            let trimmed = line.trim();
+                            if let Ok(temp) = trimmed.parse::<f32>() {
+                                if temp.is_finite() {
+                                    let _ = app.emit("temp-data", temp);
+                                }
+                            }
+                            line.clear();
+                        }
                     }
-                    continue;
-                }
-                Err(e) => {
-                    if running_for_thread.load(Ordering::Relaxed) {
-                        eprintln!("温度读取错误: {}", e);
-                        let _ = app.emit("temp-disconnected", ());
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                        ) =>
+                    {
+                        if line.len() > 256 {
+                            line.clear();
+                        }
+                        continue;
                     }
-                    break;
+                    Err(e) => {
+                        if running_for_thread.load(Ordering::Relaxed) {
+                            eprintln!("温度读取错误: {}", e);
+                            let _ = app.emit("temp-disconnected", ());
+                        }
+                        break;
+                    }
                 }
             }
-        }
-        running_for_thread.store(false, Ordering::Relaxed);
-    });
-    task_slot.replace(BackgroundTask {
-        running,
-        joins: vec![join],
-        session: None,
-    });
+            running_for_thread.store(false, Ordering::Relaxed);
+        });
+        task_slot.replace(BackgroundTask {
+            running,
+            joins: vec![join],
+            session: None,
+        });
 
-    Ok(format!("已连接到温度服务 {}", addr))
+        Ok(format!("已连接到温度服务 {}", addr))
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("tempConnectFailed", detail))
 }
 
 /// 断开温度服务
 #[tauri::command(async)]
-fn disconnect_temp_service(state: State<'_, AppState>) -> Result<String, String> {
-    let mut task_slot = state
-        .temp_task
-        .lock()
-        .map_err(|_| "温度任务状态已损坏".to_string())?;
-    stop_task(&mut task_slot);
-    Ok("已断开温度服务连接".to_string())
+fn disconnect_temp_service(
+    state: State<'_, AppState>,
+) -> Result<String, crate::app_error::AppError> {
+    let result: Result<String, String> = (|| {
+        let mut task_slot = state
+            .temp_task
+            .lock()
+            .map_err(|_| "温度任务状态已损坏".to_string())?;
+        stop_task(&mut task_slot);
+        Ok("已断开温度服务连接".to_string())
+    })();
+    result.map_err(|detail| crate::app_error::AppError::new("tempDisconnectFailed", detail))
 }
 
 /// 连续超时超过此时长且曾经读到过报告，视为拔线。
@@ -1144,6 +1228,7 @@ pub fn run() {
             boot_timing::get_boot_timing,
             boot_timing::report_boot_timing,
             get_runtime_platform,
+            get_system_locale,
             connect_device_by_path,
             disconnect_device,
             drain_device_stream,
@@ -1225,6 +1310,8 @@ mod tests {
             product: Some("K2".to_string()),
             model_name: "WITRN K2".to_string(),
             display_name: "WITRN K2 (USB 4-4)".to_string(),
+            model_description: None,
+            interface_description: None,
             interface_number,
             usage_page,
             family: DeviceFamily::Witrn,
@@ -1453,7 +1540,7 @@ mod tests {
         assert_eq!(model_name_for(WITRN_VID, 0x5064), "WITRN C5");
         assert_eq!(
             model_name_for(WITRN_VID, 0x50FF),
-            "未知 WITRN 设备 (0716:50FF)"
+            "Unknown WITRN device (0716:50FF)"
         );
     }
 
@@ -1593,11 +1680,11 @@ mod tests {
 
         assert_eq!(
             devices[0].display_name,
-            "WITRN K2 (USB 4-4) [接口 0 / Usage 0xFF00]"
+            "WITRN K2 (USB 4-4) [Interface 0 / Usage 0xFF00]"
         );
         assert_eq!(
             devices[1].display_name,
-            "WITRN K2 (USB 4-4) [接口 1 / Usage 0xFF01]"
+            "WITRN K2 (USB 4-4) [Interface 1 / Usage 0xFF01]"
         );
     }
 }

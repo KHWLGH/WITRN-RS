@@ -14,7 +14,7 @@
  * 创建一个由 trigger 按钮触发的菜单。
  * @param {HTMLElement} trigger
  * @param {MenuItem[]} items
- * @returns {{ open: () => void, close: () => void, toggle: () => void, setHidden: (id: string, hidden: boolean) => void, setDisabled: (id: string, disabled: boolean) => void, el: HTMLElement }}
+ * @returns {{ open: () => void, close: () => void, toggle: () => void, setHidden: (id: string, hidden: boolean) => void, setDisabled: (id: string, disabled: boolean) => void, setLabel: (id: string, label: string) => void, el: HTMLElement }}
  */
 export function createMenu(trigger, items) {
   const menu = document.createElement('div');
@@ -148,5 +148,14 @@ export function createMenu(trigger, items) {
     if (el) el.disabled = disabled;
   }
 
-  return { open, close, toggle, setHidden, setDisabled, el: menu };
+  /** @param {string} id @param {string} label */
+  function setLabel(id, label) {
+    const item = menu.querySelector(`#${CSS.escape(id)}`);
+    if (!item) return;
+    const text = Array.from(item.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+    if (text) text.nodeValue = label;
+    else item.appendChild(document.createTextNode(label));
+  }
+
+  return { open, close, toggle, setHidden, setDisabled, setLabel, el: menu };
 }

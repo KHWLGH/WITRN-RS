@@ -1,4 +1,5 @@
 // @ts-check
+import { t } from './i18n.js';
 /**
  * @file 纯工具函数 — 无外部依赖，可被任意模块安全引用。
  */
@@ -45,8 +46,8 @@ export function hexToRgba(hex, opacityPercent) {
 export function formatSampleRateLabel(intervalMs) {
   const perSecond = Number((1000 / intervalMs).toFixed(2));
   return intervalMs > 1000
-    ? `${perSecond} 次/秒 (${Number((intervalMs / 1000).toFixed(2))}秒1次)`
-    : `${perSecond} 次/秒`;
+    ? t('secondsPerSample', { value: perSecond, seconds: Number((intervalMs / 1000).toFixed(2)) })
+    : t('samplesPerSecond', { value: perSecond });
 }
 
 /**

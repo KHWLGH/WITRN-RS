@@ -1,4 +1,5 @@
 // @ts-check
+import { errorText, t } from './i18n.js';
 /**
  * @file 记录实时写入临时恢复文件：每份单次记录（清空或导入之间的全部数据）对应一个缓存文件。
  *
@@ -98,7 +99,7 @@ function fail(error) {
   drainQueued = false;
   if (failed) void closeWriter(failed.handle).catch(() => {});
   console.error('临时恢复文件写入失败:', error);
-  toast.error(`临时恢复文件写入失败：${error}。记录已暂停，数据仍在内存中，可手动导出。`);
+  toast.error(() => t('spoolWriteFailed', { detail: errorText(error) }));
   onFailure?.();
 }
 

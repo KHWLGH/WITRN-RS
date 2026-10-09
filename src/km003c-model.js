@@ -6,6 +6,8 @@
  * 命令的 JSON 形状与后端 `km003c::TriggerCommand` 一致（`type` 标签、蛇形字段名）。
  */
 
+import { t } from './i18n.js';
+
 /**
  * @typedef {{ pdType: number, em: number, sink: number }} PdmSettings
  * @typedef {{ type: string } & Record<string, unknown>} TriggerCommand
@@ -13,21 +15,21 @@
  *   cur_ma?: number, label: string, programmable: boolean }} TriggerPdo
  * @typedef {{ id: string, label: string }} DetectedProtocol
  * @typedef {{ ok: boolean, message: string, pdos: TriggerPdo[], protocols: DetectedProtocol[],
- *   code?: string, pdm_open: boolean }} TriggerOutcome
+ *   code?: string, pdm_open: boolean, description?: unknown }} TriggerOutcome
  * @typedef {{ position: number, voltMv: number, curMa: number, volt: string }} TriggerForm
  */
 
 /** @type {{ value: number, label: string }[]} */
 export const PD_TYPES = [
-  { value: 0, label: '自动' },
+  { value: 0, label: 'Automatic' },
   { value: 1, label: 'PD 3.0' },
   { value: 2, label: 'PD 3.1' },
-  { value: 3, label: '私有 PPS' },
+  { value: 3, label: 'Private PPS' },
 ];
 
 /** @type {{ value: number, label: string }[]} */
 export const EM_TYPES = [
-  { value: 0, label: '关闭' },
+  { value: 0, label: 'Off' },
   { value: 1, label: '20V 5A' },
   { value: 2, label: '50V 5A EPR' },
   { value: 3, label: 'LA135 6.75A' },
@@ -89,7 +91,7 @@ export function protocolFields(proto) {
   const fixedVolt = proto === 'qc' || proto === 'fcp' || proto === 'afc' || proto === 'sfcp';
   return {
     position: proto === 'pd' || proto === 'ufcs',
-    positionLabel: proto === 'ufcs' ? '请求序号' : 'PDO 序号',
+    positionLabel: t(proto === 'ufcs' ? 'requestPosition' : 'pdoPosition'),
     fixedVolt,
     voltChoices: proto === 'qc' ? QC_VOLTS : FCP_VOLTS,
     voltMv: proto === 'pd' || proto === 'qc3' || proto === 'scp' || proto === 'vfcp' || proto === 'ufcs',
@@ -105,17 +107,18 @@ function intIn(value, min, max) {
 }
 
 /**
- * 按表单构造一条触发命令；数值不合法时给出中文原因，不发送。
+ * 按表单构造一条触发命令；数值不合法时给出当前语言的原因，不发送。
  * @param {string} proto
  * @param {TriggerForm} form
  * @returns {{ cmd: TriggerCommand } | { error: string }}
  */
 export function buildTriggerCommand(proto, form) {
   const fields = protocolFields(proto);
-  if (fields.position && !intIn(form.position, 1, 15)) return { error: `${fields.positionLabel}应为 1–15 的整数` };
-  if (fields.voltMv && !intIn(form.voltMv, 0, 60000)) return { error: '电压应为 0–60000 mV 的整数' };
-  if (fields.curMa && !intIn(form.curMa, 0, 10000)) return { error: '电流应为 0–10000 mA 的整数' };
-  if (fields.fixedVolt && !fields.voltChoices.includes(form.volt)) return { error: '请选择电压档位' };
+  if (fields.position && !intIn(form.position, 1, 15))
+    return { error: t('positionInvalid', { field: fields.positionLabel }) };
+  if (fields.voltMv && !intIn(form.voltMv, 0, 60000)) return { error: t('voltageInvalid') };
+  if (fields.curMa && !intIn(form.curMa, 0, 10000)) return { error: t('currentInvalid') };
+  if (fields.fixedVolt && !fields.voltChoices.includes(form.volt)) return { error: t('selectVoltage') };
   const position = Number(form.position);
   const voltMv = Number(form.voltMv);
   const curMa = Number(form.curMa);
@@ -139,7 +142,7 @@ export function buildTriggerCommand(proto, form) {
     case 'apple':
       return { cmd: { type: 'entry', protocol: proto } };
     default:
-      return { error: `未知协议：${proto}` };
+      return { error: t('unknownProtocol', { protocol: proto }) };
   }
 }
 
@@ -181,7 +184,7 @@ export function outcomeHead(outcome) {
   const listed = outcome.protocols.length > 0;
   const looksLikeList = /:\s*(OK|FAIL|n\/a)/i.test(outcome.message);
   if (!(outcome.ok || listed)) return 'ERR';
-  return listed || looksLikeList ? '检测完成' : 'OK';
+  return listed || looksLikeList ? t('scanComplete') : 'OK';
 }
 
 /**
@@ -194,7 +197,7 @@ export function outcomeHead(outcome) {
  */
 export function prependOutcome(log, outcome, progress, time) {
   const raw = (outcome.message ?? '').trim();
-  const empty = !raw || raw === '(无回复)';
+  const empty = !raw;
   const body = empty && progress.trim() ? progress.trim() : raw;
   return prependLog(log, `[${time}] ${outcomeHead(outcome)}\n${body}`);
 }
@@ -209,14 +212,14 @@ export function prependLog(log, entry) {
 
 /** @type {Record<string, string>} */
 const PDO_KIND_LABELS = {
-  fixed: '固定',
-  epr_fixed: 'EPR 固定',
+  fixed: 'Fixed',
+  epr_fixed: 'EPR Fixed',
   pps: 'PPS',
   avs: 'AVS',
   spr_avs: 'SPR AVS',
   epr_avs: 'EPR AVS',
-  battery: '电池',
-  variable: '可变',
+  battery: 'Battery',
+  variable: 'Variable',
 };
 
 /** @param {number} mv */

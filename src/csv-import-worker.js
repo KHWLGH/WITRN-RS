@@ -20,11 +20,11 @@ worker.onmessage = (/** @type {MessageEvent} */ event) => {
       decoder = new TextDecoder('utf-8');
       worker.postMessage({ type: 'ready' });
     } else if (message?.type === 'chunk') {
-      if (!session || !decoder) throw new Error('CSV 导入尚未开始');
+      if (!session || !decoder) throw new Error('csvImportNotStarted');
       session.push(decoder.decode(new Uint8Array(message.bytes), { stream: true }));
       worker.postMessage({ type: 'ack', rows: session.rows });
     } else if (message?.type === 'end') {
-      if (!session || !decoder) throw new Error('CSV 导入尚未开始');
+      if (!session || !decoder) throw new Error('csvImportNotStarted');
       session.push(decoder.decode());
       const result = session.finish();
       session = null;

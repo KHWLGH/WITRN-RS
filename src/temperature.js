@@ -6,14 +6,12 @@
  */
 
 import { setSeriesVisible } from './chart.js';
+import { errorText, t } from './i18n.js';
 import { state } from './state.js';
 import { syncTempUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 
 const { invoke } = window.__TAURI__.core;
-
-const DEVICE_HINT = '使用当前连接仪表报告的温度。使用命令栏按钮连接或断开。';
-const EXTERNAL_HINT = '外部 TCP 温度服务，每行一个数值。使用命令栏按钮连接或断开。';
 
 /** @returns {'device'|'external'} */
 export function currentTempSource() {
@@ -30,7 +28,7 @@ export function syncTempSourceUI() {
   const fields = document.getElementById('temp-external-fields');
   if (fields) fields.hidden = isDevice;
   const hint = document.getElementById('temp-source-hint');
-  if (hint) hint.textContent = isDevice ? DEVICE_HINT : EXTERNAL_HINT;
+  if (hint) hint.textContent = t(isDevice ? 'temperatureDeviceHint' : 'temperatureExternalHint');
 }
 
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
@@ -42,7 +40,7 @@ export async function connectTempService() {
   if (connectingTemp) return;
   if (currentTempSource() === 'device') {
     if (!state.isConnected) {
-      toast.warning('请先连接设备');
+      toast.warning(() => t('pleaseConnect'));
       return;
     }
     setTempConnected(true);
@@ -61,7 +59,7 @@ export async function connectTempService() {
     state.settings.tempIp = ip;
     state.settings.tempPort = port;
   } catch (e) {
-    toast.error(`温度服务连接失败: ${e}`);
+    toast.error(() => t('tempConnectFailed', { detail: errorText(e) }));
   } finally {
     connectingTemp = false;
   }
@@ -77,7 +75,7 @@ export async function disconnectTempService() {
     await invoke('disconnect_temp_service');
     setTempConnected(false);
   } catch (e) {
-    toast.error(`断开温度服务失败: ${e}`);
+    toast.error(() => t('tempDisconnectFailed', { detail: errorText(e) }));
   }
 }
 

@@ -6,6 +6,7 @@
 import { refreshRecordButton, stopRecording } from './data.js';
 import { deviceStream } from './device-stream.js';
 import { registerListeners } from './event-listeners.js';
+import { errorText, onLanguageChange, t } from './i18n.js';
 import { cancelPdExport } from './pd-export.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { finalizeSpool } from './recording-spool.js';
@@ -19,13 +20,43 @@ const { invoke } = window.__TAURI__.core;
 let streamInitialization = null;
 let connectionReady = false;
 
+onLanguageChange(() => {
+  const connected = state.isConnected;
+  setDeviceField('connection-text', t(connected ? 'connectedStatus' : 'disconnectedStatus'));
+  setDeviceField('btn-connect-label', t(connected ? 'disconnect' : 'connect'));
+  const button = document.getElementById('btn-connect');
+  if (button) {
+    button.title = t(!connectionReady ? 'listenerNotReady' : connected ? 'disconnectDevice' : 'connectDevice');
+    button.setAttribute('aria-label', button.title);
+  }
+  const selected = state.connectedDevice ?? state.deviceList.find((device) => device.path === state.selectedDevicePath);
+  setDeviceNote(selected?.family);
+  const select = document.getElementById('device-select');
+  const empty = select?.querySelector('option[value=""]');
+  if (empty) empty.textContent = t(state.deviceList.length ? 'scanDevices' : 'noDevice');
+  for (const option of select?.querySelectorAll('option') ?? []) {
+    const device = state.deviceList.find((entry) => entry.path === option.value);
+    if (device) option.textContent = deviceDisplayName(device);
+  }
+});
+
+/** Application-generated descriptions translate; raw device/product names remain unchanged.
+ * @param {import('./state.js').DeviceInfo} device */
+export function deviceDisplayName(device) {
+  if (!device.model_description && !device.interface_description) return device.display_name;
+  const model = device.model_description ? errorText(device.model_description) : device.model_name;
+  const port = device.usb_port ? ` (USB ${device.usb_port})` : '';
+  const iface = device.interface_description ? ` [${errorText(device.interface_description)}]` : '';
+  return model + port + iface;
+}
+
 /** Enable connecting only after all acquisition and protocol listeners are registered. @param {boolean} ready */
 export function setConnectionReady(ready) {
   connectionReady = ready;
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-connect'));
   if (button) {
     button.disabled = !ready;
-    button.title = ready ? (state.isConnected ? '断开连接' : '连接设备') : '设备事件监听尚未就绪';
+    button.title = ready ? (state.isConnected ? t('disconnectDevice') : t('connectDevice')) : t('listenerNotReady');
     button.setAttribute('aria-label', button.title);
   }
 }
@@ -41,7 +72,7 @@ export function initializeDeviceStream() {
       // 只停记录不改连接状态的话，底栏会永远停在「已连接」盖着一条死流。
       // setConnected(false) 内部已含 stopRecording 与广播，这里不再单独停。
       setConnected(false);
-      toast.error(`采集已停止: ${error.error}`);
+      toast.error(() => t('deviceCaptureStopped', { detail: errorText(error.description ?? error.error ?? error) }));
     },
   });
   deviceStream.enable();
@@ -92,12 +123,7 @@ function setDeviceField(id, value) {
 
 /** 设置页「设备」说明随设备家族变化。 @param {string|undefined} family */
 function setDeviceNote(family) {
-  setDeviceField(
-    'device-note',
-    family === 'km003c'
-      ? 'USB 枚举得到的厂商 ID、产品 ID 与序列号。POWER-Z 经 Vendor Bulk 接口（Windows 下为 WinUSB）采集，协议控制走同一设备的虚拟串口。'
-      : 'HID 枚举得到的厂商 ID、产品 ID 与 USB 序列号。维简硬件的序列号通常是生产批次日期，不是单机编号。',
-  );
+  setDeviceField('device-note', family === 'km003c' ? t('devicePowerNote') : t('deviceHidNote'));
 }
 
 /** 下拉框选中项或连接状态变了：协议控制 Tab 等依赖设备家族的界面据此刷新。 */
@@ -123,7 +149,7 @@ export async function refreshDeviceList() {
     if (state.deviceList.length === 0) {
       const option = document.createElement('option');
       option.value = '';
-      option.textContent = '-- 未检测到设备 --';
+      option.textContent = t('noDevice');
       select.appendChild(option);
       state.selectedDevicePath = null;
       announceDeviceSelection();
@@ -131,7 +157,7 @@ export async function refreshDeviceList() {
       state.deviceList.forEach((device) => {
         const option = document.createElement('option');
         option.value = device.path;
-        option.textContent = device.display_name;
+        option.textContent = deviceDisplayName(device);
         option.dataset.vid = String(device.vid);
         option.dataset.pid = String(device.pid);
         option.dataset.sn = device.serial_number || '';
@@ -149,7 +175,7 @@ export async function refreshDeviceList() {
   } catch (e) {
     console.error('枚举设备失败:', e);
     const select = /** @type {HTMLSelectElement} */ (document.getElementById('device-select'));
-    select.innerHTML = '<option value="">-- 枚举设备失败 --</option>';
+    select.innerHTML = `<option value="">${t('noDevice')}</option>`;
     return [];
   }
 }
@@ -191,7 +217,7 @@ export async function connectDevice() {
   if (connecting || !connectionReady) return;
   try {
     if (!state.selectedDevicePath) {
-      toast.warning('请先选择一个设备');
+      toast.warning(() => t('selectDevice'));
       return;
     }
     connecting = true;
@@ -211,7 +237,7 @@ export async function connectDevice() {
       setDeviceNote(di.family);
     }
 
-    if (deviceStream.ended) throw new Error('设备已在连接过程中断开');
+    if (deviceStream.ended) throw new Error(t('deviceConnectionLost'));
     setConnected(true);
 
     try {
@@ -220,7 +246,7 @@ export async function connectDevice() {
       console.error('Failed to apply sample rate on connect:', err);
     }
   } catch (e) {
-    toast.error(`连接失败: ${e}`);
+    toast.error(() => t('deviceConnectionFailed', { detail: errorText(e) }));
   } finally {
     connecting = false;
   }
@@ -232,7 +258,7 @@ export async function disconnectDevice() {
     await deviceStream.drain();
     setConnected(false);
   } catch (e) {
-    toast.error(`断开失败: ${e}`);
+    toast.error(() => t('deviceDisconnectionFailed', { detail: errorText(e) }));
   }
 }
 
@@ -248,7 +274,7 @@ export function setConnected(connected) {
   if (statusEl) statusEl.classList.toggle('connected', connected);
 
   const textEl = document.getElementById('connection-text');
-  if (textEl) textEl.textContent = connected ? '已连接' : '未连接';
+  if (textEl) textEl.textContent = connected ? t('connectedStatus') : t('disconnectedStatus');
 
   /** @param {string} id @param {boolean} disabled */
   const setDisabled = (id, disabled) => {
@@ -264,10 +290,10 @@ export function setConnected(connected) {
   const connectLabel = document.getElementById('btn-connect-label');
   const connectIcon = document.getElementById('btn-connect-icon');
   if (connectBtn) {
-    connectBtn.title = connected ? '断开连接' : '连接设备';
+    connectBtn.title = connected ? t('disconnectDevice') : t('connectDevice');
     connectBtn.setAttribute('aria-label', connectBtn.title);
   }
-  if (connectLabel) connectLabel.textContent = connected ? '断开' : '连接';
+  if (connectLabel) connectLabel.textContent = connected ? t('disconnect') : t('connect');
   if (connectIcon) {
     connectIcon.classList.toggle('fi-plug', !connected);
     connectIcon.classList.toggle('fi-plug-off', connected);

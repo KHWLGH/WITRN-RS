@@ -30,12 +30,12 @@ async function runExport(getEntries) {
   cancelActive = () => {
     cancelled = true;
     worker?.terminate();
-    rejectPending?.(new Error('PD 导出已取消'));
+    rejectPending?.(new Error('pdExportCancelled'));
   };
   const file = await pickPdExportFile(`lapower_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
   if (!file) return null;
   try {
-    if (cancelled) throw new Error('PD 导出已取消');
+    if (cancelled) throw new Error('pdExportCancelled');
     const entries = getEntries().slice();
     const exportedAt = new Date().toISOString();
     worker = new Worker(new URL('./pd-export-worker.js', import.meta.url), { type: 'module' });
@@ -48,13 +48,13 @@ async function runExport(getEntries) {
       rejectPending = null;
       resolvePending = null;
     };
-    worker.onerror = (event) => rejectPending?.(new Error(event.message || 'PD 导出 Worker 失败'));
-    worker.onmessageerror = () => rejectPending?.(new Error('PD 导出数据传输失败'));
+    worker.onerror = (event) => rejectPending?.(new Error(event.message || 'pdWorkerFailed'));
+    worker.onmessageerror = () => rejectPending?.(new Error('pdTransferFailed'));
     /** @param {unknown} message */
     const send = (message) =>
       new Promise((resolve, reject) => {
         if (cancelled) {
-          reject(new Error('PD 导出已取消'));
+          reject(new Error('pdExportCancelled'));
           return;
         }
         resolvePending = resolve;
@@ -65,18 +65,18 @@ async function runExport(getEntries) {
     const drain = async (message) => {
       let reply = /** @type {any} */ (await send(message));
       while (reply.type === 'chunk') {
-        if (cancelled) throw new Error('PD 导出已取消');
+        if (cancelled) throw new Error('pdExportCancelled');
         await writeBytes(file.handle, reply.bytes);
         reply = await send({ type: 'pull' });
       }
-      if (reply.type !== 'ack') throw new Error('PD 导出 Worker 返回无效数据');
+      if (reply.type !== 'ack') throw new Error('pdWorkerInvalid');
     };
     await drain({ type: 'begin', exportedAt });
     for (let from = 0; from < entries.length; from += PD_EXPORT_BATCH) {
       await drain({ type: 'entries', entries: entries.slice(from, from + PD_EXPORT_BATCH), first: from === 0 });
     }
     await drain({ type: 'end' });
-    if (cancelled) throw new Error('PD 导出已取消');
+    if (cancelled) throw new Error('pdExportCancelled');
     await closeWriter(file.handle, { sync: true });
     return entries.length;
   } catch (error) {

@@ -2074,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "km003c"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "aes",
  "anyhow",
@@ -2088,13 +2088,14 @@ dependencies = [
 
 [[package]]
 name = "lapower"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "criterion",
  "hidapi",
  "km003c",
  "serde",
  "serde_json",
+ "sys-locale",
  "tauri",
  "tauri-build",
  "tauri-plugin-decorum",
@@ -3738,6 +3739,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "system-deps"
 version = "6.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4589,7 +4599,7 @@ dependencies = [
 
 [[package]]
 name = "usbpd-parser"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5401,7 +5411,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "witrn-hid"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "hidapi",

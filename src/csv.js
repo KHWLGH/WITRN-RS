@@ -32,6 +32,7 @@ import {
   readChunk,
   writeText,
 } from './file-io.js';
+import { errorText, t } from './i18n.js';
 import { F64_CHUNK_SIZE, F64Col, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -43,6 +44,11 @@ const EXPORT_CHUNK_ROWS = 4096;
 const LARGE_EXPORT_ROWS = 200_000;
 const LARGE_IMPORT_BYTES = 16 * 1024 * 1024;
 
+/** Convert known parser/worker failures to localised user-facing text. */
+function csvErrorText(error) {
+  return errorText(error);
+}
+
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 /**
@@ -51,7 +57,7 @@ const LARGE_IMPORT_BYTES = 16 * 1024 * 1024;
  */
 export async function exportCSV(withTemp = false) {
   if (state.chartSeries.x.length === 0) {
-    toast.warning('没有数据可导出');
+    toast.warning(() => t('noDataToExport'));
     return;
   }
 
@@ -61,7 +67,7 @@ export async function exportCSV(withTemp = false) {
     file = await pickExportFile(`lapower_data_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
   } catch (e) {
     console.error(e);
-    toast.error(`导出失败: ${e}`);
+    toast.error(() => t('csvExportFailed', { detail: csvErrorText(e) }));
     return;
   }
   // 取消不遍历、格式化或复制任何列；对话框期间可能继续录制或换入新数据。
@@ -69,7 +75,7 @@ export async function exportCSV(withTemp = false) {
   const cols = state.chartSeries;
   if (cols.x.length === 0) {
     await closeWriter(file.handle, { abort: true }).catch(() => {});
-    toast.warning('没有数据可导出');
+    toast.warning(() => t('noDataToExport'));
     return;
   }
   const snapshot = snapshotCsvColumns(cols, {
@@ -77,7 +83,7 @@ export async function exportCSV(withTemp = false) {
     sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
     startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
   });
-  if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(`正在导出 ${snapshot.length} 行…`);
+  if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(() => t('csvExporting', { count: snapshot.length }));
   try {
     // 逐块等待写完再格式化下一块：背压留在这里，内存里最多一块文本。
     await writeText(file.handle, formatCsvHeader(snapshot));
@@ -87,12 +93,12 @@ export async function exportCSV(withTemp = false) {
       await yieldToMainThread();
     }
     await closeWriter(file.handle, { sync: true });
-    toast.success(`导出成功：${file.name}`);
+    toast.success(() => t('csvExported', { name: file.name }));
   } catch (e) {
     console.error(e);
     // 写失败直接退出，不报成功；写了一半的文件删掉，不留下看似完整的残档。
     await closeWriter(file.handle, { abort: true }).catch(() => {});
-    toast.error(`导出失败: ${e}`);
+    toast.error(() => t('csvExportFailed', { detail: csvErrorText(e) }));
   }
 }
 
@@ -113,7 +119,7 @@ let cancelActiveImport = null;
 function parseFileInWorker(handle, options, generation) {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') {
-      reject(new Error('此环境不支持 CSV 导入 Worker'));
+      reject(new Error(t('csvUnsupportedWorker')));
       return;
     }
     /** @type {Worker} */
@@ -137,7 +143,7 @@ function parseFileInWorker(handle, options, generation) {
       if (error) reject(error);
       else resolve(result);
     };
-    const cancel = () => finish(new Error('CSV 导入已被新任务取消'));
+    const cancel = () => finish(new Error(t('csvImportCancelled')));
     cancelActiveImport = cancel;
     worker.onmessage = (event) => {
       if (generation !== importGeneration) return cancel();
@@ -147,10 +153,10 @@ function parseFileInWorker(handle, options, generation) {
         ackWaiter = null;
         waiter?.();
       } else if (message?.type === 'done') finish(null, message.result);
-      else finish(new Error(message?.error || 'CSV Worker 返回无效结果'));
+      else finish(new Error(message?.error || t('csvWorkerInvalid')));
     };
-    worker.onerror = (event) => finish(new Error(event.message || 'CSV Worker 执行失败'));
-    worker.onmessageerror = () => finish(new Error('CSV Worker 数据传输失败'));
+    worker.onerror = (event) => finish(new Error(event.message || t('csvWorkerFailed')));
+    worker.onmessageerror = () => finish(new Error(t('csvTransferFailed')));
 
     /** 发一条消息并等 Worker 回执。 @param {unknown} message @param {Transferable[]} [transfer] */
     const send = (message, transfer = []) =>
@@ -190,7 +196,7 @@ function restoreColumns(raw) {
       source.length > source._chunks.length * F64_CHUNK_SIZE ||
       source._chunks.length !== Math.ceil(source.length / F64_CHUNK_SIZE)
     )
-      throw new Error('CSV Worker 返回无效列缓冲');
+      throw new Error('csvWorkerInvalid');
     columns[key] = Object.assign(Object.create(F64Col.prototype), source);
   }
   return columns;
@@ -201,12 +207,13 @@ async function importOpenedFile(
   file,
   generation,
   reportFailure = (error) => {
-    toast.error(`导入失败: ${error.message ?? error}`);
+    toast.error(() => t('csvImportFailed', { detail: csvErrorText(error) }));
   },
 ) {
   if (!file) return false;
   if (generation !== importGeneration) return false;
-  if (file.size >= LARGE_IMPORT_BYTES) toast.info(`正在导入 ${file.name}（${(file.size / 1048576).toFixed(0)} MB）…`);
+  if (file.size >= LARGE_IMPORT_BYTES)
+    toast.info(() => t('csvImporting', { name: file.name, size: (file.size / 1048576).toFixed(0) }));
   try {
     const imported = /** @type {ReturnType<import('./csv-import-core.js').computeCsvImport>} */ (
       await parseFileInWorker(
@@ -223,10 +230,9 @@ async function importOpenedFile(
     const n = cols.x.length;
 
     if (state.isRecording || state.chartSeries.timestamps.length > 0) {
-      const message = state.isRecording
-        ? '当前正在录制，导入 CSV 将停止录制并清除现有记录。\n确定要继续吗？'
-        : '当前已有数据，导入 CSV 将清除现有记录。\n确定要继续吗？';
-      const confirmed = await ask(message, { title: '确认导入', kind: 'warning' });
+      const replacingRecording = state.isRecording;
+      const message = () => t(replacingRecording ? 'csvImportReplaceRecording' : 'csvImportReplaceData');
+      const confirmed = await ask(message, { title: () => t('confirm'), kind: 'warning' });
       if (!confirmed || generation !== importGeneration) return false;
     }
 
@@ -264,7 +270,7 @@ async function importOpenedFile(
       cc2: cols.cc2.valueAt(last),
     });
     refreshRecordButton();
-    toast.success(`成功导入 ${n} 条数据`);
+    toast.success(() => t('csvImported', { count: n }));
     return true;
   } catch (e) {
     if (generation !== importGeneration) return false;
@@ -288,13 +294,13 @@ export async function importCSV() {
   } catch (e) {
     if (generation !== importGeneration) return;
     console.error(e);
-    toast.error(`导入失败: ${/** @type {Error} */ (e).message ?? e}`);
+    toast.error(() => t('csvImportFailed', { detail: csvErrorText(e) }));
   }
 }
 
 /** 恢复并清理一份异常退出留下的临时记录；取消或失败时保留文件。
  * @param {string} id
- * @param {(message: string) => void} [reportFailure]
+ * @param {(message: import('./ui/toast.js').ToastText) => void} [reportFailure]
  * @returns {Promise<boolean>}
  */
 export async function importSpoolRecovery(id, reportFailure = toast.error) {
@@ -304,19 +310,19 @@ export async function importSpoolRecovery(id, reportFailure = toast.error) {
   try {
     file = await openSpoolRecovery(id);
     const imported = await importOpenedFile(file, generation, (error) =>
-      reportFailure(`恢复临时记录失败: ${error.message ?? error}`),
+      reportFailure(() => t('recoveryImportFailed', { detail: csvErrorText(error) })),
     );
     if (!imported || generation !== importGeneration) return false;
     try {
       await deleteSpoolRecovery(id);
     } catch (error) {
-      reportFailure(`记录已恢复，但临时文件清理失败，请重试删除: ${error}`);
+      reportFailure(() => t('recoveryCleanupFailed', { detail: csvErrorText(error) }));
       return false;
     }
     return true;
   } catch (error) {
     console.error(error);
-    reportFailure(`恢复临时记录失败: ${error}`);
+    reportFailure(() => t('recoveryImportFailed', { detail: csvErrorText(error) }));
     return false;
   }
 }

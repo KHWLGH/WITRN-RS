@@ -6,6 +6,7 @@
  * close() 继续进入现有 onCloseRequested 确认流程。
  */
 
+import { onLanguageChange, t } from '../i18n.js';
 import { state } from '../state.js';
 
 /** @param {boolean} visible */
@@ -28,6 +29,13 @@ const RESIZE_DIRECTIONS = /** @type {const} */ ({
 });
 
 let initialized = false;
+let refreshLanguage = () => {};
+
+export function refreshWindowControlLanguage() {
+  refreshLanguage();
+}
+
+onLanguageChange(() => refreshWindowControlLanguage());
 
 /** @param {HTMLElement} btn @param {string} icon @param {string} label */
 function setIcon(btn, icon, label) {
@@ -49,10 +57,10 @@ function restyleDecorumButtons() {
     const maxBtn = document.getElementById('decorum-tb-maximize');
     const closeBtn = document.getElementById('decorum-tb-close');
     if (!minBtn || !maxBtn || !closeBtn) return false;
-    setIcon(minBtn, 'subtract', '最小化');
-    setIcon(closeBtn, 'dismiss', '关闭');
+    setIcon(minBtn, 'subtract', t('windowMinimize'));
+    setIcon(closeBtn, 'dismiss', t('windowClose'));
     const maximized = document.documentElement.classList.contains('is-maximized');
-    setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? '还原' : '最大化');
+    setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? t('windowRestore') : t('windowMaximize'));
     attachSnapGuard(maxBtn);
     return true;
   };
@@ -154,7 +162,13 @@ export function initWindowControls() {
           setIcon(
             maxBtn,
             expanded ? 'restore' : 'maximize',
-            isMac ? (fullscreen ? '退出全屏' : '进入全屏') : maximized ? '还原' : '最大化',
+            isMac
+              ? fullscreen
+                ? t('windowExitFullscreen')
+                : t('windowEnterFullscreen')
+              : maximized
+                ? t('windowRestore')
+                : t('windowMaximize'),
           );
         }
         paint();
@@ -182,14 +196,37 @@ export function initWindowControls() {
       container.appendChild(btn);
       return btn;
     };
-    mkBtn('minimize', 'subtract', '最小化', () => appWindow.minimize());
-    maxBtn = mkBtn('maximize', 'maximize', isMac ? '进入全屏' : '最大化', async () => {
+    mkBtn('minimize', 'subtract', t('windowMinimize'), () => appWindow.minimize());
+    maxBtn = mkBtn('maximize', 'maximize', isMac ? t('windowEnterFullscreen') : t('windowMaximize'), async () => {
       if (isMac) await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
       else await appWindow.toggleMaximize();
       await syncWindowState();
     });
-    mkBtn('close', 'dismiss', '关闭', () => appWindow.close());
+    mkBtn('close', 'dismiss', t('windowClose'), () => appWindow.close());
   }
+
+  refreshLanguage = () => {
+    const maximized = root.classList.contains('is-maximized');
+    const fullscreen = root.classList.contains('is-fullscreen');
+    const min = document.getElementById('decorum-tb-minimize') ?? container.querySelector('.wc-btn-minimize');
+    const close = document.getElementById('decorum-tb-close') ?? container.querySelector('.wc-btn-close');
+    if (min instanceof HTMLElement) setIcon(min, 'subtract', t('windowMinimize'));
+    if (close instanceof HTMLElement) setIcon(close, 'dismiss', t('windowClose'));
+    if (maxBtn) {
+      setIcon(
+        maxBtn,
+        isMac ? (fullscreen ? 'restore' : 'maximize') : maximized ? 'restore' : 'maximize',
+        isMac
+          ? fullscreen
+            ? t('windowExitFullscreen')
+            : t('windowEnterFullscreen')
+          : maximized
+            ? t('windowRestore')
+            : t('windowMaximize'),
+      );
+    }
+    paint();
+  };
 
   // 全屏切换也会触发 resize；合并并发状态读取，避免较旧结果覆盖最新状态。
   void appWindow.onResized(() => void syncWindowState());

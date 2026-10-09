@@ -7,11 +7,14 @@
  * #toast-region（页面加载即存在，aria-live 对读屏器更可靠），缺失时兜底创建。
  */
 
+import { errorText, onLanguageChange, t } from '../i18n.js';
+
 /** @typedef {'info'|'success'|'warning'|'error'} ToastSeverity */
-/** @typedef {{ label: string, onClick: () => void | boolean | Promise<void | boolean>, disabled?: () => boolean }} ToastAction */
+/** @typedef {{ label: string|(() => string), onClick: () => void | boolean | Promise<void | boolean>, disabled?: () => boolean }} ToastAction */
 /** @typedef {{ severity?: ToastSeverity, duration?: number, action?: ToastAction, actions?: ToastAction[] }} ToastOptions */
-/** @typedef {{ dismiss: () => void, refreshActions: () => void, setText: (text: string) => void }} ToastHandle */
-/** @typedef {{ text: string, options: ToastOptions, handle: ToastHandle }} QueuedToast */
+/** @typedef {string|(() => string)} ToastText */
+/** @typedef {{ dismiss: () => void, refreshActions: () => void, refreshLanguage: () => void, setText: (text: ToastText) => void }} ToastHandle */
+/** @typedef {{ text: ToastText, options: ToastOptions, handle: ToastHandle }} QueuedToast */
 
 const MAX_VISIBLE = 3;
 const DEFAULT_DURATION = 4000;
@@ -29,6 +32,8 @@ let regionEl = null;
 /** @type {QueuedToast[]} */
 const pending = [];
 let visibleCount = 0;
+/** @type {Set<import('./toast.js').ToastHandle>} */
+const activeHandles = new Set();
 
 function ensureRegion() {
   if (regionEl?.isConnected) return regionEl;
@@ -62,7 +67,8 @@ function render({ text, options, handle }) {
 
   const textEl = document.createElement('div');
   textEl.className = 'toast-text';
-  textEl.textContent = text;
+  let currentText = text;
+  textEl.textContent = typeof currentText === 'function' ? currentText() : currentText;
   el.appendChild(textEl);
 
   const actions = options.actions ?? (options.action ? [options.action] : []);
@@ -75,7 +81,7 @@ function render({ text, options, handle }) {
     const actionBtn = document.createElement('button');
     actionBtn.type = 'button';
     actionBtn.className = 'btn toast-action';
-    actionBtn.textContent = action.label;
+    actionBtn.textContent = typeof action.label === 'function' ? action.label() : action.label;
     actionButtons.push({ button: actionBtn, action });
     actionBtn.addEventListener('click', async () => {
       if (dismissed || busy || action.disabled?.()) return;
@@ -86,7 +92,7 @@ function render({ text, options, handle }) {
         if ((await action.onClick()) !== false) dismiss();
       } catch (error) {
         console.error('通知操作失败:', error);
-        toast.error(`操作失败: ${error}`);
+        toast.error(() => t('operationFailed', { detail: errorText(error) }));
       } finally {
         busy = false;
         refreshActions();
@@ -100,8 +106,8 @@ function render({ text, options, handle }) {
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'toast-close';
-  closeBtn.title = '关闭';
-  closeBtn.setAttribute('aria-label', '关闭通知');
+  closeBtn.title = t('close');
+  closeBtn.setAttribute('aria-label', t('closeNotification'));
   closeBtn.innerHTML = '<i class="fi fi-dismiss" aria-hidden="true"></i>';
   closeBtn.addEventListener('click', () => dismiss());
   el.appendChild(closeBtn);
@@ -117,7 +123,10 @@ function render({ text, options, handle }) {
   };
 
   const refreshActions = () => {
-    for (const { button, action } of actionButtons) button.disabled = dismissed || busy || !!action.disabled?.();
+    for (const { button, action } of actionButtons) {
+      button.textContent = typeof action.label === 'function' ? action.label() : action.label;
+      button.disabled = dismissed || busy || !!action.disabled?.();
+    }
     closeBtn.disabled = dismissed || busy;
     el.setAttribute('aria-busy', String(busy));
   };
@@ -125,6 +134,7 @@ function render({ text, options, handle }) {
   const dismiss = () => {
     if (dismissed) return;
     dismissed = true;
+    activeHandles.delete(handle);
     stopTimer();
     refreshActions();
     el.classList.add('toast-leaving');
@@ -151,10 +161,18 @@ function render({ text, options, handle }) {
 
   handle.dismiss = dismiss;
   handle.refreshActions = refreshActions;
+  handle.refreshLanguage = () => {
+    textEl.textContent = typeof currentText === 'function' ? currentText() : currentText;
+    refreshActions();
+    closeBtn.title = t('close');
+    closeBtn.setAttribute('aria-label', t('closeNotification'));
+  };
   handle.setText = (message) => {
-    textEl.textContent = message;
+    currentText = message;
+    textEl.textContent = typeof message === 'function' ? message() : message;
   };
   refreshActions();
+  activeHandles.add(handle);
   region.appendChild(el);
   visibleCount++;
   startTimer();
@@ -169,7 +187,7 @@ function drainQueue() {
 
 /**
  * 显示一条 toast。
- * @param {string} text
+ * @param {ToastText} text
  * @param {ToastOptions} [options]
  */
 export function toast(text, options = {}) {
@@ -180,6 +198,7 @@ export function toast(text, options = {}) {
       if (index >= 0) pending.splice(index, 1);
     },
     refreshActions: () => {},
+    refreshLanguage: () => {},
     setText: (message) => {
       notification.text = message;
     },
@@ -193,11 +212,15 @@ export function toast(text, options = {}) {
   return handle;
 }
 
-/** @param {string} text @param {ToastOptions} [options] */
+/** @param {ToastText} text @param {ToastOptions} [options] */
 toast.info = (text, options = {}) => toast(text, { ...options, severity: 'info' });
-/** @param {string} text @param {ToastOptions} [options] */
+/** @param {ToastText} text @param {ToastOptions} [options] */
 toast.success = (text, options = {}) => toast(text, { ...options, severity: 'success' });
-/** @param {string} text @param {ToastOptions} [options] */
+/** @param {ToastText} text @param {ToastOptions} [options] */
 toast.warning = (text, options = {}) => toast(text, { ...options, severity: 'warning' });
-/** @param {string} text @param {ToastOptions} [options] */
+/** @param {ToastText} text @param {ToastOptions} [options] */
 toast.error = (text, options = {}) => toast(text, { ...options, severity: 'error' });
+
+onLanguageChange(() => {
+  for (const handle of activeHandles) handle.refreshLanguage();
+});

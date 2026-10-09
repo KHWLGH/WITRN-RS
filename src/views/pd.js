@@ -10,6 +10,7 @@
  */
 
 import { runCooperativeSlices } from '../cooperative.js';
+import { errorText, t } from '../i18n.js';
 import { exportPdFile } from '../pd-export.js';
 import {
   buildRowOffsets,
@@ -33,7 +34,6 @@ import {
   PD_SOFT_CAP,
   parsePdCaptureFile,
   rowHeightOf,
-  VI_SAMPLE_TITLE,
   visibleRangeByOffsets,
 } from '../pd-model.js';
 import { debouncedSaveSettings } from '../settings.js';
@@ -190,7 +190,7 @@ function ingestOne(payload, live = true) {
   if (originTime === null && !isDivider(entry)) originTime = entry.t;
   if (log.length === PD_SOFT_CAP && !softCapWarned) {
     softCapWarned = true;
-    toast.warning(`PD 报文已达 ${PD_SOFT_CAP} 条，继续存储可能占用较多内存`);
+    toast.warning(() => t('pdSoftCap', { count: PD_SOFT_CAP }));
   }
   if (paused) {
     bufferedWhilePaused++;
@@ -400,7 +400,7 @@ function rebuildFilterAndWindow() {
       .catch((error) => {
         if (projectionWork === work) cancelProjection();
         console.error(error);
-        toast.error('PD 列表更新失败');
+        toast.error(() => t('pdListUpdateFailed'));
       });
     return;
   }
@@ -466,7 +466,7 @@ function patchWindow(start, end, origin) {
       (wantDivider ? node.classList.contains('pd-divider-row') : node.classList.contains('pd-row'));
     if (reusable && node instanceof HTMLElement) {
       if (wantDivider) {
-        const text = `── ${formatTime(entry.t)} 设备断开 ──`;
+        const text = `── ${formatTime(entry.t)} ${t('pdDisconnected')} ──`;
         if (node.textContent !== text) node.textContent = text;
       } else {
         updateMessageRow(node, /** @type {PdEntry} */ (entry), logIndex, i + 1, origin);
@@ -509,7 +509,7 @@ function buildRow(entry, logIndex, visibleN, origin) {
   if (isDivider(entry)) {
     const div = document.createElement('div');
     div.className = 'pd-divider-row';
-    div.textContent = `── ${formatTime(entry.t)} 设备断开 ──`;
+    div.textContent = `── ${formatTime(entry.t)} ${t('pdDisconnected')} ──`;
     return div;
   }
 
@@ -531,7 +531,7 @@ function buildRow(entry, logIndex, visibleN, origin) {
     dirCell(msg.direction ?? ''),
     cell('pd-col-obj', msg.obj ?? ''),
     cell('pd-col-rev', msg.rev ?? ''),
-    cell('pd-col-vi', vi, vi ? VI_SAMPLE_TITLE : undefined),
+    cell('pd-col-vi', vi, vi ? t('pdBusHint') : undefined),
     cell('pd-col-note', msg.summary, msg.summary),
   );
   return row;
@@ -566,7 +566,7 @@ function updateMessageRow(row, msg, logIndex, visibleN, origin) {
   }
   setCellText(kids[6], msg.obj ?? '');
   setCellText(kids[7], msg.rev ?? '');
-  setCellText(kids[8], vi, vi ? VI_SAMPLE_TITLE : '');
+  setCellText(kids[8], vi, vi ? t('pdBusHint') : '');
   setCellText(kids[9], msg.summary, msg.summary);
 }
 
@@ -651,13 +651,13 @@ async function renderDetail(entry, logIndex) {
       if (decoded && typeof decoded === 'object') meta = /** @type {PdMeta} */ (decoded);
     } catch (e) {
       console.error(e);
-      toast.error(`解码失败: ${e}`);
+      toast.error(() => t('decodeFailed', { detail: errorText(e) }));
       return;
     }
   }
   if (selectedIndex !== logIndex) return;
   if (!meta) {
-    toast.warning('这条报文没有可显示的解码结果');
+    toast.warning(() => t('noDecodeResult'));
     return;
   }
   cacheMeta(logIndex, meta);
@@ -682,7 +682,7 @@ function buildDetail(entry, meta) {
   if (vi) {
     const sample = document.createElement('div');
     sample.className = 'pd-detail-vi';
-    sample.title = VI_SAMPLE_TITLE;
+    sample.title = t('pdBusHint');
     sample.textContent = `V/I  ${vi}`;
     wrap.appendChild(sample);
   }
@@ -819,7 +819,7 @@ export function clearPdEntries() {
     .catch((e) => {
       console.error(e);
       acceptedGen = null;
-      toast.error(`清空 PD 日志失败: ${e}`);
+      toast.error(() => t('clearPdLogFailed', { detail: errorText(e) }));
     });
   rebuildFilterAndWindow();
 }
@@ -831,10 +831,12 @@ export async function requestPdClear() {
   const follow = followRecordingEnabled();
   if (log.length === 0 && !follow) return;
 
-  const head = log.length > 0 ? `确定要清空已捕获的 ${log.length} 条报文吗？` : 'PD 报文列表已是空的，确定要继续吗？';
-  const linked = follow ? '\n跟随记录已开启，监控图表、统计与累计能量也会一并重置。' : '';
-
-  const confirmed = await ask(head + linked, { title: '确认清空', kind: follow ? 'error' : 'warning' });
+  const confirmed = await ask(
+    () =>
+      (log.length > 0 ? t('clearPdPromptCount', { count: log.length }) : t('clearPdPromptEmpty')) +
+      (follow ? `\n${t('clearPdLinkedPrompt')}` : ''),
+    { title: () => t('clear'), kind: follow ? 'error' : 'warning' },
+  );
   if (!confirmed) return;
 
   clearPdEntries();
@@ -847,16 +849,16 @@ let exportPending = false;
 async function exportPdCapture() {
   if (exportPending) return;
   if (log.length === 0) {
-    toast.warning('没有可导出的报文');
+    toast.warning(() => t('noMessagesToExport'));
     return;
   }
   exportPending = true;
   try {
     const count = await exportPdFile(() => log);
-    if (count !== null) toast.success(`已导出 ${count} 条报文`);
+    if (count !== null) toast.success(() => t('exportPdCount', { count }));
   } catch (e) {
     console.error(e);
-    toast.error(`导出失败: ${e}`);
+    toast.error(() => t('csvExportFailed', { detail: errorText(e) }));
   } finally {
     exportPending = false;
   }
@@ -867,19 +869,23 @@ async function importPdCapture() {
   const { readTextFile } = window.__TAURI__.fs;
   try {
     if (log.length > 0) {
-      const confirmed = await ask(`导入将替换当前已捕获的 ${log.length} 条报文，确定继续吗？`, {
-        title: '确认导入',
+      const confirmed = await ask(() => t('importPdReplace', { count: log.length }), {
+        title: () => t('import'),
         kind: 'warning',
       });
       if (!confirmed) return;
     }
-    const selected = await open({ multiple: false, filters: [{ name: 'PD Capture', extensions: ['json'] }] });
+    const selected = await open({
+      title: t('pdImportTitle'),
+      multiple: false,
+      filters: [{ name: t('pdFile'), extensions: ['json'] }],
+    });
     if (!selected) return;
 
     const content = await readTextFile(/** @type {string} */ (selected));
     const result = parsePdCaptureFile(JSON.parse(content));
     if (!result.ok) {
-      toast.error(`导入失败: ${result.error}`);
+      toast.error(() => t('csvImportFailed', { detail: errorText(result.description) }));
       return;
     }
 
@@ -901,7 +907,7 @@ async function importPdCapture() {
         }),
       });
       if (!Array.isArray(loaded)) {
-        toast.error('导入失败: 后端无法替换报文日志');
+        toast.error(() => t('pdBackendReplaceFailed'));
         return;
       }
       nextEntries = [];
@@ -914,7 +920,7 @@ async function importPdCapture() {
       if (typeof gen === 'number' && Number.isFinite(gen)) {
         acceptedGen = gen;
       } else {
-        toast.error('导入失败: 无法清空后端报文日志');
+        toast.error(() => t('pdBackendClearFailed'));
         return;
       }
     }
@@ -937,10 +943,11 @@ async function importPdCapture() {
     }
 
     rebuildFilterAndWindow();
-    toast.success(`成功导入 ${log.length} 条报文`);
+    const count = log.length;
+    toast.success(() => t('importPdCount', { count }));
   } catch (e) {
     console.error(e);
-    toast.error(`导入失败: ${/** @type {Error} */ (e).message}`);
+    toast.error(() => t('csvImportFailed', { detail: errorText(e) }));
   } finally {
     ingestSuspended = false;
     syncBackendCaptureFlag();
@@ -962,10 +969,10 @@ function updateEmptyState() {
 function updateCounter() {
   const counter = els.counter();
   if (!counter) return;
-  const parts = [`${log.length} 条`];
-  if (paused && bufferedWhilePaused > 0) parts.push(`已缓冲 ${bufferedWhilePaused}`);
+  const parts = [t('pdCounter', { count: log.length })];
+  if (paused && bufferedWhilePaused > 0) parts.push(t('pdBuffered', { count: bufferedWhilePaused }));
   const capture = getPdCaptureState();
-  if (!capture.paused && capture.followSuspended) parts.push('跟随记录等待中');
+  if (!capture.paused && capture.followSuspended) parts.push(t('pdFollowWaiting'));
   counter.textContent = parts.join(' / ');
 }
 
@@ -995,11 +1002,11 @@ export function applyPdSplitLayout() {
   if (handle) {
     handle.style.cursor = side ? 'col-resize' : 'row-resize';
     handle.setAttribute('aria-orientation', side ? 'vertical' : 'horizontal');
-    handle.setAttribute('aria-label', side ? '调整列表与详情宽度' : '调整列表与详情高度');
+    handle.setAttribute('aria-label', side ? t('pdAdjustWidth') : t('pdAdjustHeight'));
   }
   if (btn) {
     btn.setAttribute('aria-pressed', String(preferSide));
-    btn.title = preferSide ? '改回上下分栏' : '左右分栏（窗口宽度 ≥1400px 时生效）';
+    btn.title = preferSide ? t('pdSplitBack') : t('pdSplitSide');
     btn.setAttribute('aria-label', btn.title);
   }
   if (icon) {
@@ -1101,7 +1108,7 @@ export function initPdView() {
     pauseBtn.addEventListener('click', () => {
       if (followRecordingEnabled()) {
         if (!state.isRecording && !state.isConnected) {
-          toast.warning('请先连接设备');
+          toast.warning(() => t('pleaseConnect'));
           return;
         }
         state.__toggleRecording?.();
@@ -1178,5 +1185,19 @@ export function initPdView() {
 
 /** 每次切到 PD 视图：先补 seq 缺口，再重建过滤窗口。 */
 export function syncPdView() {
+  refreshPdLanguage();
   void fillPdGap().then(() => rebuildFilterAndWindow());
+}
+
+/** Refresh state-derived text without changing the capture gate, filters or selection. */
+export function refreshPdLanguage() {
+  syncPdCaptureUI(getPdCaptureState(), {
+    followEnabled: followRecordingEnabled(),
+    connected: state.isConnected,
+    recording: state.isRecording,
+  });
+  updateCounter();
+  applyPdSplitLayout();
+  for (const element of document.querySelectorAll('.pd-detail-vi')) element.setAttribute('title', t('pdBusHint'));
+  if (!viewHidden()) syncWindow(false);
 }

@@ -272,7 +272,7 @@ test('real PD Worker exports a fixed snapshot with bounded backpressure and clea
     const cleanup = cancelPdExport();
     releaseWrite();
     await cleanup;
-    await assert.rejects(cancelled, /已取消/);
+    await assert.rejects(cancelled, /pdExportCancelled/);
     assert.deepEqual(closes, [{ abort: true }], 'exit cancellation awaits incomplete-file cleanup');
     assert.ok(ModuleWorker.instances.at(-1).closed);
   } finally {

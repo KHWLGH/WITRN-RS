@@ -1,4 +1,5 @@
 // @ts-check
+import { t } from '../i18n.js';
 /**
  * @file 顶栏 Tab 条（Fluent TabView 习惯用法，参考 Windows Terminal）。
  *
@@ -17,7 +18,8 @@
  */
 export function initTabBar(container, tabs, onSelect) {
   container.setAttribute('role', 'tablist');
-  container.setAttribute('aria-label', '工作区');
+  container.setAttribute('aria-label', t('workspace'));
+  container.setAttribute('data-i18n-aria-label', 'workspace');
 
   /** @type {Map<string, HTMLButtonElement>} */
   const buttons = new Map();
@@ -34,6 +36,14 @@ export function initTabBar(container, tabs, onSelect) {
     btn.tabIndex = -1;
     btn.hidden = tab.hidden === true;
     btn.innerHTML = `<i class="fi fi-${tab.icon}" aria-hidden="true"></i><span>${tab.label}</span>`;
+    const key = { monitor: 'monitor', pd: 'pdWorkspace', trigger: 'protocolWorkspace' }[tab.id];
+    if (key) {
+      btn.querySelector('span')?.setAttribute('data-i18n', key);
+      btn.title = t(key);
+      btn.setAttribute('aria-label', t(key));
+      btn.setAttribute('data-i18n-title', key);
+      btn.setAttribute('data-i18n-aria-label', key);
+    }
     btn.addEventListener('click', () => onSelect(tab.id));
     container.appendChild(btn);
     buttons.set(tab.id, btn);

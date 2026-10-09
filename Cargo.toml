@@ -10,7 +10,7 @@ members = [
 [workspace.package]
 # The whole workspace releases as one product; crates are not published
 # independently, so they share the application's version.
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 rust-version = "1.85"
 license = "LGPL-3.0-or-later"
@@ -25,6 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hidapi = "2.6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sys-locale = "0.3"
 
 # Profiles live in this root manifest: the workspace is virtual, so anything written in
 # src-tauri/Cargo.toml would be ignored.

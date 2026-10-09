@@ -9,7 +9,15 @@
  * 并发：同一时刻只显示一个对话框，后到的请求排队串行弹出。
  */
 
-/** @typedef {{ title?: string, kind?: 'info'|'warning'|'error', okLabel?: string, cancelLabel?: string }} DialogOptions */
+import { onLanguageChange, t } from '../i18n.js';
+
+/** @typedef {string|(() => string)} DialogText */
+/** @typedef {{ title?: DialogText, kind?: 'info'|'warning'|'error', okLabel?: DialogText, cancelLabel?: DialogText }} DialogOptions */
+/** @param {DialogText} value */
+const textValue = (value) => (typeof value === 'function' ? value() : value);
+/** @type {(() => void)|null} */
+let refreshOpenDialog = null;
+onLanguageChange(() => refreshOpenDialog?.());
 
 const supportsDialog = typeof HTMLDialogElement === 'function';
 
@@ -41,12 +49,14 @@ function ensureDialog() {
 
   dialogEl = document.createElement('dialog');
   dialogEl.className = 'fluent-dialog';
+  dialogEl.setAttribute('aria-labelledby', 'fluent-dialog-title');
+  dialogEl.setAttribute('aria-describedby', 'fluent-dialog-body');
   dialogEl.innerHTML = [
     '<div class="fluent-dialog-header">',
     '  <i class="fluent-dialog-icon fi fi-info" aria-hidden="true"></i>',
-    '  <h2 class="fluent-dialog-title"></h2>',
+    '  <h2 id="fluent-dialog-title" class="fluent-dialog-title"></h2>',
     '</div>',
-    '<div class="fluent-dialog-body"></div>',
+    '<div id="fluent-dialog-body" class="fluent-dialog-body"></div>',
     '<div class="fluent-dialog-actions">',
     '  <button type="button" class="btn btn-accent fluent-dialog-ok"></button>',
     '  <button type="button" class="btn fluent-dialog-cancel"></button>',
@@ -63,7 +73,7 @@ function ensureDialog() {
 
 /**
  * 弹出对话框并等待用户选择。
- * @param {string} text
+ * @param {DialogText} text
  * @param {DialogOptions} options
  * @param {boolean} withCancel - false = 仅"确定"（message 语义）
  * @returns {Promise<boolean>}
@@ -75,18 +85,22 @@ function show(text, options, withCancel) {
       const dialog = /** @type {HTMLDialogElement} */ (dialogEl);
       const kind = options.kind ?? 'info';
 
-      if (titleEl) titleEl.textContent = options.title ?? '提示';
-      if (bodyEl) bodyEl.textContent = text;
+      const refresh = () => {
+        if (titleEl) titleEl.textContent = textValue(options.title ?? t('notice'));
+        if (bodyEl) bodyEl.textContent = textValue(text);
+        if (okBtn) okBtn.textContent = textValue(options.okLabel ?? t('ok'));
+        if (cancelBtn) cancelBtn.textContent = textValue(options.cancelLabel ?? t('cancel'));
+      };
+      refreshOpenDialog = refresh;
+      refresh();
       if (iconEl) {
         iconEl.className = `fluent-dialog-icon fi ${KIND_ICON[kind] ?? KIND_ICON.info}`;
         iconEl.setAttribute('data-kind', kind);
       }
       if (okBtn) {
-        okBtn.textContent = options.okLabel ?? '确定';
         okBtn.classList.toggle('btn-danger', kind === 'error');
       }
       if (cancelBtn) {
-        cancelBtn.textContent = options.cancelLabel ?? '取消';
         cancelBtn.hidden = !withCancel;
       }
 
@@ -97,6 +111,7 @@ function show(text, options, withCancel) {
       const finish = (result) => {
         if (settled) return;
         settled = true;
+        refreshOpenDialog = null;
         okBtn?.removeEventListener('click', onOk);
         cancelBtn?.removeEventListener('click', onCancel);
         dialog.removeEventListener('cancel', onNativeCancel);
@@ -143,14 +158,19 @@ function show(text, options, withCancel) {
 
 /**
  * 确认对话框（确定 / 取消）。
- * @param {string} text
+ * @param {DialogText} text
  * @param {DialogOptions} [options]
  * @returns {Promise<boolean>} 用户是否点了"确定"
  */
 export async function ask(text, options = {}) {
   if (!supportsDialog) {
     console.warn('[dialog] HTMLDialogElement 不可用，回退到 tauri dialog 插件');
-    return window.__TAURI__.dialog.ask(text, options);
+    return window.__TAURI__.dialog.ask(textValue(text), {
+      kind: options.kind,
+      title: textValue(options.title ?? t('notice')),
+      okLabel: textValue(options.okLabel ?? t('ok')),
+      cancelLabel: textValue(options.cancelLabel ?? t('cancel')),
+    });
   }
   return show(text, options, true);
 }

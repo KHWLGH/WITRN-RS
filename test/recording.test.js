@@ -356,7 +356,7 @@ test('CSV import waits for the pause boundary and does not replace data if it fa
   const { toast } = await import('../src/ui/toast.js');
   const { importCSV } = await import('../src/csv.js');
   toast.success = (message) => messages.push(['success', message]);
-  toast.error = (message) => messages.push(['error', message]);
+  toast.error = (message) => messages.push(['error', typeof message === 'function' ? message() : message]);
   toast.info = () => {};
   try {
     openNativeStream();
@@ -468,7 +468,7 @@ test('crash recovery preserves its file on cancel, parse/open failure and cleanu
     };
   }
   toast.success = () => {};
-  toast.error = (message) => errors.push(message);
+  toast.error = (message) => errors.push(typeof message === 'function' ? message() : message);
   console.error = () => {};
   try {
     openNativeStream();
@@ -501,7 +501,7 @@ test('crash recovery preserves its file on cancel, parse/open failure and cleanu
       'restored data remains available despite cleanup failure',
     );
     assert.equal(deleteCalls, 1);
-    assert.match(errors.at(-1), /已恢复.*清理失败/);
+    assert.match(errors.at(-1), /Recording recovered.*could not be deleted/);
 
     backend();
     assert.equal(await importSpoolRecovery(id), true);
@@ -552,7 +552,10 @@ test('shared recovery actions deduplicate scans and serialize restore/delete of 
         this.text = value;
       },
     };
-    notices.set(text.includes('first.partial') ? files[0].id : files[1].id, notice);
+    notices.set(
+      (typeof text === 'function' ? text() : text).includes('first.partial') ? files[0].id : files[1].id,
+      notice,
+    );
     return notice;
   };
   toast.error = () => {};
@@ -598,7 +601,13 @@ test('shared recovery actions deduplicate scans and serialize restore/delete of 
     assert.equal(await restoring, false);
     assert.equal(snapshot.length, 1);
     assert.equal(notices.get(files[0].id).dismissed, false);
-    assert.match(notices.get(files[0].id).text, /recovery open denied/);
+    const failureText = notices.get(files[0].id).text;
+    assert.match(failureText(), /recovery open denied/);
+    const { applyLanguage, t } = await import('../src/i18n.js');
+    await applyLanguage('ja');
+    assert.equal(notices.get(files[0].id).text, failureText, 'language refresh preserves the failure');
+    assert.equal(failureText(), `${files[0].name}\n${t('recoveryImportFailed', { detail: 'recovery open denied' })}`);
+    await applyLanguage('en');
     assert.equal(
       recovery.recoveryActionDisabled(files[0].id, 'recover'),
       false,
@@ -773,7 +782,7 @@ test('a skipped cell is disclosed on the mean instead of silently dropped', asyn
   state.settings.statsRange = true;
   try {
     updateStatsDisplay();
-    assert.equal(document.getElementById('avg-voltage').title, '1 个样本值缺失，未计入');
+    assert.equal(document.getElementById('avg-voltage').title, '1 sample value missing and excluded');
     assert.equal(document.getElementById('avg-current').title, '', '完整通道不该出现缺失提示');
   } finally {
     state.settings.statsRange = false;
@@ -859,7 +868,7 @@ test('large follow statistics coalesce appends, label completed bounds and avoid
     assert.equal(completed.endIndex, 11999);
     const workers = ModuleWorker.instances.length;
     updateStatsDisplay();
-    assert.match(document.getElementById('stats-snapshot-label').textContent, /更新中/);
+    assert.match(document.getElementById('stats-snapshot-label').textContent, /updating/);
     assert.equal(ModuleWorker.instances.length, workers, 'latest bounds wait for adaptive refresh');
     assert.equal(snapshots, 7, 'cache and active-task checks capture no additional references');
     suspendMonitorDisplay();

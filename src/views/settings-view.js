@@ -4,6 +4,7 @@
  * 首次打开时由 shell 的 init 钩子调用。
  */
 
+import { t } from '../i18n.js';
 import { processRecovery, recoveryActionDisabled, scanRecoveries, subscribeRecoveries } from '../recording-recovery.js';
 
 /** @typedef {{id:string, name:string, size:number, modified_ms:number}} RecoveryEntry */
@@ -18,7 +19,7 @@ export function showSpoolRecoveries(entries) {
     return;
   }
   el.hidden = false;
-  el.textContent = `发现 ${entries.length} 份未正常结束的临时记录，可在此恢复或删除。`;
+  el.textContent = t('recoveryFound', { count: entries.length });
   el.replaceChildren();
   for (const entry of entries) {
     const row = document.createElement('div');
@@ -28,11 +29,11 @@ export function showSpoolRecoveries(entries) {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'btn';
-    remove.textContent = '删除';
+    remove.textContent = t('delete');
     const recover = document.createElement('button');
     recover.type = 'button';
     recover.className = 'btn';
-    recover.textContent = '恢复';
+    recover.textContent = t('recover');
     recover.disabled = recoveryActionDisabled(entry.id, 'recover');
     remove.disabled = recoveryActionDisabled(entry.id, 'delete');
     recover.addEventListener('click', () => void processRecovery(entry.id, 'recover'));
