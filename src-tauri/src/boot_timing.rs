@@ -277,6 +277,9 @@ mod tests {
 
     #[test]
     fn stages_are_emitted_in_declared_order_then_alphabetically() {
+        // The stage map is process-global; do not rely on another test having
+        // recorded process_start first.
+        record_process_start();
         mark("zzz_last");
         mark("setup_enter");
         let keys: Vec<_> = build_report().stages_ms.keys().cloned().collect();

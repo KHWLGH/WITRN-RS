@@ -61,6 +61,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 - **采集读线程** —— WITRN 阻塞读 HID 报告，POWER-Z 读取 Vendor Bulk / AdcQueue；解码、节拍选点后写入容量 4096 的有界通道。PD 事件在通道满时进入最多 256 条的 pending，完整报文仍保留在后端日志。测量样本的未确认量达到 8192 时明确停止采集并报错。
 - **IPC 发射线程** —— 测量与 PD 分别发为 `device-data-batch` / `pd-data-batch`。测量按最多 64 点或 `clamp(4 × 采样间隔, 8 ms, 50 ms)` 合批，保留每点的序号、录制段与时间戳；前端消费后通过 ACK 确认。采集停止时先排空残留，再发末包回执与断开事件。
 
+因为采集能否继续取决于前端 ACK，窗口不可见时前端也必须照常运行。macOS 上两件事会破坏这一点，因此分别处理：WKWebView 默认挂起不可见的页面，主窗口配置 `backgroundThrottling: "disabled"`（macOS 14+）；App Nap 会合并整个进程的定时器并降低线程优先级，读线程存活期间持有 `NSProcessInfo` activity（`src-tauri/src/app_nap.rs`）退出 App Nap，并带 `LatencyCritical`：只退出 App Nap 时，最小化窗口下读线程仍偶尔迟醒（实测最大 36 ms），迟到的报告按主机接收时刻打戳后在 10 ms 选择窗口里被合并。读线程收到非零的录制段（`set_recording_segment`）时换成同时阻止系统空闲睡眠的 activity，收到 0（暂停、停止、清空）时换回只退出 App Nap 的那个；先开始新的再结束旧的，切换时不留空档。屏幕熄灭、合盖和手动睡眠不受影响。Windows 的 WebView2 最小化时仍在运行，不受这两项影响。
+
 `BackgroundTask::stop()` 先置停止标志再 `join`，且**顺序固定为先生产者后消费者** —— 反过来会让读线程写入一个没人消费的通道。
 
 `shutdown` 命令标注 `#[tauri::command(async)]`，这样它不会在主线程上 join 那些正在 `emit` 的工作线程（否则互相等待会死锁）。停完线程后 `destroy` 主窗口，而不是 `close` —— Tauri v2 的 `close()` 会重新派发 `close-requested`，造成退出回环。

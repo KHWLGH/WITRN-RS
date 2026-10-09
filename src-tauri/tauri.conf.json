@@ -23,7 +23,8 @@
         "decorations": false,
         "shadow": true,
         "transparent": false,
-        "backgroundColor": "#1f1f1f"
+        "backgroundColor": "#1f1f1f",
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

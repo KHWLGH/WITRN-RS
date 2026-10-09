@@ -1,4 +1,5 @@
 mod acquire;
+mod app_nap;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
 mod file_io;

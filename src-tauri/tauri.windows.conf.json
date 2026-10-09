@@ -14,6 +14,7 @@
         "shadow": true,
         "transparent": false,
         "backgroundColor": "#1f1f1f",
+        "backgroundThrottling": "disabled",
         "additionalBrowserArgs": "--enable-gpu-rasterization --enable-features=CanvasOopRasterization"
       }
     ]
