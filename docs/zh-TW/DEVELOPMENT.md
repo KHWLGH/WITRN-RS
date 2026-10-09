@@ -20,7 +20,7 @@
 
 在「設定 → 外觀 → 語言」可選擇跟隨系統、简体中文、繁體中文、English、日本語。切換立即生效並儲存偏好，保留連線、記錄、資料、圖表範圍、篩選和選中報文；重設設定回到自動模式。
 
-Linux 按第一項非空的 LC_ALL → LC_MESSAGES → LANG 檢測；Windows／macOS 使用原生系統 locale。原生不可用時採用 WebView 首選語言，最終回退英文。Hans 優先選擇簡中、Hant 優先選擇繁中；否則 CN／SG 和無區域 zh 為簡中，TW／HK／MO 為繁中，ja 為日文，其餘含 C／POSIX 為英文。統一處理大小寫、下劃線、編碼與修飾後綴；手動選擇覆蓋自動檢測。
+Linux 按第一項非空的 LC_ALL → LC_MESSAGES → LANG 偵測；Windows／macOS 使用原生系統 locale。原生不可用時採用 WebView 首選語言，最終回退英文。Hans 優先選擇簡中、Hant 優先選擇繁中；否則 CN／SG 和無區域 zh 為簡中，TW／HK／MO 為繁中，ja 為日文，其餘含 C／POSIX 為英文。統一處理大小寫、下劃線、編碼與修飾後綴；手動選擇覆蓋自動偵測。
 
 ```bash
 LANG=en_US.UTF-8 ./laPower.AppImage
@@ -30,11 +30,11 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 
 ## 詞典維護與翻譯檢查
 
-src/i18n.js 提供 t(key, params)、locale 解析和語言變更訂閱，四份詞典離線打包，英文作為基準與缺詞回退。src/i18n-messages.js 的四列依次為英文、簡中、繁中、日文。使用語義鍵名，保持插值參數名稱一致；含數量的消息按需補充單數版本。使用者文件以簡中版本為內容基準，其他語言的內容由人工校對。
+src/i18n.js 提供 t(key, params)、locale 解析和語言變更訂閱，四份詞典離線打包，英文作為基準與缺詞回退。src/i18n-messages.js 的四列依次為英文、簡中、繁中、日文。使用語義鍵名，保持插值參數名稱一致；含數量的訊息按需補充單數版本。使用者文件以簡中版本為內容基準，其他語言的內容由人工校對。
 
-靜態 HTML 使用英文兜底和 data-i18n／data-i18n-title／data-i18n-placeholder／data-i18n-aria-label／data-i18n-alt；含圖示或輸入控制項的元素只標記文字 span。動態內容通過 t 產生，持續通知和日誌用延遲文字函數。切換只更新標籤、選單、下拉和圖表，不能重新連線或重建資料。
+靜態 HTML 使用英文兜底和 data-i18n／data-i18n-title／data-i18n-placeholder／data-i18n-aria-label／data-i18n-alt；含圖示或輸入控制項的元素只標記文字 span。動態內容通過 t 產生，持續通知和記錄用延遲文字函數。切換只更新標籤、選單、下拉和圖表，不能重新連線或重建資料。
 
-應用後端錯誤使用 {code, params, detail?}，異步事件保留原有字段並添加 description；前端翻譯 code，保留原始診斷，仍相容插件字串錯誤。檔案對話框標題與過濾器由前端翻譯，原生按鈕跟隨 OS。PD 標準名、解碼字段、原始回覆、單位和 CSV／PD 資料格式保持相容。
+應用後端錯誤使用 {code, params, detail?}，異步事件保留原有欄位並添加 description；前端翻譯 code，保留原始診斷，仍相容插件字串錯誤。檔案對話框標題與篩選器由前端翻譯，原生按鈕跟隨 OS。PD 標準名、解碼欄位、原始回覆、單位和 CSV／PD 資料格式保持相容。
 
 ```bash
 node --test test/i18n.test.js test/settings-persistence.test.js
@@ -80,9 +80,9 @@ npx --no-install tauri build
 npm run version:set -- 0.2.3
 ```
 
-將 `0.2.3` 換成目標版本即可。命令接受不含前導零的 `X.Y.Z`，先校驗所有檔案，再同步以下位置；重複設定同一版本不會重複寫入，也不會創建 Git 提交或 tag、更新依賴或修改更新日誌：
+將 `0.2.3` 換成目標版本即可。命令接受不含前導零的 `X.Y.Z`，先校驗所有檔案，再同步以下位置；重複設定同一版本不會重複寫入，也不會創建 Git 提交或 tag、更新依賴或修改更新記錄：
 
-| 檔案 | 字段 |
+| 檔案 | 欄位 |
 | --- | --- |
 | `package.json` | `version` |
 | `package-lock.json` | 頂層與根包 `version` |
@@ -113,7 +113,7 @@ macOS 建置顯式使用 `--bundles app,dmg`：Tauri 在僅建置 DMG 時會清�
 
 ### 推送版本 Tag 自動發佈
 
-完成上述首次驗收後，更新版本、整理更新日誌、運行質量檢查並提交，再推送與清單一致的 Tag，例如：
+完成上述首次驗收後，更新版本、整理更新記錄、運行質量檢查並提交，再推送與清單一致的 Tag，例如：
 
 ```bash
 git tag v0.2.3
@@ -143,7 +143,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-`npm test` 使用 Node 內置測試運行器，覆蓋純邏輯、資料處理、協議/檔案契約、安全邊界和版本同步。測試檔案按核心領域組織，當前保留的主要檔案包括：
+`npm test` 使用 Node 內置測試運行器，覆蓋純邏輯、資料處理、協定/檔案契約、安全邊界和版本同步。測試檔案按核心領域組織，當前保留的主要檔案包括：
 
 ```text
 chart-buckets  chart-columns  chart-extrema  chart-window
@@ -153,7 +153,7 @@ recording     recording-spool  security-csp  settings-persistence
 version-sync  bench-gate
 ```
 
-Rust workspace 測試、格式檢查、Clippy 和協議 crate 的 feature 組合檢查繼續保留。涉及 `usbpd-parser` 或 `witrn-hid` 的 feature 門時，按 CI 的組合補跑：
+Rust workspace 測試、格式檢查、Clippy 和協定 crate 的 feature 組合檢查繼續保留。涉及 `usbpd-parser` 或 `witrn-hid` 的 feature 門時，按 CI 的組合補跑：
 
 ```bash
 for combo in \
@@ -169,15 +169,15 @@ done
 
 ## 測試與迴歸邊界
 
-- 普通功能增加、刪除、重命名，UI 佈局、樣式、文案和選項列表變化，預設不新增迴歸測試。
-- 只有涉及資料丟失或損壞、協議相容、崩潰或死鎖、安全邊界、發佈建置不變量，或已經確認的高影響歷史缺陷時才增加測試。
+- 普通功能增加、刪除、重命名，UI 佈局、樣式、文案和選項清單變化，預設不新增迴歸測試。
+- 只有涉及資料丟失或損壞、協定相容、崩潰或死鎖、安全邊界、發佈建置不變量，或已經確認的高影響歷史缺陷時才增加測試。
 - 優先補充現有核心測試，不為每個小功能新建測試檔案、設計方案或 CI job。
 - 效能 benchmark 和真機檢查按需手動運行，不作為每次改動的瀏覽器自動迴歸。
 - CI 保持固定的核心檢查集合，不因單個功能增加專用迴歸流程。
 
 ## 開發展示工具
 
-`tools/showcase/` 是獨立的瀏覽器開發工具，提供虛擬 WITRN K2 與 POWER-Z KM003C、確定性的測量曲線、PD 報文和協議控制結果。資料仍經過軟體現有攝入與渲染邏輯；完整標題列使用 decorum 同款控制項結構與軟體自身的圖示、樣式，視窗行為虛擬化。工具不連線真實儀表，不進入 `src/`、`out/` 或安裝包，也不加入瀏覽器 CI。
+`tools/showcase/` 是獨立的瀏覽器開發工具，提供虛擬 WITRN K2 與 POWER-Z KM003C、確定性的測量曲線、PD 報文和協定控制結果。資料仍經過軟體現有攝入與渲染邏輯；完整標題列使用 decorum 同款控制項結構與軟體自身的圖示、樣式，視窗行為虛擬化。工具不連線真實儀表，不進入 `src/`、`out/` 或安裝包，也不加入瀏覽器 CI。
 
 首次準備：
 
@@ -193,9 +193,11 @@ npm run showcase:dev
 npm run showcase:capture
 ```
 
-預覽預設監聽 `http://127.0.0.1:4173`，預設顯示淺色主題；獨立軟體視圖可用 `/app/?theme=dark` 或 `/app/?theme=system` 指定深色或跟隨系統。軟體標題列可選擇虛擬裝置、連線與中斷連線，記錄按鈕可開始和暫停。開發工具外層提供「填充 120 秒展示資料」「凍結」「繼續模擬」「推進 10 秒」「重設預覽」；填充按鈕自動連線當前選擇的裝置與本機溫度源並開始記錄。協議控制需要選擇 POWER-Z 並連線，然後打開 PDM。連接埠可用 `npm run showcase:dev -- --port 4174` 指定，服務只監聽本機。
+預覽預設監聽 `http://127.0.0.1:4173`，預設顯示淺色主題；獨立軟體視圖可用 `/app/?theme=dark` 或 `/app/?theme=system` 指定深色或跟隨系統。軟體標題列可選擇虛擬裝置、連線與中斷連線，記錄按鈕可開始和暫停。開發工具外層提供「填充 120 秒展示資料」「凍結」「繼續模擬」「推進 10 秒」「重設預覽」；填充按鈕自動連線當前選擇的裝置與儀表溫度源並開始記錄。協定控制需要選擇 POWER-Z 並連線，然後開啟 PDM。連接埠可用 `npm run showcase:dev -- --port 4174` 指定，服務只監聽本機。
 
-截圖命令使用 Chromium、Windows 風格、1280×800 CSS 視口、2 倍像素密度及 100% 介面縮放，產生 2560×1600 PNG。預設使用 POWER-Z、本機溫度源與相同的 120 秒模擬資料，先凍結虛擬時間，再等待實際圖表、報文詳情、字體與控制項渲染完成。輸出為 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每種語言各 8 張展示圖（共 32 張）。
+截圖命令使用 Chromium、Windows 風格、1280×800 CSS 視口、2 倍像素密度及 100% 介面縮放，產生 2560×1600 PNG。預設使用 POWER-Z、儀表溫度源與相同的 120 秒模擬資料，先凍結虛擬時間，再等待實際圖表、報文詳情、字體與控制項渲染完成。輸出為 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每種語言各 8 張展示圖（共 32 張）。
+
+關於頁版本讀取 package.json，截圖命令會驗證版本、語言與頁面溢位。截圖只寫入對應語言子目錄，不再產生根目錄中的重複副本。
 
 可以只截取指定頁面、主題或更改輸出目錄：
 
@@ -204,11 +206,11 @@ npm run showcase:capture -- --theme light --page pd,trigger --output output/show
 npm run showcase:capture -- --help
 ```
 
-`--language` 支持 zh-CN、zh-TW、en、ja（逗號分隔，預設全部）；`--theme` 支持 `light,dark`，預設按淺色、深色順序產生；`--page` 支持 `record,pd,trigger,settings`。輸出目錄相對於儲存庫根目錄，也可使用絕對路徑。修改 `tools/showcase/scenario.js` 可以調整虛擬裝置信息、隨機種子、充電曲線、握手時刻及 PDO / 協議檢測結果。`bridge.js` 實現 Tauri 命令、事件、錄製段、ACK、內存設定與檔案句柄；未實現的調用會明確報錯。CSV / PD 匯出通過瀏覽器下載，CSV 匯入通過瀏覽器檔案選擇器；PD 匯入僅支持包含已固化樣例原始報文的檔案，任意真機報文解碼仍應使用原生軟體。
+`--language` 支援 zh-CN、zh-TW、en、ja（逗號分隔，預設全部）；`--theme` 支援 `light,dark`，預設按淺色、深色順序產生；`--page` 支援 `record,pd,trigger,settings`。輸出目錄相對於儲存庫根目錄，也可使用絕對路徑。修改 `tools/showcase/scenario.js` 可以調整虛擬裝置資訊、隨機種子、充電曲線、握手時刻及 PDO / 協定偵測結果。`bridge.js` 實現 Tauri 命令、事件、錄製段、ACK、記憶體設定與檔案句柄；未實現的調用會明確報錯。CSV / PD 匯出通過瀏覽器下載，CSV 匯入通過瀏覽器檔案選擇器；PD 匯入僅支援包含已固化樣例原始報文的檔案，任意真機報文解碼仍應使用原生軟體。
 
 `pd-fixtures.json` 儲存由現有 `witrn-hid` Rust 解析器產生的原始報文與解碼樹，普通預覽和截圖無需 Rust 編譯。更改 PD 原始樣例後，可在安裝 Rust 的環境中運行 `node tools/showcase/generate-pd.mjs` 重新產生；臨時產生器寫入忽略的 `output/`，編譯產物寫入 `target/`。
 
-瀏覽器上下文使用內存設定與檔案，不讀寫真實應用的資料目錄。軟體使用新的標識 `io.github.khwlgh.lapower`，啟動測量工具也已同步該標識；舊 WITRN-RS 設定不會自動遷移。
+瀏覽器上下文使用記憶體設定與檔案，不讀寫真實應用的資料目錄。軟體使用新的標識 `io.github.khwlgh.lapower`，啟動測量工具也已同步該標識；舊 WITRN-RS 設定不會自動遷移。
 
 ## 效能測量
 
@@ -224,7 +226,7 @@ npm run showcase:capture -- --help
 | `node bench/extrema.mjs` | 掃描與極值索引的算法對照 |
 | `node bench/startup.mjs` | 原生二進制冷啟動分段，按需手動運行 |
 | `node bench/packaging.mjs` | 檢查 `out/` 的發貨檔案和內嵌集合 |
-| `cargo bench -p lapower` | Rust 協議解碼、編碼和選擇路徑基準 |
+| `cargo bench -p lapower` | Rust 協定解碼、編碼和選擇路徑基準 |
 
 `perf-shape` CI job 只硬性檢查發貨形狀和基線結構；算法和 Rust benchmark 只報告結果，不把單次耗時當作跨主機門禁。
 
@@ -236,7 +238,7 @@ npm run showcase:capture -- --help
 | --- | --- |
 | `validate` | Linux 依賴、前端建置、JS 測試、typecheck、lint、Rust fmt、Clippy、workspace test |
 | `backend-other-platforms` | Windows workspace test；macOS workspace check |
-| `crate-features` | 協議 crate 的非預設 feature 組合 Clippy 與 test |
+| `crate-features` | 協定 crate 的非預設 feature 組合 Clippy 與 test |
 | `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`，以及報告型 benchmark |
 | `package` | 僅版本 Tag push / 手動觸發；依賴以上四項檢查，四目標並行打包，單個平台失敗不會取消其他目標 |
 | `package-summary` | 四目標全部成功後驗證七個安裝包並產生 `SHA256SUMS` |
@@ -271,7 +273,7 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="5fc9", ATTR{idProduct}=="0061", TAG+="uaccess
 SUBSYSTEM=="tty", ATTRS{idVendor}=="5fc9", TAG+="uaccess"
 ```
 
-隨後執行 `sudo udevadm control --reload-rules`，重新插拔裝置，再啟動軟體。`uaccess` 依賴 systemd-logind 的活動本地會話；其他發行版或無桌面會話環境應使用發行版的裝置訪問組規則。POWER-Z 協議控制還需要訪問其 CDC 串口。
+隨後執行 `sudo udevadm control --reload-rules`，重新插拔裝置，再啟動軟體。`uaccess` 依賴 systemd-logind 的活動本地工作階段；其他發行版或無桌面工作階段環境應使用發行版的裝置訪問組規則。POWER-Z 協定控制還需要訪問其 CDC 序列埠。
 
 ## macOS 自行編譯
 
@@ -283,7 +285,7 @@ npm run build
 npx --no-install tauri build
 ```
 
-macOS private API 的 Cargo feature 與 Tauri 設定必須保持一致。平台設定使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同時設定 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留舊系統部署目標，並通過 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳過 Finder 美化。當前沒有 Developer ID 簽章或 Apple 公證；首次打開方式見 [README 下載與安裝](../../README.zh-TW.md#-下載與安裝)。
+macOS private API 的 Cargo feature 與 Tauri 設定必須保持一致。平台設定使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同時設定 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留舊系統部署目標，並通過 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳過 Finder 美化。當前沒有 Developer ID 簽章或 Apple 公證；首次開啟方式見 [README 下載與安裝](../../README.zh-TW.md#-下載與安裝)。
 
 普通 macOS CI 做 workspace check；版本 Tag / 手動建置還會產生並驗證 DMG，不運行 GUI 或真機檢查。
 
@@ -291,7 +293,7 @@ macOS private API 的 Cargo feature 與 Tauri 設定必須保持一致。平台�
 
 1. Fork 儲存庫並創建分支。
 2. 完成改動後運行上面的核心質量檢查。
-3. 保持前端模塊的 `// @ts-check`，純邏輯優先抽成可直接測試的模塊。
+3. 保持前端模組的 `// @ts-check`，純邏輯優先抽成可直接測試的模組。
 4. 新增裝置型號或韌體前，用實機樣本確認 HID 位元組結構與量程。
 
 測試新增遵循“測試與迴歸邊界”規則；不要為普通 UI 或功能表面變化新增獨立測試、設計文件或 CI job。

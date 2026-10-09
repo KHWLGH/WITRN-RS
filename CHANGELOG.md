@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 校对四语言界面与使用文档，修正日文暂停与恢复提示、统一繁中文案术语，并澄清仪表温度源、PD 跟随采集和记录上限后的操作；更新 0.2.3 四语言深浅主题截图，按语言子目录存放并移除根目录中的重复图片。
 - 修正文档中的旧 PD 列名、独立模式暂停行为和温度服务换行说明，补齐外观设置中的语言选项。
 - macOS 27 + Xcode 27.0（beta）上 release 构建在第一个过程宏处失败：继承 release 的 `strip` 后，dylib 被 dyld 以 LINKEDIT 字符串池未对齐为由拒绝加载。构建脚本与过程宏不进安装包，不再 strip。
 - macOS 上主窗口隐藏、最小化或被遮挡时，WKWebView 默认的后台策略会节流并约 5 分钟后挂起页面，前端不再确认样本，未确认量达到 8192 后采集停止（1 ms 采样约 8 秒）。主窗口改为关闭 WebView 后台节流（macOS 14+ 生效，Windows / Linux 忽略该项）。

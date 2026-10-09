@@ -52,7 +52,7 @@
             </button>
             <span class="cmd-sep"></span>
             <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
-            <select id="sample-rate" class="ribbon-select" title="Sample rate (samples per second; stored as milliseconds)" data-i18n-title="sampleRateHint">
+            <select id="sample-rate" class="ribbon-select" title="Choose how many samples to record per second" data-i18n-title="sampleRateHint">
               <option value="1" hidden data-i18n="rate1000">1000 samples/s</option>
               <option value="10" data-i18n="rate100">100 samples/s</option>
               <option value="100" data-i18n="rate10">10 samples/s</option>
@@ -347,13 +347,13 @@
                 <span class="pd-col-obj">Obj</span>
                 <span class="pd-col-rev">Rev</span>
                 <span class="pd-col-vi">V/I</span>
-                <span class="pd-col-note" data-i18n="pdNote">Note</span>
+                <span class="pd-col-note" data-i18n="pdNote">Summary</span>
               </div>
               <div class="pd-list" id="pd-list" hidden></div>
               <div class="empty-state" id="pd-empty">
                 <i class="fi fi-flash" aria-hidden="true"></i>
                 <div class="empty-state-title"><span data-i18n="waitingPd">Waiting for USB-PD traffic</span></div>
-                <div><span data-i18n="waitingPdHint">PD messages are captured after connecting; charger connection handshakes are particularly useful</span></div>
+                <div><span data-i18n="waitingPdHint">With Follow recording enabled, start recording to capture PD messages. Charger connection handshakes are particularly useful.</span></div>
               </div>
             </div>
             <div
@@ -664,7 +664,7 @@
                       <div class="settings-row-text">
                         <div class="settings-row-title"><span data-i18n="signedCurrent">Record current direction</span></div>
                         <div class="settings-row-desc">
-                          <span data-i18n="signedCurrentHint">Keep the sign in new recordings and imports (forward positive, reverse negative). Existing data stays unchanged; exports keep recorded values.</span>
+                          <span data-i18n="signedCurrentHint">Keep the current sign in new recordings and imports (forward positive, reverse negative). When disabled, record absolute values. Existing data stays unchanged; exports keep recorded values.</span>
                         </div>
                       </div>
                       <div class="settings-row-control">

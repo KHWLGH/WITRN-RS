@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -7,6 +7,7 @@ import { DURATION_MS } from './scenario.js';
 import { startServer } from './server.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const { version } = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
 const config = {
   themes: ['light', 'dark'],
   pages: ['record', 'pd', 'trigger', 'settings'],
@@ -98,6 +99,7 @@ try {
         if (view === 'settings') {
           await page.locator('#btn-settings-tab').click();
           await page.waitForFunction(() => document.getElementById('about-version').textContent !== '--');
+          assert.equal(await page.locator('#about-version').textContent(), `v${version}`);
         } else {
           // Re-entering monitor runs its normal visibility refresh, including throttled statistics.
           if (view === 'record') await page.locator('#tab-pd').click();
@@ -137,6 +139,12 @@ try {
           assert.equal(await page.locator('.trigger-pdo-row').count(), 6);
         }
         await settled(page);
+        assert.equal(await page.locator('html').getAttribute('lang'), language);
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),
+          false,
+          `${language}/${theme}/${view}: viewport overflow`,
+        );
         const path = resolve(output, language, `${theme}-${view}.png`);
         await page.screenshot({ path, animations: 'disabled' });
         console.log(`${theme}/${view}: ${path}`);

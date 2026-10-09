@@ -197,6 +197,8 @@ npm run showcase:capture
 
 截图命令使用 Chromium、Windows 风格、1280×800 CSS 视口、2 倍像素密度及 100% 界面缩放，生成 2560×1600 PNG。默认使用 POWER-Z、本机温度源与相同的 120 秒模拟数据，先冻结虚拟时间，再等待实际图表、报文详情、字体与控件渲染完成。输出为 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每种语言各 8 张展示图（共 32 张）。
 
+关于页版本读取 package.json，截图命令会校验版本、语言与页面溢出。截图仅写入对应语言子目录，不再生成根目录中的重复副本。
+
 可以只截取指定页面、主题或更改输出目录：
 
 ```bash

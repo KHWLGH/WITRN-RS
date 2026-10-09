@@ -117,7 +117,7 @@ An empty chart displays “Connect a device, then start recording”. It disappe
 
 ### `Auto pause` flyout
 
-For unattended tests, recording stops after the selected measurement remains below a threshold for a continuous duration.
+For unattended tests, recording pauses after the selected measurement remains below a threshold for a continuous duration.
 
 | Field | Values |
 | --- | --- |
@@ -177,9 +177,9 @@ When disabled, PD capture, pause and clear operate independently.
 | `Obj` | Number of Data Objects |
 | `Rev` | USB-PD specification revision |
 | `V/I` | Latest meter voltage/current sample; not necessarily simultaneous with the message |
-| `Note` | Quick summary |
+| `Summary` | Quick summary |
 
-`Note` helps locate negotiation steps quickly. Typical contents:
+`Summary` helps locate negotiation steps quickly. Typical contents:
 
 ```text
 Fixed: 5.0V 9.0V 12.0V 15.0V 20.0V SPR AVS: 9-15V@3.0A 15-20V@5.0A PPS: 5.0-21.0V
@@ -237,7 +237,7 @@ On first run and after resetting settings, the theme follows OS appearance. Exis
 - **Record current direction** — New recordings/imports keep the sign (positive forward, negative reverse) and show arrows; disabled recording stores absolute values. **Existing data is not rewritten.** Export follows the values actually recorded.
 - **Recording limit** — Estimated from memory and CSV row sizes. Recording pauses at the limit; the status bar shows estimated remaining time.
 - **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings in Settings. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
-- **Reset all settings** — Restores sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
+- **Reset all settings** — Restores language, sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
 
 ### Device
 

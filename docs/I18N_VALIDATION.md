@@ -21,6 +21,24 @@ Browser verification switches English, Simplified Chinese, Traditional Chinese a
 
 CSV and PD capture tests export in each language and import in every other language. They preserve numeric precision, signed current, missing temperature, signal channels, recording segments, mixed sample intervals and compact PD frames. Native file-dialog IPC checks verify translated titles and filter names; OS-provided dialog buttons retain the OS language.
 
+## 0.2.3 proofreading and screenshot refresh — 2026-10-09
+
+Reviewed all 397 message IDs across English, Simplified Chinese, Traditional Chinese and Japanese against the controls and user documentation. Corrected Japanese pause/recovery wording, aligned Traditional Chinese protocol/list/log terminology, clarified the meter temperature source, and matched the English PD summary heading to its content. Updated PD follow-mode and recording-capacity prompts to describe the actual operation: follow mode captures during recording, and exporting does not clear a full recording.
+
+Updated the four READMEs and corresponding usage/temperature guides to match the labels and native macOS window behavior. Recaptured all 32 localized images (four languages × two themes × four workspaces). Removed eight duplicate Simplified Chinese images from the screenshot root after verifying identical SHA-256 hashes and confirming that documentation uses the language subdirectories. Capture now writes only to language subdirectories. The images use the existing simulated POWER-Z scenario at 1280×800 CSS pixels and 2× pixel density (2560×1600 PNGs). The About card displays v0.2.3 from package.json; capture checks the version, selected language and viewport overflow. All four language contact sheets were visually reviewed.
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 346 passed |
+| `npm run typecheck` | Passed |
+| `npm run lint` | Passed |
+| `npm run build:dist` | Passed |
+| `node tools/showcase/verify-i18n.mjs` | Passed: light/dark at 900×600 and 1280×800, all four languages and workspaces |
+| `npm run showcase:capture` | Passed: all 32 localized images |
+| `git diff --check` | Passed |
+
+These checks cover the frontend and simulated data; native backend results in the initial validation above remain historical.
+
 ## Remaining native acceptance
 
 Actual Linux AppImage startup under different `LANG` / `LC_*` values, macOS GUI/system locale, native file dialogs and physical-meter acquisition require their respective machines and hardware. The Linux priority function is covered by Rust tests, and locale selection is covered by browser tests, but an AppImage was not run on this Windows host.

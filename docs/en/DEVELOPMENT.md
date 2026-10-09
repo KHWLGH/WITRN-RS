@@ -196,6 +196,8 @@ The preview listens on `http://127.0.0.1:4173` and defaults to light mode. Stand
 
 Capture uses Chromium, Windows window style, a 1280×800 CSS viewport, 2× pixel density and 100% UI scale, producing 2560×1600 PNGs. Defaults use POWER-Z, device temperature and the same 120 seconds of simulated data. Virtual time is frozen before waiting for actual charts, details, fonts and controls to finish rendering. Output is `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`, eight images per language and 32 total.
 
+The About version comes from package.json; capture checks the version, language and viewport overflow. Images are written only to language subdirectories, without duplicate copies in the screenshot root.
+
 Capture selected pages/themes or choose another output directory:
 
 ```bash
