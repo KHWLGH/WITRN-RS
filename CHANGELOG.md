@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- macOS 应用菜单新增「Settings…」（⌘,），打开设置页，与标题栏齿轮按钮相同。
+
+### Changed
+
+- macOS 改用系统原生红绿灯：标题栏布局不变，窗口按钮、全屏、窗口平铺、圆角与阴影由系统提供；双击标题栏空白处按「系统设置 › 桌面与程序坞」缩放或最小化。原生按钮不能换皮肤，设置中的「窗口风格」只在 Windows / Linux 显示。
+
 ### Fixed
 
 - macOS 27 + Xcode 27.0（beta）上 release 构建在第一个过程宏处失败：继承 release 的 `strip` 后，dylib 被 dyld 以 LINKEDIT 字符串池未对齐为由拒绝加载。构建脚本与过程宏不进安装包，不再 strip。

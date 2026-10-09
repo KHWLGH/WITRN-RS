@@ -273,6 +273,9 @@
   --window-mac-control-symbol: 7px;
   --window-mac-control-inset: 12px;
   --window-mac-controls-width: calc(3 * var(--window-mac-control-target) + 2 * var(--window-mac-control-inset));
+  /* macOS 系统红绿灯：tauri.macos.conf.json 的 trafficLightPosition x = 14，三颗按钮实测跨 60 pt
+     （macOS 27；较早系统间距更小），余下留作间距。原生按钮不随界面缩放，使用处按 --ui-scale 反比换算。 */
+  --window-native-controls-width: 78px;
   --window-close-fill: hsl(3 100% 69%);
   --window-minimize-fill: hsl(42 100% 59%);
   --window-maximize-fill: hsl(135 65% 48%);

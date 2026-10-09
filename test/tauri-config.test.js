@@ -28,6 +28,15 @@ const PLATFORM_FILES = readdirSync(path.join(root, 'src-tauri'))
   .filter((name) => /^tauri\.(windows|macos|linux)\.conf\.json$/.test(name))
   .map((name) => `src-tauri/${name}`);
 
+/**
+ * 平台层允许改写的基础键。除此之外平台层只能加键；每一项都必须写明原因。
+ * @type {Record<string, string[]>}
+ */
+const ALLOWED_OVERRIDES = {
+  // macOS 使用系统原生红绿灯：需要系统装饰配合 Overlay 标题栏，Windows / Linux 仍为无边框自绘。
+  macos: ['decorations'],
+};
+
 test('平台配置文件确实存在（否则下面的不变式是空过）', () => {
   assert.ok(PLATFORM_FILES.includes('src-tauri/tauri.windows.conf.json'), '找不到 tauri.windows.conf.json');
 });
@@ -39,6 +48,7 @@ for (const rel of PLATFORM_FILES) {
     const platformWindows = platform?.app?.windows;
     if (!platformWindows) return; // 没写 windows 就等于不参与合并，合法。
     assert.equal(platformWindows.length, base.app.windows.length, `${os} 层改了窗口数量`);
+    const allowed = ALLOWED_OVERRIDES[os] ?? [];
     for (const [index, baseWindow] of base.app.windows.entries()) {
       const override = platformWindows[index];
       const missing = Object.keys(baseWindow).filter((key) => !(key in override));
@@ -48,12 +58,30 @@ for (const rel of PLATFORM_FILES) {
         `数组是整体替换的：${os} 层少了这些键，等于在 ${os} 上把它们删掉了 -> ${missing.join(', ')}`,
       );
       const diverged = Object.keys(baseWindow)
+        .filter((key) => !allowed.includes(key))
         .filter((key) => JSON.stringify(baseWindow[key]) !== JSON.stringify(override[key]))
         .map((key) => `${key}: 基础=${JSON.stringify(baseWindow[key])} ${os}=${JSON.stringify(override[key])}`);
       assert.deepEqual(diverged, [], `${os} 层悄悄改动了基础配置的取值（只想加键，不想改值）`);
     }
   });
 }
+
+test('macOS 使用系统原生红绿灯，并在自绘标题栏内纵向居中', () => {
+  const window = readJson('src-tauri/tauri.macos.conf.json').app.windows[0];
+  assert.equal(window.decorations, true, '原生红绿灯需要系统装饰');
+  assert.equal(window.titleBarStyle, 'Overlay', '标题栏透明叠在网页之上，布局仍由前端决定');
+  assert.equal(window.hiddenTitle, true, '隐藏系统标题文字，避免压在 Tab 上');
+  // 截图实测（macOS 27.2）：按钮圆心比 y 高约 2 pt，直径 13.5 pt，圆心间距 23 pt，三颗从 x 起跨 60 pt。
+  // y 取标题栏高度的一半再加 2，按钮在 100% 缩放的标题栏内居中；改标题栏高度时同步改 y。
+  const tokens = readFileSync(path.join(root, 'src/styles/tokens.css'), 'utf8');
+  const titlebarHeight = Number(tokens.match(/--titlebar-height:\s*(\d+)px/)?.[1]);
+  assert.equal(window.trafficLightPosition.y, titlebarHeight / 2 + 2, '红绿灯应在 100% 缩放的标题栏内居中');
+  // CSS 预留宽度必须盖住三颗按钮，否则 Tab 会钻到按钮底下。
+  const reserve = Number(tokens.match(/--window-native-controls-width:\s*(\d+)px/)?.[1]);
+  assert.ok(reserve >= window.trafficLightPosition.x + 60, `预留 ${reserve}px 不足以容纳红绿灯`);
+  // Windows / Linux 继续使用无边框自绘标题栏。
+  assert.equal(base.app.windows[0].decorations, false);
+});
 
 test('Windows 层带上 WebView2 的 GPU 栅格化参数', () => {
   // CHANGELOG 与 docs 都宣称这项已发货；它只存在于这个文件里，所以在非 Windows 的 CI 上
